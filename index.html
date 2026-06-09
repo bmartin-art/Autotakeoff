@@ -8678,6 +8678,7 @@ window.addEventListener('load', function(){
     '<label style="display:block;font-size:11px">Print opacity <input type="range" id="sbPlOp" min="0" max="100" value="90" style="width:100%"></label>'+
     '<button id="sbFlip" style="padding:6px;border:1px solid #345;border-radius:6px;background:#13212e;color:#cde;cursor:pointer">Flip \u2195</button>'+
     '<button id="sbFlipH" style="margin-top:4px;padding:6px;border:1px solid #345;border-radius:6px;background:#13212e;color:#cde;cursor:pointer">Flip \u2194</button>'+
+    '<button id="sbHideDuct" style="margin-top:4px;padding:6px;border:1px solid #2b6aa0;border-radius:6px;background:#13212e;color:#cfe7ff;font-weight:600;cursor:pointer">\ud83d\udc41 Hide duct (see print)</button>'+
     '<div style="font-size:11px;opacity:.8;margin-top:4px">Snap views:</div>'+
     '<div style="display:flex;gap:4px;flex-wrap:wrap">'+
       '<button id="vTop" style="flex:1;padding:6px;border:1px solid #345;border-radius:6px;background:#13212e;color:#cde;cursor:pointer">Top</button>'+
@@ -8692,6 +8693,7 @@ window.addEventListener('load', function(){
   ['mousedown','mousemove','mouseup','touchstart','touchmove','wheel'].forEach(function(t){ bar.addEventListener(t,function(e){ e.stopPropagation(); }, false); });
   var msg=function(t){ document.getElementById('sbMsg').textContent=t; };
   document.getElementById('sbMin').onclick=function(){ var bd=document.getElementById('sbBody'); var hide=(bd.style.display!=='none'); bd.style.display=hide?'none':'block'; document.getElementById('sbMin').textContent=hide?'+':'–'; };
+  document.getElementById('sbHideDuct').onclick=function(){ TK.hideDuct=!TK.hideDuct; this.textContent=TK.hideDuct?'\ud83d\udc41 Show duct':'\ud83d\udc41 Hide duct (see print)'; this.style.background=TK.hideDuct?'#2a1f0a':'#13212e'; try{ runDraw(); }catch(e){} };
 
   var ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;z-index:99998;background:#0c141c;display:none';
@@ -8723,16 +8725,19 @@ window.addEventListener('load', function(){
     function group(boxes){ boxes.sort(function(a,b){return a.c-b.c;}); var gs=[],cur=null;
       boxes.forEach(function(b){ if(cur&&Math.abs(b.c-cur.c)<14){cur.boxes.push(b);} else {cur={c:b.c,boxes:[b]};gs.push(cur);} }); return gs; }
     function depthNear(px,py){ var best=8,bd=70; (tags||[]).forEach(function(t){ var m=/(\d+)\s*[xX]\s*(\d+)/.exec(t.text||''); if(!m)return; var d=Math.hypot((t.nx||1e9)-px,(t.ny||1e9)-py); if(d<bd){bd=d;best=parseInt(m[2]);} }); return best; }
-    var runs=[], ri=0;
+    var runs=[], ri=0, nRed=0;
     function build(groups, axis){
       groups.forEach(function(g){ if(!g.boxes.length)return; ri++;
         g.boxes.sort(function(a,b){ return axis==='V' ? b.s-a.s : a.s-b.s; });
         var label='Run '+ri, pieces=[], prevW=null;
         g.boxes.forEach(function(b){
-          var wIn=Math.max(4,Math.round(b.w*IN)); var len=Math.abs(b.e-b.s);
+          var wIn=Math.max(4, Math.round((b.w*IN)/2)*2);   // snap duct width to the nearest 2" (kills pairing jitter)
+          var len=Math.abs(b.e-b.s);
           var cx = axis==='V'? g.c : (b.s+b.e)/2, cy = axis==='V'? (b.s+b.e)/2 : g.c; var dep=depthNear(cx,cy);
-          if(prevW!==null && Math.abs(wIn-prevW)>=1) pieces.push({id:'tr',n:'Transition',d:{A:prevW,B:dep,C:wIn,Dp:dep,E:8,CN1:0,CN2:0,LN:5},_pos:{x:cx,y:cy}});
-          pieces.push({id:'st',n:'Straight',d:{A:wIn,B:dep,C:Math.max(6,Math.round(len*IN)),CN1:0,CN2:0,LN:5},_pos:{x:cx,y:cy}});
+          if(prevW!==null && Math.abs(wIn-prevW)>=2){ pieces.push({id:'tr',n:'Transition',d:{A:prevW,B:dep,C:wIn,Dp:dep,E:8,CN1:0,CN2:0,LN:5},_pos:{x:cx,y:cy},_reducer:true}); nRed++; }   // size step -> reducer
+          // straight duct comes in 60" (5') joints on S&D — split long runs into joints
+          var totC=Math.max(6,Math.round(len*IN)), rem=totC;
+          while(rem>0){ var cC=Math.min(60,rem); pieces.push({id:'st',n:'Straight',d:{A:wIn,B:dep,C:cC,CN1:0,CN2:0,LN:5},_pos:{x:cx,y:cy}}); rem-=cC; }
           prevW=wIn;
         });
         var far=g.boxes[g.boxes.length-1]; var farEnd = axis==='V'? far.s : far.e;
@@ -8743,6 +8748,11 @@ window.addEventListener('load', function(){
       });
     }
     build(group(V),'V'); build(group(H),'H');
+    // flag side branches as taps: a run that meets a perpendicular run mid-span
+    var nTap=0;
+    H.forEach(function(hb){ [hb.s,hb.e].forEach(function(hx){ V.forEach(function(vb){ if(Math.abs(hx-vb.c)<16 && hb.c>Math.min(vb.s,vb.e)-12 && hb.c<Math.max(vb.s,vb.e)+12) nTap++; }); }); });
+    V.forEach(function(vb){ [vb.s,vb.e].forEach(function(vy){ H.forEach(function(hb){ if(Math.abs(vy-hb.c)<16 && vb.c>Math.min(hb.s,hb.e)-12 && vb.c<Math.max(hb.s,hb.e)+12) nTap++; }); }); });
+    window.__scanStats={reducers:nRed, taps:nTap};
     return runs;
   }
 
@@ -8787,7 +8797,10 @@ window.addEventListener('load', function(){
       try{ renderTrunkTabs(); }catch(e){} try{ renderRunPieces(); }catch(e){}
       if(PL.pendingCanvas){ applyPrintImage(PL.pendingCanvas, PL.pendingW, PL.pendingH); PL.pendingCanvas=null; }
       runDraw();
-      msg('Placed '+trunks.length+' run(s). Drag = pan, shift-drag = rotate, wheel = zoom. Tap a piece (on its tab) to edit.');
+      var _st=window.__scanStats||{}; var _ex='';
+      if(_st.reducers) _ex+=' \u00b7 '+_st.reducers+' reducer(s) added at size step-downs';
+      if(_st.taps) _ex+=' \u00b7 '+_st.taps+' side branch(es) detected \u2014 add taps in the run builder';
+      msg('Placed '+trunks.length+' run(s)'+_ex+'. Straight duct split into 60\u2033 (5\u2032) S&D joints. Drag = pan, shift-drag = rotate, wheel = zoom.');
     }, 700);
     return trunks;
   }
@@ -8848,9 +8861,9 @@ window.addEventListener('load', function(){
     gl.enableVertexAttribArray(pa); gl.vertexAttribPointer(pa,3,gl.FLOAT,false,28,0);
     gl.enableVertexAttribArray(na); gl.vertexAttribPointer(na,3,gl.FLOAT,false,28,12);
     if(ha>=0){ gl.enableVertexAttribArray(ha); gl.vertexAttribPointer(ha,1,gl.FLOAT,false,28,24); }
-    if(runState.vc) gl.drawArrays(gl.TRIANGLES,0,runState.vc);
+    if(runState.vc && !TK.hideDuct) gl.drawArrays(gl.TRIANGLES,0,runState.vc);
     if(PL.on&&PL.prog&&PL.tex){ try{ drawPlane(gl,P.mvp); }catch(e){} }
-    drawTakeoffLabels(P.mvp);
+    if(!TK.hideDuct) drawTakeoffLabels(P.mvp);
   }
   var _origRunDraw=window.runDraw;
   window.runDraw=function(){ if(TK.on&&runState.prog){ try{ takeoffDraw(); }catch(e){} return; } return _origRunDraw.apply(this,arguments); };
