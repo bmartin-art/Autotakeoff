@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Brookstone · 2D Takeoff</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.17.1/ort.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
 <style>
   :root{
     --bg:#0d1117; --panel:#141b24; --panel2:#1b2530; --line:#243140;
@@ -2053,7 +2053,7 @@ function refreshSel(){
     var buf; try{ buf=await f.arrayBuffer(); }catch(err){ setY('read failed'); setStatus('Could not read file: '+err.message); return; }
     // try a sequence of configs; keep the first that builds a session
     var attempts=[
-      {label:'wasm basic', setup:function(){ ort.env.wasm.wasmPaths='https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.17.1/'; ort.env.wasm.numThreads=1; ort.env.wasm.simd=false; ort.env.wasm.proxy=false; }, opts:{executionProviders:['wasm']}},
+      {label:'wasm basic', setup:function(){ ort.env.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/'; ort.env.wasm.numThreads=1; ort.env.wasm.simd=false; ort.env.wasm.proxy=false; }, opts:{executionProviders:['wasm']}},
       {label:'wasm simd', setup:function(){ ort.env.wasm.simd=true; }, opts:{executionProviders:['wasm']}},
       {label:'wasm basic-optAll', setup:function(){ ort.env.wasm.simd=false; }, opts:{executionProviders:['wasm'], graphOptimizationLevel:'all'}}
     ];
