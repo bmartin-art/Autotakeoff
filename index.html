@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>DUCT</b> EXTRACTOR</div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t7 · yolo full-scan</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2170,6 +2170,7 @@ function refreshSel(){
       var un=page.getViewport({scale:1});
       var detail=parseFloat(($('yoloDetail')||{}).value)||1.0;
       var rScale=Math.min(3.0, 3000/un.width)*detail; if(!(rScale>0.3)) rScale=2.0;
+      console.log('[takeoff build t7] scan render scale =',rScale.toFixed(3),'| page',Math.round(un.width)+'x'+Math.round(un.height),'| detail',detail);
       var rvp=page.getViewport({scale:rScale});
       var rc=document.createElement('canvas'); rc.width=Math.ceil(rvp.width); rc.height=Math.ceil(rvp.height);
       var rx=rc.getContext('2d',{willReadFrequently:true}); rx.fillStyle='#fff'; rx.fillRect(0,0,rc.width,rc.height);
