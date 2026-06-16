@@ -312,6 +312,7 @@
           </div>
           <input type="file" id="yoloFile" accept=".onnx" style="display:none">
           <button class="btn go" id="yoloTestBtn" style="width:100%;margin-top:6px;background:#0c1f3a;border-color:#2b6aa0;color:#bfe0ff" disabled>▸ Test detect (visible area)</button>
+          <button class="btn go" id="yoloScanBtn" style="width:100%;margin-top:6px;background:#0a2a1f;border-color:#2b9e7a;color:#bfffe6;font-weight:700" disabled>⬛ Scan whole sheet (tiled)</button>
           <div class="hint" style="margin-top:4px">Stage 1: loads your model and runs it on the area you're currently viewing, so we confirm in-browser detection works before scanning the whole sheet. conf <input type="range" id="yoloConf" min="0.05" max="0.6" step="0.05" value="0.2" style="width:70px;vertical-align:middle"> <span id="yoloConfV">0.20</span></div>
           <div id="yoloOut" style="margin-top:6px"></div>
         </div>
@@ -2061,7 +2062,7 @@ function refreshSel(){
     for(var i=0;i<attempts.length;i++){ var a=attempts[i];
       try{ setY('try: '+a.label+'…'); try{a.setup();}catch(_){}
         session=await ort.InferenceSession.create(buf, a.opts);
-        setY('✓ '+f.name); var tb=$('yoloTestBtn'); if(tb) tb.disabled=false;
+        setY('✓ '+f.name); var tb=$('yoloTestBtn'); if(tb) tb.disabled=false; var sb=$('yoloScanBtn'); if(sb) sb.disabled=false;
         setStatus('YOLO loaded via '+a.label+'. in='+session.inputNames.join(',')+' out='+session.outputNames.join(',')+'. Click Test detect.');
         $('yoloOut').innerHTML='<div class="hint" style="color:#bfe0ff">Model ready ('+a.label+'). Inputs: '+session.inputNames.join(', ')+' · Outputs: '+session.outputNames.join(', ')+'</div>';
         return;
@@ -2151,6 +2152,75 @@ function refreshSel(){
       setY('✓ '+kept.length+' found');
       setStatus('YOLO detected '+kept.length+' fittings in the visible area ('+ms+'ms). Pan/zoom and test other areas, or we build full-sheet scan next.');
     }catch(err){ setY('detect failed'); setStatus('Detection failed: '+err.message); console.error(err); $('yoloOut').innerHTML='<div class="hint" style="color:#f99">'+err.message+'</div>'; }
+  });
+
+  // ---- Stage 2: scan the WHOLE sheet, tiled at full resolution (like Colab) ----
+  $('yoloScanBtn') && ($('yoloScanBtn').onclick=async function(){
+    if(!session){ setStatus('Load a model first.'); return; }
+    if(!pdfDoc){ setStatus('Load a print first.'); return; }
+    var confT=parseFloat($('yoloConf').value)||0.2;
+    setY('rendering…'); setStatus('Rendering full-resolution sheet for scanning…');
+    await new Promise(function(r){setTimeout(r,20);});
+    try{
+      var page=await pdfDoc.getPage(pageNum);
+      // render at a resolution where fittings are ~the size they trained on.
+      // training tiles were 1024px cut from a sheet rendered ~2x; target similar density.
+      var un=page.getViewport({scale:1});
+      var targetMax=4000;                       // cap longest side ~4000px
+      var rScale=Math.min(targetMax/Math.max(un.width,un.height), 3.0); if(!(rScale>0.3)) rScale=2.0;
+      var rvp=page.getViewport({scale:rScale});
+      var rc=document.createElement('canvas'); rc.width=Math.ceil(rvp.width); rc.height=Math.ceil(rvp.height);
+      var rx=rc.getContext('2d',{willReadFrequently:true}); rx.fillStyle='#fff'; rx.fillRect(0,0,rc.width,rc.height);
+      await page.render({canvasContext:rx, viewport:rvp, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise;
+      var W=rc.width, H=rc.height;
+      var TILE=1024, OV=200, stepT=TILE-OV;
+      var xs=[], ys=[];
+      for(var x=0;x<W;x+=stepT){ xs.push(Math.min(x,Math.max(0,W-TILE))); if(x+TILE>=W) break; }
+      for(var y=0;y<H;y+=stepT){ ys.push(Math.min(y,Math.max(0,H-TILE))); if(y+TILE>=H) break; }
+      xs=Array.from(new Set(xs)); ys=Array.from(new Set(ys));
+      var total=xs.length*ys.length, done=0, all=[];
+      var tcv=document.createElement('canvas'); tcv.width=TILE; tcv.height=TILE; var tx=tcv.getContext('2d',{willReadFrequently:true});
+      for(var yi=0;yi<ys.length;yi++){ for(var xi=0;xi<xs.length;xi++){
+        var ox=xs[xi], oy=ys[yi];
+        tx.fillStyle='#fff'; tx.fillRect(0,0,TILE,TILE);
+        tx.drawImage(rc, ox,oy,TILE,TILE, 0,0,TILE,TILE);
+        var d=tx.getImageData(0,0,TILE,TILE).data; var f=new Float32Array(3*TILE*TILE); var n=TILE*TILE;
+        for(var i=0;i<n;i++){ f[i]=d[i*4]/255; f[i+n]=d[i*4+1]/255; f[i+2*n]=d[i*4+2]/255; }
+        var t=new ort.Tensor('float32',f,[1,3,TILE,TILE]); var feeds={}; feeds[session.inputNames[0]]=t;
+        var outMap=await session.run(feeds); var out=outMap[session.outputNames[0]]; var nc=out.dims[1]-4;
+        var raw=decode(out,nc,confT);
+        raw.forEach(function(b){ all.push({x:b.x+ox,y:b.y+oy,w:b.w,h:b.h,cls:b.cls,score:b.score}); });
+        done++; if(done%2===0||done===total){ setY('tile '+done+'/'+total); setStatus('Scanning… tile '+done+' of '+total+' ('+all.length+' raw)'); await new Promise(function(r){setTimeout(r,0);}); }
+      }}
+      // NMS across the whole sheet (render px)
+      var kept=nms(all,0.45);
+      // map render px -> overlay px, and -> normalized nvt coords for the run-builder
+      var oScale=(baseScale*scale)/rScale;       // render px -> current overlay px
+      var names=null;
+      var maxCls=0; kept.forEach(function(d){ if(d.cls>maxCls)maxCls=d.cls; });
+      var use16=(maxCls>7);
+      names=use16?NAMES16:NAMES;
+      var dets=[], counts={};
+      var lay=$('yoloLayer'); lay.innerHTML='';
+      kept.forEach(function(d){
+        var oxp=d.x*oScale, oyp=d.y*oScale, owp=d.w*oScale, ohp=d.h*oScale;
+        var nm=names[d.cls]!=null?names[d.cls]:('cls'+d.cls); counts[nm]=(counts[nm]||0)+1;
+        var col=colorFor(d.cls);
+        var rc2=document.createElementNS(ns,'rect'); rc2.setAttribute('x',oxp); rc2.setAttribute('y',oyp); rc2.setAttribute('width',owp); rc2.setAttribute('height',ohp);
+        rc2.setAttribute('fill','none'); rc2.setAttribute('stroke',col); rc2.setAttribute('stroke-width','2.5'); lay.appendChild(rc2);
+        var tt=document.createElementNS(ns,'text'); tt.setAttribute('x',oxp); tt.setAttribute('y',oyp-3); tt.setAttribute('font-size','11'); tt.setAttribute('font-weight','700'); tt.setAttribute('fill',col); tt.setAttribute('stroke','#0a0f16'); tt.setAttribute('stroke-width','2.5'); tt.setAttribute('paint-order','stroke'); tt.textContent=nm; lay.appendChild(tt);
+        // normalized coords (nvt space) for the run-builder: overlay px -> user space -> nvt
+        var cxo=oxp+owp/2, cyo=oyp+ohp/2;
+        var u=null,nrm=null; try{ u=invVP(cxo,cyo); nrm=applyM(window.__nvt,u[0],u[1]); }catch(e){}
+        dets.push({cls:nm, clsIdx:d.cls, score:+d.score.toFixed(3), nx:nrm?nrm[0]:null, ny:nrm?nrm[1]:null,
+          wpx_overlay:owp, hpx_overlay:ohp });
+      });
+      window.__yoloDets=dets;
+      var summary=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a];}).map(function(k){return counts[k]+' '+k;}).join(', ');
+      $('yoloOut').innerHTML='<div class="hint" style="color:#bfe0ff"><b>'+kept.length+' fittings</b> on full sheet ('+(use16?'16':'8')+'-class, '+total+' tiles)<br>'+(summary||'none')+'</div>';
+      setY('✓ '+kept.length+' on sheet');
+      setStatus('Full-sheet scan done — '+kept.length+' fittings detected. Stored for the run-builder.');
+    }catch(err){ setY('scan failed'); setStatus('Scan failed: '+((err&&err.message)||err)); console.error(err); $('yoloOut').innerHTML='<div class="hint" style="color:#f99">'+String((err&&err.message)||err).slice(0,300)+'</div>'; }
   });
 })();
 
