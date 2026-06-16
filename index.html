@@ -313,7 +313,7 @@
           <input type="file" id="yoloFile" accept=".onnx" style="display:none">
           <button class="btn go" id="yoloTestBtn" style="width:100%;margin-top:6px;background:#0c1f3a;border-color:#2b6aa0;color:#bfe0ff" disabled>▸ Test detect (visible area)</button>
           <button class="btn go" id="yoloScanBtn" style="width:100%;margin-top:6px;background:#0a2a1f;border-color:#2b9e7a;color:#bfffe6;font-weight:700" disabled>⬛ Scan whole sheet (tiled)</button>
-          <div class="hint" style="margin-top:4px">Stage 1: loads your model and runs it on the area you're currently viewing, so we confirm in-browser detection works before scanning the whole sheet. conf <input type="range" id="yoloConf" min="0.05" max="0.6" step="0.05" value="0.2" style="width:70px;vertical-align:middle"> <span id="yoloConfV">0.20</span></div>
+          <div class="hint" style="margin-top:4px">Stage 1: loads your model and runs it on the area you're currently viewing, so we confirm in-browser detection works before scanning the whole sheet. conf <input type="range" id="yoloConf" min="0.05" max="0.6" step="0.05" value="0.2" style="width:70px;vertical-align:middle"> <span id="yoloConfV">0.20</span> · detail <input type="range" id="yoloDetail" min="0.6" max="1.8" step="0.1" value="1.0" style="width:60px;vertical-align:middle"> <span id="yoloDetailV">1.0×</span></div>
           <div id="yoloOut" style="margin-top:6px"></div>
         </div>
         <label style="display:block;font-size:12px;margin-top:4px"><input type="checkbox" id="runsTagOnly"> Runs only where a size tag matches the width <span style="opacity:.7">(hides empty pockets between ducts)</span></label>
@@ -2073,6 +2073,7 @@ function refreshSel(){
     $('yoloOut').innerHTML='<div class="hint" style="color:#f99">Load failed: '+String(msg).replace(/[&<>]/g,'').slice(0,400)+'<br><br>If it mentions an opset/operator, the model needs re-exporting at a lower opset. Open F12 console for the full error.</div>';
   });
   $('yoloConf') && ($('yoloConf').oninput=function(){ $('yoloConfV').textContent=parseFloat(this.value).toFixed(2); });
+  $('yoloDetail') && ($('yoloDetail').oninput=function(){ $('yoloDetailV').textContent=parseFloat(this.value).toFixed(1)+'\u00d7'; });
 
   // ---- letterbox a source canvas region into IMSZ x IMSZ ----
   function letterbox(srcCanvas, sx, sy, sw, sh){
@@ -2163,11 +2164,12 @@ function refreshSel(){
     await new Promise(function(r){setTimeout(r,20);});
     try{
       var page=await pdfDoc.getPage(pageNum);
-      // render at a resolution where fittings are ~the size they trained on.
-      // training tiles were 1024px cut from a sheet rendered ~2x; target similar density.
+      // MATCH the label-maker's training render exactly: RS = min(3.0, 3000/width).
+      // Training tiles were cut from a sheet rendered this way, so fittings appear at the
+      // size the model learned. (Earlier maxSide/4000 skewed tall riser sheets.)
       var un=page.getViewport({scale:1});
-      var targetMax=4000;                       // cap longest side ~4000px
-      var rScale=Math.min(targetMax/Math.max(un.width,un.height), 3.0); if(!(rScale>0.3)) rScale=2.0;
+      var detail=parseFloat(($('yoloDetail')||{}).value)||1.0;
+      var rScale=Math.min(3.0, 3000/un.width)*detail; if(!(rScale>0.3)) rScale=2.0;
       var rvp=page.getViewport({scale:rScale});
       var rc=document.createElement('canvas'); rc.width=Math.ceil(rvp.width); rc.height=Math.ceil(rvp.height);
       var rx=rc.getContext('2d',{willReadFrequently:true}); rx.fillStyle='#fff'; rx.fillRect(0,0,rc.width,rc.height);
