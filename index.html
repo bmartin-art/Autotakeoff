@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t8 · yolo→runs</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t11 · tag-extract</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -303,6 +303,13 @@
           <button class="btn adv" id="itemsClearBtn" style="flex:1;background:#3a2030;border-color:#7a3b4b;color:#fbb">Clear</button>
         </div>
         <div class="hint" style="margin-top:4px">Breaks each run into 5′ joint pieces (round = 10′). Click a joint to change its length (chain reflows), insert a reducer/tee/elbow (reducer resizes downstream), shift-click to multi-select, color/label runs. <b>Scan with YOLO first</b> and Build takeoff will auto-split runs at detected fittings and drop in transitions. Wheel = zoom to cursor.</div>
+        <div class="row" style="margin-top:6px;display:flex;gap:6px;align-items:center">
+          <button class="btn" id="yoloCleanBtn" style="flex:2;background:#1a2a0c;border-color:#7a9e2b;color:#e6ffbf">🧹 Clean with YOLO</button>
+          <span style="font-size:11px;opacity:.7">reach</span>
+          <input type="range" id="cleanReach" min="6" max="60" step="2" value="24" style="flex:1">
+          <span id="cleanReachV" style="font-size:11px;opacity:.7">24"</span>
+        </div>
+        <div class="hint" style="margin-top:2px">Flags takeoff runs that have <b>no YOLO fitting near them</b> (likely junk the geometry over-grabbed). Previews what it'd remove first — you confirm. "Reach" = how close a YOLO detection must be to count as supporting a run.</div>
         <div id="itemPanelBody" style="margin-top:7px"></div>
         <div style="margin-top:12px;border-top:1px solid #243;padding-top:10px">
           <div style="font-weight:700;color:#bfe6ff;font-size:13px;margin-bottom:5px">🔎 YOLO fitting detection</div>
@@ -730,10 +737,29 @@ async function extractTags(page){
   const nvt=page.getViewport({scale:1}).transform;   // rotation-normalized frame (matches exported lines)
   var SUF='(?:SA|RA|EA|OA|RD|SD|FA|MA|TA|OSA|EF|SF|RF|EX)';
   const re=new RegExp('(\\d{1,3})\\s*[xX\\u00d7]\\s*(\\d{1,3})|(\\d{2,3})\\s*\\/\\s*(\\d{1,3})|(\\d{1,3})\\s*\\/\\s*(\\d{1,3})\\s*'+SUF+'|(\\d{1,3})\\s*["\\u201d]?\\s*(?:\\u00d8|DIA|ROUND)|(\\d{1,3})\\s*'+SUF,'i');
-  for(const it of tc.items){
-    if(!it.str||!re.test(it.str)) continue;
+  var items=tc.items.filter(function(it){return it.str&&it.str.trim();});
+  var usedJoin={};
+  for(let ii=0; ii<items.length; ii++){ var it=items[ii];
+    var matched=re.test(it.str);
+    var text=it.str.trim();
+    if(!matched){
+      // try joining with the next 1-2 adjacent items (PDFs split "20x16" into "20","x","16")
+      for(var span=1; span<=2 && ii+span<items.length; span++){
+        var nIt=items[ii+span];
+        // adjacency: close in position
+        var dx=Math.abs((nIt.transform[4])-(it.transform[4])), dy=Math.abs((nIt.transform[5])-(it.transform[5]));
+        if(dx>60 && dy>60) break;
+        var joined=(text+nIt.str).replace(/\s+/g,'');
+        if(re.test(joined)){ text=joined; matched=true; usedJoin[ii+span]=1; break; }
+        // also try with an 'x' between bare numbers stacked vertically (e.g. "20" over "16")
+        if(/^\d{1,3}$/.test(text) && /^\d{1,3}$/.test(nIt.str.trim()) && dy>3 && dx<20){
+          var stacked=text+'x'+nIt.str.trim(); if(re.test(stacked)){ text=stacked; matched=true; usedJoin[ii+span]=1; break; }
+        }
+      }
+    }
+    if(!matched || usedJoin[ii]) continue;
     const m=it.transform; const [x,y]=applyM(vt,m[4],m[5]); const [nx,ny]=applyM(nvt,m[4],m[5]);
-    tags.push({x,y,ux:m[4],uy:m[5],nx,ny,text:it.str.trim()});
+    tags.push({x,y,ux:m[4],uy:m[5],nx,ny,text:text});
   }
   try{ var __all=tc.items.map(function(it){return it.str||'';}).join(' '); detectScaleFromText(__all); }catch(e){}
 }
@@ -1984,6 +2010,47 @@ function refreshSel(){
   }
   window.__integrateYoloFittings=integrateYoloFittings;
 
+  // ---- Clean with YOLO: flag/remove runs with no nearby YOLO support ----
+  var cleanFlagged=[];   // run ids previewed for removal
+  function scoreRunsByYolo(reachIn){
+    var dets=window.__yoloDets||[];
+    return (window.__runs2d||[]).map(function(run){
+      var lenIn=runLenIn(run); var support=0;
+      dets.forEach(function(d){ if(d.nx==null) return; var pr=projOnRun(run,d.nx,d.ny);
+        if(pr.alongIn>=-reachIn && pr.alongIn<=lenIn+reachIn && Math.abs(pr.perpIn)<=(run.widthIn/2+reachIn)) support++;
+      });
+      return {run:run, support:support};
+    });
+  }
+  function cleanPreview(){
+    if(!(window.__runs2d||[]).length){ setStatus('Build the takeoff first, then clean.'); return; }
+    if(!(window.__yoloDets||[]).length){ setStatus('Scan with YOLO first — cleaning uses the detections to tell real duct from junk.'); return; }
+    var reach=parseFloat(($('cleanReach')||{}).value)||24;
+    var scored=scoreRunsByYolo(reach);
+    cleanFlagged=scored.filter(function(s){return s.support===0;}).map(function(s){return s.run.id;});
+    // highlight flagged runs red on the overlay
+    renderItems();
+    var lay=document.getElementById('itemLayer');
+    cleanFlagged.forEach(function(id){ var run=findRun(id); if(!run)return;
+      run.pieces.forEach(function(p,i){ var pts=piecePolyPts(run,i); if(pts.some(function(q){return !q;}))return;
+        var hl=document.createElementNS(ns,'path'); hl.setAttribute('d','M'+pts.map(function(q){return q[0].toFixed(1)+' '+q[1].toFixed(1);}).join('L')+'Z');
+        hl.setAttribute('fill','rgba(255,45,45,.18)'); hl.setAttribute('stroke','#ff2d2d'); hl.setAttribute('stroke-width','2.5'); hl.setAttribute('stroke-dasharray','5 4'); hl.setAttribute('pointer-events','none'); lay.appendChild(hl);
+      });
+    });
+    if(!cleanFlagged.length){ setStatus('Clean: every run has YOLO support nearby — nothing flagged as junk.'); return; }
+    // confirm bar
+    var bar=document.getElementById('cleanBar'); if(!bar){ bar=document.createElement('div'); bar.id='cleanBar'; bar.style.cssText='position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:100000;background:#2a1010;border:1px solid #ff2d2d;border-radius:10px;padding:10px 14px;color:#fff;font:13px system-ui;box-shadow:0 6px 22px rgba(0,0,0,.5)'; document.body.appendChild(bar); }
+    bar.innerHTML='<b style="color:#ff8a8a">'+cleanFlagged.length+'</b> run(s) have no YOLO fitting within '+reach+'\u2033 (shown dashed red). Remove them? '
+      +'<button id="cleanGo" style="margin-left:8px;padding:5px 11px;border:none;border-radius:6px;background:#ff2d2d;color:#fff;font-weight:700;cursor:pointer">Remove</button> '
+      +'<button id="cleanCancel" style="padding:5px 11px;border:1px solid #555;border-radius:6px;background:#222;color:#ccc;cursor:pointer">Keep all</button>';
+    bar.style.display='block';
+    document.getElementById('cleanGo').onclick=function(){ window.__runs2d=(window.__runs2d||[]).filter(function(r){return cleanFlagged.indexOf(r.id)<0;}); var n=cleanFlagged.length; cleanFlagged=[]; bar.style.display='none'; renderItems(); renderPanel(); setStatus('Removed '+n+' unsupported run(s).'); };
+    document.getElementById('cleanCancel').onclick=function(){ cleanFlagged=[]; bar.style.display='none'; renderItems(); setStatus('Kept all runs.'); };
+    setStatus('Clean preview: '+cleanFlagged.length+' run(s) flagged (dashed red). Confirm in the bar at the bottom.');
+  }
+  (function(){ var b=document.getElementById('yoloCleanBtn'); if(b) b.onclick=cleanPreview;
+    var rs=document.getElementById('cleanReach'); if(rs) rs.oninput=function(){ var v=document.getElementById('cleanReachV'); if(v)v.textContent=this.value+'"'; }; })();
+
   function piecePolyPts(run,i){
     var off=0; for(var k=0;k<i;k++) off+=run.pieces[k].lenIn;
     var p=run.pieces[i]; var a=inToPt(off), b=inToPt(off+(p.lenIn||0.1));
@@ -2110,6 +2177,21 @@ function refreshSel(){
   function hsv(h,s,v){ var i=Math.floor(h*6),f=h*6-i,p=v*(1-s),q=v*(1-f*s),t=v*(1-(1-f)*s),r,g,b; switch(i%6){case 0:r=v;g=t;b=p;break;case 1:r=q;g=v;b=p;break;case 2:r=p;g=v;b=t;break;case 3:r=p;g=q;b=v;break;case 4:r=t;g=p;b=v;break;default:r=v;g=p;b=q;} return 'rgb('+(r*255|0)+','+(g*255|0)+','+(b*255|0)+')'; }
   function $(id){ return document.getElementById(id); }
   function setY(msg){ var s=$('yoloStatus'); if(s)s.textContent=msg; }
+  // redraw stored detections through the current transform (so boxes stick on zoom/pan)
+  function n2sY(nx,ny){ if(!window.__nvt||!viewport) return null; var m=window.__nvt,a=m[0],b=m[1],c=m[2],d=m[3],e=m[4],f=m[5],det=(a*d-b*c)||1; var u=[(d*(nx-e)-c*(ny-f))/det,(-b*(nx-e)+a*(ny-f))/det]; return applyM(viewport.transform,u[0],u[1]); }
+  function renderYolo(){
+    var lay=$('yoloLayer'); if(!lay) return; lay.innerHTML='';
+    (window.__yoloDets||[]).forEach(function(d){
+      if(d.nx0==null) return; var p0=n2sY(d.nx0,d.ny0), p1=n2sY(d.nx1,d.ny1); if(!p0||!p1) return;
+      var x=Math.min(p0[0],p1[0]), y=Math.min(p0[1],p1[1]), w=Math.abs(p1[0]-p0[0]), h=Math.abs(p1[1]-p0[1]);
+      var col=colorFor(d.clsIdx);
+      var rc=document.createElementNS(ns,'rect'); rc.setAttribute('x',x); rc.setAttribute('y',y); rc.setAttribute('width',w); rc.setAttribute('height',h);
+      rc.setAttribute('fill','none'); rc.setAttribute('stroke',col); rc.setAttribute('stroke-width','2.5'); lay.appendChild(rc);
+      var tt=document.createElementNS(ns,'text'); tt.setAttribute('x',x); tt.setAttribute('y',y-3); tt.setAttribute('font-size','11'); tt.setAttribute('font-weight','700'); tt.setAttribute('fill',col); tt.setAttribute('stroke','#0a0f16'); tt.setAttribute('stroke-width','2.5'); tt.setAttribute('paint-order','stroke'); tt.textContent=d.cls; lay.appendChild(tt);
+    });
+  }
+  window.__renderYolo=renderYolo;
+  if(typeof drawOverlay==='function'){ var _ody=drawOverlay; drawOverlay=function(){ var r=_ody.apply(this,arguments); try{renderYolo();}catch(e){} return r; }; }
 
   // ---- load model ----
   $('yoloLoadBtn') && ($('yoloLoadBtn').onclick=function(){ $('yoloFile').click(); });
@@ -2225,7 +2307,7 @@ function refreshSel(){
     if(!session){ setStatus('Load a model first.'); return; }
     if(!pdfDoc){ setStatus('Load a print first.'); return; }
     var confT=parseFloat($('yoloConf').value)||0.2;
-    setY('rendering…'); setStatus('Rendering full-resolution sheet for scanning…');
+    setY('rendering…'); setStatus(workArea?'Rendering work area for scanning…':'Rendering full sheet for scanning…');
     await new Promise(function(r){setTimeout(r,20);});
     try{
       var page=await pdfDoc.getPage(pageNum);
@@ -2235,21 +2317,32 @@ function refreshSel(){
       var un=page.getViewport({scale:1});
       var detail=parseFloat(($('yoloDetail')||{}).value)||1.0;
       var rScale=Math.min(3.0, 3000/un.width)*detail; if(!(rScale>0.3)) rScale=2.0;
-      console.log('[takeoff build t8] scan render scale =',rScale.toFixed(3),'| page',Math.round(un.width)+'x'+Math.round(un.height),'| detail',detail);
+      console.log('[takeoff build t10] scan render scale =',rScale.toFixed(3),'| page',Math.round(un.width)+'x'+Math.round(un.height),'| detail',detail);
       var rvp=page.getViewport({scale:rScale});
       var rc=document.createElement('canvas'); rc.width=Math.ceil(rvp.width); rc.height=Math.ceil(rvp.height);
       var rx=rc.getContext('2d',{willReadFrequently:true}); rx.fillStyle='#fff'; rx.fillRect(0,0,rc.width,rc.height);
       await page.render({canvasContext:rx, viewport:rvp, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise;
       var W=rc.width, H=rc.height;
       var TILE=1024, OV=200, stepT=TILE-OV;
+      // if a work area is set, restrict scanning to it (user-space -> render px)
+      var WA=null;
+      if(workArea){ WA={x0:workArea.ux0*rScale, y0:workArea.uy0*rScale, x1:workArea.ux1*rScale, y1:workArea.uy1*rScale};
+        var t0=Math.min(WA.y0,WA.y1),t1=Math.max(WA.y0,WA.y1),l0=Math.min(WA.x0,WA.x1),l1=Math.max(WA.x0,WA.x1); WA={x0:l0,y0:t0,x1:l1,y1:t1}; }
       var xs=[], ys=[];
       for(var x=0;x<W;x+=stepT){ xs.push(Math.min(x,Math.max(0,W-TILE))); if(x+TILE>=W) break; }
       for(var y=0;y<H;y+=stepT){ ys.push(Math.min(y,Math.max(0,H-TILE))); if(y+TILE>=H) break; }
       xs=Array.from(new Set(xs)); ys=Array.from(new Set(ys));
-      var total=xs.length*ys.length, done=0, all=[];
+      // build the tile list, skipping tiles fully outside the work area
+      var tileList=[];
+      for(var yi2=0;yi2<ys.length;yi2++){ for(var xi2=0;xi2<xs.length;xi2++){
+        var tx0=xs[xi2], ty0=ys[yi2], tx1=tx0+TILE, ty1=ty0+TILE;
+        if(WA && (tx1<WA.x0 || tx0>WA.x1 || ty1<WA.y0 || ty0>WA.y1)) continue;
+        tileList.push([tx0,ty0]);
+      }}
+      var total=tileList.length, done=0, all=[];
       var tcv=document.createElement('canvas'); tcv.width=TILE; tcv.height=TILE; var tx=tcv.getContext('2d',{willReadFrequently:true});
-      for(var yi=0;yi<ys.length;yi++){ for(var xi=0;xi<xs.length;xi++){
-        var ox=xs[xi], oy=ys[yi];
+      for(var ti=0;ti<tileList.length;ti++){
+        var ox=tileList[ti][0], oy=tileList[ti][1];
         tx.fillStyle='#fff'; tx.fillRect(0,0,TILE,TILE);
         tx.drawImage(rc, ox,oy,TILE,TILE, 0,0,TILE,TILE);
         var d=tx.getImageData(0,0,TILE,TILE).data; var f=new Float32Array(3*TILE*TILE); var n=TILE*TILE;
@@ -2257,9 +2350,11 @@ function refreshSel(){
         var t=new ort.Tensor('float32',f,[1,3,TILE,TILE]); var feeds={}; feeds[session.inputNames[0]]=t;
         var outMap=await session.run(feeds); var out=outMap[session.outputNames[0]]; var nc=out.dims[1]-4;
         var raw=decode(out,nc,confT);
-        raw.forEach(function(b){ all.push({x:b.x+ox,y:b.y+oy,w:b.w,h:b.h,cls:b.cls,score:b.score}); });
+        raw.forEach(function(b){ var cx=b.x+ox+b.w/2, cy=b.y+oy+b.h/2;
+          if(WA && (cx<WA.x0||cx>WA.x1||cy<WA.y0||cy>WA.y1)) return;   // drop detections outside the work area
+          all.push({x:b.x+ox,y:b.y+oy,w:b.w,h:b.h,cls:b.cls,score:b.score}); });
         done++; if(done%2===0||done===total){ setY('tile '+done+'/'+total); setStatus('Scanning… tile '+done+' of '+total+' ('+all.length+' raw)'); await new Promise(function(r){setTimeout(r,0);}); }
-      }}
+      }
       // NMS across the whole sheet (render px)
       var kept=nms(all,0.45);
       // map render px -> overlay px, and -> normalized nvt coords for the run-builder
@@ -2269,21 +2364,17 @@ function refreshSel(){
       var use16=(maxCls>7);
       names=use16?NAMES16:NAMES;
       var dets=[], counts={};
-      var lay=$('yoloLayer'); lay.innerHTML='';
       kept.forEach(function(d){
-        var oxp=d.x*oScale, oyp=d.y*oScale, owp=d.w*oScale, ohp=d.h*oScale;
+        // box corners in render px -> normalized nvt coords (so they stick through zoom/pan)
+        var cxr=d.x+d.w/2, cyr=d.y+d.h/2;
+        function r2n(rx,ry){ var ox=rx*oScale, oy=ry*oScale; var u=invVP(ox,oy); return applyM(window.__nvt,u[0],u[1]); }
+        var nC=r2n(cxr,cyr), n0=r2n(d.x,d.y), n1=r2n(d.x+d.w,d.y+d.h);
         var nm=names[d.cls]!=null?names[d.cls]:('cls'+d.cls); counts[nm]=(counts[nm]||0)+1;
-        var col=colorFor(d.cls);
-        var rc2=document.createElementNS(ns,'rect'); rc2.setAttribute('x',oxp); rc2.setAttribute('y',oyp); rc2.setAttribute('width',owp); rc2.setAttribute('height',ohp);
-        rc2.setAttribute('fill','none'); rc2.setAttribute('stroke',col); rc2.setAttribute('stroke-width','2.5'); lay.appendChild(rc2);
-        var tt=document.createElementNS(ns,'text'); tt.setAttribute('x',oxp); tt.setAttribute('y',oyp-3); tt.setAttribute('font-size','11'); tt.setAttribute('font-weight','700'); tt.setAttribute('fill',col); tt.setAttribute('stroke','#0a0f16'); tt.setAttribute('stroke-width','2.5'); tt.setAttribute('paint-order','stroke'); tt.textContent=nm; lay.appendChild(tt);
-        // normalized coords (nvt space) for the run-builder: overlay px -> user space -> nvt
-        var cxo=oxp+owp/2, cyo=oyp+ohp/2;
-        var u=null,nrm=null; try{ u=invVP(cxo,cyo); nrm=applyM(window.__nvt,u[0],u[1]); }catch(e){}
-        dets.push({cls:nm, clsIdx:d.cls, score:+d.score.toFixed(3), nx:nrm?nrm[0]:null, ny:nrm?nrm[1]:null,
-          wpx_overlay:owp, hpx_overlay:ohp });
+        dets.push({cls:nm, clsIdx:d.cls, score:+d.score.toFixed(3),
+          nx:nC[0], ny:nC[1], nx0:n0[0], ny0:n0[1], nx1:n1[0], ny1:n1[1] });
       });
       window.__yoloDets=dets;
+      renderYolo();
       var summary=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a];}).map(function(k){return counts[k]+' '+k;}).join(', ');
       $('yoloOut').innerHTML='<div class="hint" style="color:#bfe0ff"><b>'+kept.length+' fittings</b> on full sheet ('+(use16?'16':'8')+'-class, '+total+' tiles)<br>'+(summary||'none')+'</div>';
       setY('✓ '+kept.length+' on sheet');
