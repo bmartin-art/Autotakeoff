@@ -2049,22 +2049,27 @@ function refreshSel(){
   $('yoloLoadBtn') && ($('yoloLoadBtn').onclick=function(){ $('yoloFile').click(); });
   $('yoloFile') && ($('yoloFile').onchange=async function(e){
     var f=e.target.files[0]; if(!f) return; setY('loading…');
-    try{
-      if(!window.ort){ setY('onnxruntime not loaded'); setStatus('onnxruntime-web did not load — check your internet connection (it loads from a CDN).'); return; }
-      // tell ort where to fetch its .wasm engine (CDN), else it 404s next to a local file
-      try{
-        ort.env.wasm.wasmPaths='https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.17.1/';
-        ort.env.wasm.numThreads=1;     // threaded wasm needs COOP/COEP headers file:// can't give
-        ort.env.wasm.simd=false;       // plain wasm = widest compatibility
-        ort.env.wasm.proxy=false;
-      }catch(_){}
-      var buf=await f.arrayBuffer();
-      setY('building session…');
-      session=await ort.InferenceSession.create(buf,{executionProviders:['wasm'], graphOptimizationLevel:'all'});
-      setY('✓ '+f.name+' ('+session.inputNames[0]+')');
-      var tb=$('yoloTestBtn'); if(tb) tb.disabled=false;
-      setStatus('YOLO model loaded ('+f.name+'). Inputs: '+session.inputNames.join(',')+' · Outputs: '+session.outputNames.join(',')+'. Click "Test detect".');
-    }catch(err){ setY('load failed'); var msg=(err&&err.message)||String(err); setStatus('Model load failed: '+msg); $('yoloOut').innerHTML='<div class="hint" style="color:#f99">Load failed: '+msg.replace(/[&<>]/g,'')+'</div>'; console.error('ONNX load error:',err); }
+    if(!window.ort){ setY('onnxruntime not loaded'); setStatus('onnxruntime-web did not load (CDN/network).'); return; }
+    var buf; try{ buf=await f.arrayBuffer(); }catch(err){ setY('read failed'); setStatus('Could not read file: '+err.message); return; }
+    // try a sequence of configs; keep the first that builds a session
+    var attempts=[
+      {label:'wasm basic', setup:function(){ ort.env.wasm.wasmPaths='https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.17.1/'; ort.env.wasm.numThreads=1; ort.env.wasm.simd=false; ort.env.wasm.proxy=false; }, opts:{executionProviders:['wasm']}},
+      {label:'wasm simd', setup:function(){ ort.env.wasm.simd=true; }, opts:{executionProviders:['wasm']}},
+      {label:'wasm basic-optAll', setup:function(){ ort.env.wasm.simd=false; }, opts:{executionProviders:['wasm'], graphOptimizationLevel:'all'}}
+    ];
+    var lastErr=null;
+    for(var i=0;i<attempts.length;i++){ var a=attempts[i];
+      try{ setY('try: '+a.label+'…'); try{a.setup();}catch(_){}
+        session=await ort.InferenceSession.create(buf, a.opts);
+        setY('✓ '+f.name); var tb=$('yoloTestBtn'); if(tb) tb.disabled=false;
+        setStatus('YOLO loaded via '+a.label+'. in='+session.inputNames.join(',')+' out='+session.outputNames.join(',')+'. Click Test detect.');
+        $('yoloOut').innerHTML='<div class="hint" style="color:#bfe0ff">Model ready ('+a.label+'). Inputs: '+session.inputNames.join(', ')+' · Outputs: '+session.outputNames.join(', ')+'</div>';
+        return;
+      }catch(err){ lastErr=err; console.error('attempt',a.label,'failed:',err); }
+    }
+    var msg=(lastErr&&(lastErr.message||lastErr.toString()))||'unknown'; setY('load failed');
+    setStatus('Model load failed after all attempts: '+msg);
+    $('yoloOut').innerHTML='<div class="hint" style="color:#f99">Load failed: '+String(msg).replace(/[&<>]/g,'').slice(0,400)+'<br><br>If it mentions an opset/operator, the model needs re-exporting at a lower opset. Open F12 console for the full error.</div>';
   });
   $('yoloConf') && ($('yoloConf').oninput=function(){ $('yoloConfV').textContent=parseFloat(this.value).toFixed(2); });
 
