@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t11 · tag-extract</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t13 · wa-fix</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2326,8 +2326,13 @@ function refreshSel(){
       var TILE=1024, OV=200, stepT=TILE-OV;
       // if a work area is set, restrict scanning to it (user-space -> render px)
       var WA=null;
-      if(workArea){ WA={x0:workArea.ux0*rScale, y0:workArea.uy0*rScale, x1:workArea.ux1*rScale, y1:workArea.uy1*rScale};
-        var t0=Math.min(WA.y0,WA.y1),t1=Math.max(WA.y0,WA.y1),l0=Math.min(WA.x0,WA.x1),l1=Math.max(WA.x0,WA.x1); WA={x0:l0,y0:t0,x1:l1,y1:t1}; }
+      if(workArea){
+        // map work-area user-space corners through the RENDER viewport transform (not naive *rScale)
+        var wa0=applyM(rvp.transform, workArea.ux0, workArea.uy0);
+        var wa1=applyM(rvp.transform, workArea.ux1, workArea.uy1);
+        WA={x0:Math.min(wa0[0],wa1[0]), y0:Math.min(wa0[1],wa1[1]), x1:Math.max(wa0[0],wa1[0]), y1:Math.max(wa0[1],wa1[1])};
+        console.log('[takeoff t13] work area render-px:', WA, '| canvas', rc.width+'x'+rc.height);
+      }
       var xs=[], ys=[];
       for(var x=0;x<W;x+=stepT){ xs.push(Math.min(x,Math.max(0,W-TILE))); if(x+TILE>=W) break; }
       for(var y=0;y<H;y+=stepT){ ys.push(Math.min(y,Math.max(0,H-TILE))); if(y+TILE>=H) break; }
@@ -2339,6 +2344,11 @@ function refreshSel(){
         if(WA && (tx1<WA.x0 || tx0>WA.x1 || ty1<WA.y0 || ty0>WA.y1)) continue;
         tileList.push([tx0,ty0]);
       }}
+      if(WA && !tileList.length){   // work-area mapping produced no tiles — fall back to whole sheet rather than silently finding nothing
+        console.warn('[takeoff] work area produced 0 tiles — scanning whole sheet instead');
+        WA=null;
+        for(var yi3=0;yi3<ys.length;yi3++){ for(var xi3=0;xi3<xs.length;xi3++){ tileList.push([xs[xi3],ys[yi3]]); }}
+      }
       var total=tileList.length, done=0, all=[];
       var tcv=document.createElement('canvas'); tcv.width=TILE; tcv.height=TILE; var tx=tcv.getContext('2d',{willReadFrequently:true});
       for(var ti=0;ti<tileList.length;ti++){
@@ -2376,7 +2386,11 @@ function refreshSel(){
       window.__yoloDets=dets;
       renderYolo();
       var summary=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a];}).map(function(k){return counts[k]+' '+k;}).join(', ');
-      $('yoloOut').innerHTML='<div class="hint" style="color:#bfe0ff"><b>'+kept.length+' fittings</b> on full sheet ('+(use16?'16':'8')+'-class, '+total+' tiles)<br>'+(summary||'none')+'</div>';
+      // per-index breakdown — exposes any class-order mismatch (index N -> name)
+      var byIdx={}; kept.forEach(function(d){ byIdx[d.cls]=(byIdx[d.cls]||0)+1; });
+      var idxStr=Object.keys(byIdx).sort(function(a,b){return a-b;}).map(function(i){ return 'idx'+i+'\u2192'+(names[i]||'?')+':'+byIdx[i]; }).join('  ');
+      console.log('[takeoff t13] class index breakdown:', idxStr, '| total classes in model output =', (use16?16:8));
+      $('yoloOut').innerHTML='<div class="hint" style="color:#bfe0ff"><b>'+kept.length+' fittings</b> on full sheet ('+(use16?'16':'8')+'-class, '+total+' tiles)<br>'+(summary||'none')+'<br><span style="opacity:.6;font-size:10px">'+idxStr+'</span></div>';
       setY('✓ '+kept.length+' on sheet');
       setStatus('Full-sheet scan done — '+kept.length+' fittings detected. Stored for the run-builder.');
     }catch(err){ setY('scan failed'); setStatus('Scan failed: '+((err&&err.message)||err)); console.error(err); $('yoloOut').innerHTML='<div class="hint" style="color:#f99">'+String((err&&err.message)||err).slice(0,300)+'</div>'; }
