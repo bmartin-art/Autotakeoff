@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t7 · yolo full-scan</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t8 · yolo→runs</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -302,7 +302,7 @@
           <button class="btn go" id="itemsFromRunsBtn" style="flex:2;background:#0c2a1a;border-color:#2b9e5c;color:#bfffd2;font-weight:700">➕ Build takeoff (joints)</button>
           <button class="btn adv" id="itemsClearBtn" style="flex:1;background:#3a2030;border-color:#7a3b4b;color:#fbb">Clear</button>
         </div>
-        <div class="hint" style="margin-top:4px">Breaks each run into 5′ joint pieces you can edit individually — click a joint to change its length (the chain reflows), insert a reducer/tee/elbow between pieces (a reducer resizes everything downstream), shift-click to multi-select, and color/label runs. Wheel = zoom to cursor.</div>
+        <div class="hint" style="margin-top:4px">Breaks each run into 5′ joint pieces (round = 10′). Click a joint to change its length (chain reflows), insert a reducer/tee/elbow (reducer resizes downstream), shift-click to multi-select, color/label runs. <b>Scan with YOLO first</b> and Build takeoff will auto-split runs at detected fittings and drop in transitions. Wheel = zoom to cursor.</div>
         <div id="itemPanelBody" style="margin-top:7px"></div>
         <div style="margin-top:12px;border-top:1px solid #243;padding-top:10px">
           <div style="font-weight:700;color:#bfe6ff;font-size:13px;margin-bottom:5px">🔎 YOLO fitting detection</div>
@@ -313,7 +313,7 @@
           <input type="file" id="yoloFile" accept=".onnx" style="display:none">
           <button class="btn go" id="yoloTestBtn" style="width:100%;margin-top:6px;background:#0c1f3a;border-color:#2b6aa0;color:#bfe0ff" disabled>▸ Test detect (visible area)</button>
           <button class="btn go" id="yoloScanBtn" style="width:100%;margin-top:6px;background:#0a2a1f;border-color:#2b9e7a;color:#bfffe6;font-weight:700" disabled>⬛ Scan whole sheet (tiled)</button>
-          <div class="hint" style="margin-top:4px">Stage 1: loads your model and runs it on the area you're currently viewing, so we confirm in-browser detection works before scanning the whole sheet. conf <input type="range" id="yoloConf" min="0.05" max="0.6" step="0.05" value="0.2" style="width:70px;vertical-align:middle"> <span id="yoloConfV">0.20</span> · detail <input type="range" id="yoloDetail" min="0.6" max="1.8" step="0.1" value="1.0" style="width:60px;vertical-align:middle"> <span id="yoloDetailV">1.0×</span></div>
+          <div class="hint" style="margin-top:4px">Stage 1: loads your model and runs it on the area you're currently viewing, so we confirm in-browser detection works before scanning the whole sheet. conf <input type="range" id="yoloConf" min="0.05" max="0.6" step="0.05" value="0.10" style="width:70px;vertical-align:middle"> <span id="yoloConfV">0.10</span> · detail <input type="range" id="yoloDetail" min="0.6" max="1.8" step="0.1" value="1.0" style="width:60px;vertical-align:middle"> <span id="yoloDetailV">1.0×</span></div>
           <div id="yoloOut" style="margin-top:6px"></div>
         </div>
         <label style="display:block;font-size:12px;margin-top:4px"><input type="checkbox" id="runsTagOnly"> Runs only where a size tag matches the width <span style="opacity:.7">(hides empty pockets between ducts)</span></label>
@@ -1911,13 +1911,78 @@ function refreshSel(){
       var pieces=[], rem=lenIn;
       while(rem>0.5){ var L=Math.min(jointLen,rem); pieces.push({kind:'straight',lenIn:Math.round(L*10)/10,widthIn:r.widthIn,depthIn:depth,size:sz,cid:(isRound?'spiral':'st'),camduct:(isRound?'Spiral':'Straight Duct'),round:isRound}); rem-=L; }
       if(!pieces.length) pieces.push({kind:'straight',lenIn:Math.round(lenIn*10)/10,widthIn:r.widthIn,depthIn:depth,size:sz,cid:(isRound?'spiral':'st'),camduct:(isRound?'Spiral':'Straight Duct'),round:isRound});
-      window.__runs2d.push({id:uid(),axis:r.axis,start:[sx,sy],dir:[ux,uy],normal:[pnx,pny],widthIn:r.widthIn,color:palette[ci%palette.length],label:'',confirmed:!!r.confirmed,pieces:pieces});
+      window.__runs2d.push({id:uid(),axis:r.axis,start:[sx,sy],dir:[ux,uy],normal:[pnx,pny],widthIn:r.widthIn,color:palette[ci%palette.length],label:'',confirmed:!!r.confirmed,pieces:pieces,
+        _startN:[c[0],c[3]], _Lpt:Lpt});
       ci++;
     });
+    var nFit = integrateYoloFittings();
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Created '+window.__runs2d.length+' runs as joint-chains. Click a joint to edit; shift-click to multi-select.');
+    setStatus('Created '+window.__runs2d.length+' runs as joint-chains'+(nFit?(' \u00b7 placed '+nFit+' YOLO fitting(s) (runs split, transitions inserted)'):'')+'. Click a joint to edit.');
   }
   window.__runsFromPreview=runsFromPreview;
+
+  // ---- integrate YOLO detections: split runs at fittings, insert transitions/reducers ----
+  function projOnRun(run, nx, ny){
+    // returns {along: inches from start along dir, perp: inches off centerline}
+    var sx=run.start[0], sy=run.start[1], ux=run.dir[0], uy=run.dir[1], px=run.normal[0], py=run.normal[1];
+    var dxp=nx-sx, dyp=ny-sy;
+    var alongPt=dxp*ux+dyp*uy, perpPt=dxp*px+dyp*py;
+    return {alongIn:ptToIn(alongPt), perpIn:ptToIn(perpPt), alongPt:alongPt};
+  }
+  function parseWH(sz){ var m=/(\d+)\s*[x\u00d7]\s*(\d+)/.exec(sz||''); if(m) return {w:+m[1],h:+m[2],round:false}; var r=/(\d+)\s*\u00f8/.exec(sz||''); if(r) return {w:+r[1],h:+r[1],round:true}; return null; }
+  function integrateYoloFittings(){
+    var dets=window.__yoloDets; if(!dets||!dets.length||!window.__runs2d.length) return 0;
+    // only fittings that break/insert into runs (skip straight + sizetag — geometry/text own those)
+    var FITMAP={ sizechange:'__size__', transition:'tr', reducer:'reducer', sq2round:'s2r', elbow:'e90', tap:'stap', tee:'sqt', offset:'reo', cap:'ec' };
+    var placed=0;
+    dets.forEach(function(d){
+      var base=(d.cls||'').replace(/^(rect|round)-/,'');   // merged or fine -> base
+      var target=FITMAP[base]; if(!target) return;          // not an insertable fitting
+      if(d.nx==null) return;
+      // find the nearest run whose centerline this detection sits on
+      var best=null,bestPerp=1e9,bestRun=null;
+      window.__runs2d.forEach(function(run){
+        var lenIn=runLenIn(run); var pr=projOnRun(run,d.nx,d.ny);
+        if(pr.alongIn< -6 || pr.alongIn> lenIn+6) return;            // must be within the run span
+        var perp=Math.abs(pr.perpIn); if(perp> (run.widthIn/2 + 12)) return;  // must sit on the duct (within half-width + slack)
+        if(perp<bestPerp){ bestPerp=perp; best=pr; bestRun=run; }
+      });
+      if(!bestRun) return;
+      // walk the chain to find which piece the 'along' position lands in, split there, insert the fitting
+      var run=bestRun, posIn=Math.max(0,best.alongIn), acc=0, idx=-1, into=0;
+      for(var i=0;i<run.pieces.length;i++){ var pl=run.pieces[i].lenIn; if(posIn<=acc+pl || i===run.pieces.length-1){ idx=i; into=posIn-acc; break; } acc+=pl; }
+      if(idx<0) return;
+      var piece=run.pieces[idx];
+      // resolve sizechange -> transition/reducer/sq2round by duct shape before/after (use run.isRound + size tags)
+      var cid=target, name;
+      if(target==='__size__'){
+        // before size = this piece; after size = next size tag along the run if any (else same)
+        var beforeRound=!!piece.round;
+        // try to read an 'after' size from r.sizes order — approximate: if run has 2+ sizes, second is downstream
+        cid = beforeRound ? 'reducer' : 'tr';     // round->reducer, rect->transition (sq2round handled if shapes differ)
+        name = cid==='reducer'?'Reducer':'Transition';
+      } else {
+        var defn={tr:'Transition',reducer:'Reducer',s2r:'Sq to Round',e90:'90 Elbow',stap:'Straight Tap',sqt:'Sq Tee',reo:'Rect Offset',ec:'End Cap'};
+        name=defn[target]||target;
+      }
+      var fitLenIn = (cid==='e90'||cid==='sqt'||cid==='ec'||cid==='reo')?0:(cid==='reducer'||cid==='tr'||cid==='s2r'?12:6);
+      // split the straight piece at 'into'
+      var newPieces=[];
+      if(piece.kind==='straight' && into>2 && into<piece.lenIn-2){
+        var a=Object.assign({},piece); a.lenIn=Math.round(into*10)/10;
+        var b=Object.assign({},piece); b.lenIn=Math.round((piece.lenIn-into)*10)/10;
+        newPieces=[a,{kind:'fitting',cid:cid,camduct:name,lenIn:fitLenIn,widthIn:piece.widthIn,depthIn:piece.depthIn,fromYolo:true,score:d.score},b];
+      } else {
+        newPieces=[{kind:'fitting',cid:cid,camduct:name,lenIn:fitLenIn,widthIn:piece.widthIn,depthIn:piece.depthIn,fromYolo:true,score:d.score}];
+      }
+      run.pieces.splice.apply(run.pieces,[idx, (piece.kind==='straight'&&into>2&&into<piece.lenIn-2)?1:0].concat(newPieces));
+      placed++;
+    });
+    // re-apply downstream sizing for any reducers we inserted
+    window.__runs2d.forEach(function(r){ try{ applyReducerDownstream(r); }catch(e){} });
+    return placed;
+  }
+  window.__integrateYoloFittings=integrateYoloFittings;
 
   function piecePolyPts(run,i){
     var off=0; for(var k=0;k<i;k++) off+=run.pieces[k].lenIn;
@@ -2054,9 +2119,9 @@ function refreshSel(){
     var buf; try{ buf=await f.arrayBuffer(); }catch(err){ setY('read failed'); setStatus('Could not read file: '+err.message); return; }
     // try a sequence of configs; keep the first that builds a session
     var attempts=[
-      {label:'wasm basic', setup:function(){ ort.env.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/'; ort.env.wasm.numThreads=1; ort.env.wasm.simd=false; ort.env.wasm.proxy=false; }, opts:{executionProviders:['wasm']}},
-      {label:'wasm simd', setup:function(){ ort.env.wasm.simd=true; }, opts:{executionProviders:['wasm']}},
-      {label:'wasm basic-optAll', setup:function(){ ort.env.wasm.simd=false; }, opts:{executionProviders:['wasm'], graphOptimizationLevel:'all'}}
+      {label:'wasm basic', setup:function(){ ort.env.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/'; ort.env.wasm.numThreads=1; ort.env.wasm.proxy=false; }, opts:{executionProviders:['wasm']}},
+      {label:'wasm opt', setup:function(){}, opts:{executionProviders:['wasm']}},
+      {label:'wasm optAll', setup:function(){}, opts:{executionProviders:['wasm'], graphOptimizationLevel:'all'}}
     ];
     var lastErr=null;
     for(var i=0;i<attempts.length;i++){ var a=attempts[i];
@@ -2170,7 +2235,7 @@ function refreshSel(){
       var un=page.getViewport({scale:1});
       var detail=parseFloat(($('yoloDetail')||{}).value)||1.0;
       var rScale=Math.min(3.0, 3000/un.width)*detail; if(!(rScale>0.3)) rScale=2.0;
-      console.log('[takeoff build t7] scan render scale =',rScale.toFixed(3),'| page',Math.round(un.width)+'x'+Math.round(un.height),'| detail',detail);
+      console.log('[takeoff build t8] scan render scale =',rScale.toFixed(3),'| page',Math.round(un.width)+'x'+Math.round(un.height),'| detail',detail);
       var rvp=page.getViewport({scale:rScale});
       var rc=document.createElement('canvas'); rc.width=Math.ceil(rvp.width); rc.height=Math.ceil(rvp.height);
       var rx=rc.getContext('2d',{willReadFrequently:true}); rx.fillStyle='#fff'; rx.fillRect(0,0,rc.width,rc.height);
