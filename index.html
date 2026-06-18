@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t23 · draw size-tag markers</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t24 · visual scale read</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2861,7 +2861,7 @@ async function aiSizeSweep(){
   var tc=document.createElement('canvas'); tc.width=Math.round(pc.width*sc); tc.height=Math.round(pc.height*sc);
   tc.getContext('2d').drawImage(pc,0,0,tc.width,tc.height);
   var img=tc.toDataURL('image/jpeg',0.85).split(',')[1];
-  var prompt='This is an HVAC plan sheet. Find EVERY duct SIZE label printed on it. A size label looks like "20x16" (width x height, inches) or "12\\"\u00d8" / "12 DIA" (round diameter). IGNORE diffuser/grille/equipment tags (e.g. CD1-320, EF1), CFM values, and general notes \u2014 only duct dimensions. For each size label return its exact text and its center as normalized coordinates x,y in 0..1, where (0,0) is the TOP-LEFT of the image. Answer ONLY JSON, no prose or code fences: {"labels":[{"text":"20x16","x":0.12,"y":0.34}, ...]}.';
+  var prompt='This is an HVAC plan sheet. Two tasks.\n1) DRAWING SCALE: find the scale note printed on the sheet (e.g. "3/32\\"=1\'-0\\"", "1/8\\"=1\'-0\\"", "1/4\\"=1\'-0\\""). Return it as scale_text, AND as scale_inches_per_foot = inches-per-foot as a decimal (3/32->0.09375, 1/8->0.125, 3/16->0.1875, 1/4->0.25). If you cannot find a scale note, omit both.\n2) SIZE LABELS: find EVERY duct SIZE label like "20x16" (width x height, inches) or "12\\"\u00d8"/"12 DIA" (round). IGNORE diffuser/grille/equipment tags (CD1-320, EF1), CFM values, notes. For each, return its text and normalized center x,y in 0..1 (top-left origin).\nAnswer ONLY JSON, no prose or fences: {"scale_text":"3/32\\"=1\'-0\\"","scale_inches_per_foot":0.09375,"labels":[{"text":"20x16","x":0.12,"y":0.34}]}.';
   out.innerHTML='<div class="hint"><span class="spin"></span> sweeping the whole sheet for size labels\u2026 (15\u201360s)</div>';
   try{
     var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},90000);
@@ -2872,6 +2872,15 @@ async function aiSizeSweep(){
     var raw=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
     var res; try{ res=JSON.parse(raw); }catch(e){ window.__lastSweep=raw; out.innerHTML='<div class="hint">AI didn\u2019t return clean JSON \u2014 raw saved to window.__lastSweep.</div>'; return; }
     var labels=(res.labels||[]).filter(function(L){ return L && L.text && _sweepDims(L.text) && L.x!=null && L.y!=null; });
+    // ---- apply the visually-read scale (only when scale is still on auto — don't clobber a manual set) ----
+    var scaleMsg='';
+    try{
+      if(typeof scaleAuto==='undefined' || scaleAuto){
+        var sv=(typeof res.scale_inches_per_foot==='number' && res.scale_inches_per_foot>0 && res.scale_inches_per_foot<=12)?res.scale_inches_per_foot:null;
+        if(sv){ scaleIPF=sv; try{updateScaleUI();}catch(e){} scaleMsg=' \u00b7 scale set to '+(typeof scaleLabel==='function'?scaleLabel(sv):sv)+'=1\u2032 from the print'; }
+        else if(res.scale_text){ try{ detectScaleFromText(String(res.scale_text)); scaleMsg=' \u00b7 scale read: '+vhEsc(String(res.scale_text)); }catch(e){} }
+      }
+    }catch(e){}
     var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
     var added=0, dup=0;
     labels.forEach(function(L){
@@ -2883,7 +2892,7 @@ async function aiSizeSweep(){
       tags.push({x:px,y:py,nx:nx,ny:ny,text:String(L.text).replace(/\s+/g,''),_ai:true}); added++;
     });
     try{ drawOverlay(); }catch(e){}
-    out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Size sweep done.</b> '+added+' size tag(s) placed'+(dup?(', '+dup+' already present'):'')+' from '+labels.length+' read. Now hit <b>\u2795 Build takeoff</b> \u2014 runs will link these.</div>';
+    out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Size sweep done.</b> '+added+' size tag(s) placed'+(dup?(', '+dup+' already present'):'')+' from '+labels.length+' read'+scaleMsg+'. Now hit <b>\u2795 Build takeoff</b>.</div>';
   }catch(e){ out.innerHTML='<div class="hint">'+(e.name==='AbortError'?'Timed out \u2014 try a tighter work area / single sheet.':('Error: '+vhEsc(e.message||e)))+'</div>'; }
 }
 window.aiSizeSweep=aiSizeSweep;
