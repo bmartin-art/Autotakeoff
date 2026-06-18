@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t29 · vertical labels + candidate boxes</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t30 · point-to-segment duct filter + cluster counts</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2947,12 +2947,15 @@ async function aiReadSizesAtClusters(){
     var w=x1-x0,h=y1-y0, _lo=Math.min(w,h), _hi=Math.max(w,h); if(_hi<14||_hi>220||_lo<5||_lo>95) continue;   // label-sized box, either orientation
     clusters.push({bbox:[x0,y0,x1,y1], cx:(x0+x1)/2, cy:(y0+y1)/2, idxs:grp.map(function(g){return g.idx;})});
   }
-  // 2) keep clusters that sit on/near a duct line (size labels live on ducts)
+  // 2) keep clusters that sit on/near a duct LINE (point-to-segment distance, not segment-center)
   var duct=segments.filter(function(s){return s.cls==='duct';});
-  clusters=clusters.filter(function(c){ for(var i=0;i<duct.length;i++){ var s=duct[i]; if(Math.hypot(c.cx-(s.x1+s.x2)/2, c.cy-(s.y1+s.y2)/2)<200) return true; } return false; });
+  function pSegD(px,py,x1,y1,x2,y2){ var dx=x2-x1,dy=y2-y1,L2=dx*dx+dy*dy,t=L2?((px-x1)*dx+(py-y1)*dy)/L2:0; t=t<0?0:(t>1?1:t); return Math.hypot(px-(x1+t*dx),py-(y1+t*dy)); }
+  var rawCount=clusters.length;
+  clusters=clusters.filter(function(c){ for(var i=0;i<duct.length;i++){ var s=duct[i]; if(pSegD(c.cx,c.cy,s.x1,s.y1,s.x2,s.y2)<160) return true; } return false; });
+  var nearCount=clusters.length;
   clusters=clusters.slice(0,60);
   window.__geoClusters=clusters.map(function(c){return c.bbox;}); try{ drawOverlay(); }catch(e){}
-  if(!clusters.length){ out.innerHTML='<div class="hint">No text-label spots found near duct. Detect duct (green) first, and check the work area covers the labels.</div>'; return; }
+  if(!clusters.length){ out.innerHTML='<div class="hint">No label spots kept: '+rawCount+' text-like cluster(s) formed, 0 near a duct line. '+(rawCount?'They formed but none sit near green duct \u2014 widen the duct-proximity, or the green isn\u2019t on the labels.':'No clusters formed \u2014 the digit strokes aren\u2019t being grouped (wrong size cutoff).')+'</div>'; return; }
   out.innerHTML='<div class="hint"><span class="spin"></span> reading '+clusters.length+' detected label spot(s)\u2026</div>';
   var prompt='This is a tiny crop from an HVAC plan, with a red box around one feature. If that boxed feature is a duct SIZE label, read it: rectangular "20x16" (width x height, inches) or round "12\\"\u00d8". If it is NOT a duct size (a diffuser/equipment/grille tag like CD1-320 or EF1, a CFM value, a note, or unreadable), return null. Do NOT guess. Answer ONLY JSON: {"size":"20x16"} or {"size":null}.';
   var added=0, done=0, empty=0, errs=0;
