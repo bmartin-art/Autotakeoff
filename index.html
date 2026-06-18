@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t20 · sizing diagnostic</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t21 · AI size sweep + YOLO tags merged</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -296,6 +296,7 @@
         <button class="btn go" id="verifyTags" style="background:#10243a;border-color:#2b6aa0;color:#cfe7ff;margin-top:4px">✓ Verify duct against size tags</button>
         <button class="btn go" id="aiFullTakeoff" style="background:#2a1a3a;border-color:#6a3fb8;color:#dcccff;margin-top:6px">🤖 Run full AI takeoff (whole sheet)</button>
         <button class="btn go" id="aiSizeRuns" style="background:#1a2a3a;border-color:#3f8ab8;color:#cce6ff;margin-top:4px">🔎 AI read sizes per run → fix tags</button>
+        <button class="btn go" id="aiSizeSweep" style="background:#1a3a2a;border-color:#3fb87a;color:#ccffe0;margin-top:4px">🧹 AI size sweep (whole sheet → tags)</button>
         <button class="btn go" id="dimFind" style="background:#13351f;border-color:#2a6b40;color:#bdf5cf;margin-top:6px">📐 Find duct by dimension (tag-match)</button>
         <button class="btn go" id="buildRuns" style="background:#1f1430;border-color:#7a4fd0;color:#e6d8ff;margin-top:6px">📊 Preview runs (optional — Build takeoff does this for you)</button>
         <div class="row" style="margin-top:6px;display:flex;gap:6px">
@@ -2771,7 +2772,7 @@ function renderVisionSummary(p, meta){
   h+='<div class="hint" style="margin-top:6px">This is the AI\u2019s read of the whole sheet \u2014 eyeball it against the print. If the runs and sizes look right, the next step is turning these into placed, editable 3D pieces.</div>';
   return h;
 }
-(function(){ try{ var b=document.getElementById('aiFullTakeoff'); if(b) b.addEventListener('click', runFullAITakeoff); var s=document.getElementById('aiSizeRuns'); if(s) s.addEventListener('click', aiReadSizesPerRun); }catch(e){} })();
+(function(){ try{ var b=document.getElementById('aiFullTakeoff'); if(b) b.addEventListener('click', runFullAITakeoff); var s=document.getElementById('aiSizeRuns'); if(s) s.addEventListener('click', aiReadSizesPerRun); var z=document.getElementById('aiSizeSweep'); if(z) z.addEventListener('click', aiSizeSweep); }catch(e){} })();
 // ---- Per-run size reader: crop each detected run, read ordered W×D + fittings, write back as size tags ----
 function groupDuctRuns(){
   var segs=(typeof segments!=='undefined'?segments:[]).filter(function(s){return s.cls==='duct';}); if(!segs.length) return [];
@@ -2828,7 +2829,46 @@ async function aiReadSizesPerRun(){
   h+='<div style="font-size:11px;color:#9fb4c8;font-family:ui-monospace,monospace;margin-top:4px">'+report.map(function(x){return vhEsc(x);}).join('<br>')+'</div>';
   out.innerHTML=h;
 }
-// ---- AI scan: judge the ambiguous (yellow) blobs from an image crop ----
+// ---- Whole-sheet AI size sweep: read EVERY size label + position, push into tags[] in the run frame.
+// Runs through the worker ROOT (pass-through to Anthropic) so no worker redeploy is needed. ----
+function _sweepDims(t){ t=String(t||'').toUpperCase();
+  var mr=/(\d{1,3})\s*["\u201d]?\s*(?:\u00d8|DIA)|\u00d8\s*(\d{1,3})/.exec(t); if(mr){ var d=+(mr[1]||mr[2]); if(d>=3&&d<=120) return {round:true,w:d,h:d}; }
+  var m=/(\d{1,3})\s*[xX\u00d7]\s*(\d{1,3})/.exec(t); if(m){ var w=+m[1],h=+m[2]; if(w>=2&&w<=200&&h>=2&&h<=200) return {round:false,w:w,h:h}; }
+  return null; }
+async function aiSizeSweep(){
+  var out=document.getElementById('aiOut'); if(!out)return;
+  var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,''); if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
+  var pc=document.getElementById('pdfCanvas'); if(!pc||!pc.width){ out.innerHTML='<div class="hint">Load a PDF page first, then run this.</div>'; return; }
+  var maxEdge=2200, sc=Math.min(1, maxEdge/Math.max(pc.width,pc.height));
+  var tc=document.createElement('canvas'); tc.width=Math.round(pc.width*sc); tc.height=Math.round(pc.height*sc);
+  tc.getContext('2d').drawImage(pc,0,0,tc.width,tc.height);
+  var img=tc.toDataURL('image/jpeg',0.85).split(',')[1];
+  var prompt='This is an HVAC plan sheet. Find EVERY duct SIZE label printed on it. A size label looks like "20x16" (width x height, inches) or "12\\"\u00d8" / "12 DIA" (round diameter). IGNORE diffuser/grille/equipment tags (e.g. CD1-320, EF1), CFM values, and general notes \u2014 only duct dimensions. For each size label return its exact text and its center as normalized coordinates x,y in 0..1, where (0,0) is the TOP-LEFT of the image. Answer ONLY JSON, no prose or code fences: {"labels":[{"text":"20x16","x":0.12,"y":0.34}, ...]}.';
+  out.innerHTML='<div class="hint"><span class="spin"></span> sweeping the whole sheet for size labels\u2026 (15\u201360s)</div>';
+  try{
+    var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},90000);
+    var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:4000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:img}},{type:'text',text:prompt}]}]})});
+    clearTimeout(to);
+    if(!resp.ok){ var et=await resp.text(); out.innerHTML='<div class="hint">HTTP '+resp.status+': '+vhEsc(et.slice(0,200))+'</div>'; return; }
+    var data=await resp.json(); if(data.error){ out.innerHTML='<div class="hint">AI error: '+vhEsc(String(data.error.message||'err').slice(0,160))+'</div>'; return; }
+    var raw=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
+    var res; try{ res=JSON.parse(raw); }catch(e){ window.__lastSweep=raw; out.innerHTML='<div class="hint">AI didn\u2019t return clean JSON \u2014 raw saved to window.__lastSweep.</div>'; return; }
+    var labels=(res.labels||[]).filter(function(L){ return L && L.text && _sweepDims(L.text) && L.x!=null && L.y!=null; });
+    var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
+    var added=0, dup=0;
+    labels.forEach(function(L){
+      var px=L.x*pc.width, py=L.y*pc.height;          // normalized -> full-res pdfCanvas px
+      var nx=px/K, ny=py/K;                            // -> the same nx/ny frame runs + matcher use
+      var near=false;                                  // dedupe vs any size tag already within ~28px
+      for(var i=0;i<tags.length;i++){ var t=tags[i]; if(!_sweepDims(t.text)) continue; var tpx=(t.x!=null?t.x:(t.nx*K)), tpy=(t.y!=null?t.y:(t.ny*K)); if(Math.hypot(tpx-px,tpy-py)<28){ near=true; break; } }
+      if(near){ dup++; return; }
+      tags.push({x:px,y:py,nx:nx,ny:ny,text:String(L.text).replace(/\s+/g,''),_ai:true}); added++;
+    });
+    try{ drawOverlay(); }catch(e){}
+    out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Size sweep done.</b> '+added+' size tag(s) placed'+(dup?(', '+dup+' already present'):'')+' from '+labels.length+' read. Now hit <b>\u2795 Build takeoff</b> \u2014 runs will link these.</div>';
+  }catch(e){ out.innerHTML='<div class="hint">'+(e.name==='AbortError'?'Timed out \u2014 try a tighter work area / single sheet.':('Error: '+vhEsc(e.message||e)))+'</div>'; }
+}
+window.aiSizeSweep=aiSizeSweep;
 function strongDuct(s){
   if(s._userMark && s.lock==='duct') return true;             // you said so
   if(!(s.paired && (s.ulen||0)>=40)) return false;            // only PAIRED parallel walls (a real run) qualify — single dark lines (text, leaders, dimensions) and short device boxes stay reviewable
