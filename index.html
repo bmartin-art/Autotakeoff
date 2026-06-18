@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t21 · AI size sweep + YOLO tags merged</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t22 · nearest-tag snap</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -1938,6 +1938,17 @@ function refreshSel(){
       var ev=[];
       (r.tagIdx||[]).forEach(function(ti){ var tg=tags[ti]; if(!tg||tg.nx==null) return; var pd=parseTagDims(tg.text); if(!pd) return;
         ev.push({alongIn:ptToIn((tg.nx-sx)*ux+(tg.ny-sy)*uy), tagNx:tg.nx, tagNy:tg.ny, w:pd.w, h:pd.h, round:pd.round, str:pd.round?('\u00d8'+pd.w):(pd.w+'\u00d7'+pd.h)});
+      });
+      // nearest-tag snap: claim ANY parseable size tag that sits on/near this run, even if the
+      // matcher didn't bind it — robust to AI/PDF coords being a few inches off the centerline.
+      tags.forEach(function(tg){ if(tg.nx==null) return; var pd=parseTagDims(tg.text); if(!pd) return;
+        var along=(tg.nx-sx)*ux+(tg.ny-sy)*uy, perp=Math.abs((tg.nx-sx)*pnx+(tg.ny-sy)*pny);
+        if(along<-inToPt(10) || along>Lpt+inToPt(10)) return;
+        if(perp > inToPt(Math.max(r.widthIn, pd.w)/2 + 24)) return;     // inside the duct body + margin
+        var str=pd.round?('\u00d8'+pd.w):(pd.w+'\u00d7'+pd.h);
+        var ai=ptToIn(along);
+        if(ev.some(function(e){ return Math.abs(e.alongIn-ai)<6 && e.str===str; })) return;
+        ev.push({alongIn:ai, tagNx:tg.nx, tagNy:tg.ny, w:pd.w, h:pd.h, round:pd.round, str:str});
       });
       // YOLO sizetag recovery: if the dimension-match linked nothing, read PDF text under a YOLO sizetag box sitting on this run
       if(!ev.length){
