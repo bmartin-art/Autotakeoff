@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t22 · nearest-tag snap</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t23 · draw size-tag markers</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -1688,6 +1688,13 @@ function drawOverlay(){
   if(window.__flagged && window.__flagged.size){ var fp=[]; window.__flagged.forEach(function(i){ var s=segments[i]; if(s) fp.push('M'+s.x1.toFixed(1)+' '+s.y1.toFixed(1)+'L'+s.x2.toFixed(1)+' '+s.y2.toFixed(1)); }); if(fp.length) html+='<path d="'+fp.join('')+'" fill="none" stroke="'+(window.__simDir==='promote'?'#22d3ee':'#ff2d2d')+'" stroke-width="5" stroke-opacity="0.95" stroke-linecap="round" pointer-events="none"/>'; }
   html+='<path id="selPath" d="'+selPathD()+'" fill="none" stroke="#ffffff" stroke-width="3.5" pointer-events="none"/>';
   if(workArea && viewport){ var P0=applyM(viewport.transform,workArea.ux0,workArea.uy0), P1=applyM(viewport.transform,workArea.ux1,workArea.uy1); var RX=Math.min(P0[0],P1[0]),RY=Math.min(P0[1],P1[1]),RW=Math.abs(P1[0]-P0[0]),RH=Math.abs(P1[1]-P0[1]); html+='<rect x="'+RX+'" y="'+RY+'" width="'+RW+'" height="'+RH+'" fill="rgba(47,111,237,0.05)" stroke="#2f6fed" stroke-width="2" stroke-dasharray="7 5" pointer-events="none"/>'; }
+  // size-tag markers — draw where each size label actually sits (AI sweep = magenta, other = cyan).
+  // Lets us see whether tags land ON the runs (snap-tolerance issue) or off them (AI-coordinate issue).
+  try{ for(var _ti=0; _ti<tags.length; _ti++){ var _t=tags[_ti]; if(_t.x==null||_t.y==null) continue; if(!/\d/.test(String(_t.text||''))) continue;
+    var _c=_t._ai?'#ff39c0':'#7be0ff';
+    html+='<circle cx="'+_t.x.toFixed(1)+'" cy="'+_t.y.toFixed(1)+'" r="4" fill="'+_c+'" stroke="#000" stroke-width="0.7" pointer-events="none"/>'
+        +'<text x="'+(_t.x+6).toFixed(1)+'" y="'+(_t.y-6).toFixed(1)+'" font-size="13" font-weight="700" fill="'+_c+'" stroke="#000" stroke-width="0.5" pointer-events="none">'+String(_t.text)+'</text>';
+  } }catch(e){}
   g.innerHTML=html;
   if((document.getElementById('shadeBoxes')||{}).checked && viewport){ try{ shadeBoxesInto(g, viewport.transform); }catch(e){} }
 }
