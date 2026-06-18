@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t24 · visual scale read</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t26 · tiled sweep + duct-proximity guard</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2857,43 +2857,52 @@ async function aiSizeSweep(){
   var out=document.getElementById('aiOut'); if(!out)return;
   var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,''); if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
   var pc=document.getElementById('pdfCanvas'); if(!pc||!pc.width){ out.innerHTML='<div class="hint">Load a PDF page first, then run this.</div>'; return; }
-  var maxEdge=2200, sc=Math.min(1, maxEdge/Math.max(pc.width,pc.height));
-  var tc=document.createElement('canvas'); tc.width=Math.round(pc.width*sc); tc.height=Math.round(pc.height*sc);
-  tc.getContext('2d').drawImage(pc,0,0,tc.width,tc.height);
-  var img=tc.toDataURL('image/jpeg',0.85).split(',')[1];
-  var prompt='This is an HVAC plan sheet. Two tasks.\n1) DRAWING SCALE: find the scale note printed on the sheet (e.g. "3/32\\"=1\'-0\\"", "1/8\\"=1\'-0\\"", "1/4\\"=1\'-0\\""). Return it as scale_text, AND as scale_inches_per_foot = inches-per-foot as a decimal (3/32->0.09375, 1/8->0.125, 3/16->0.1875, 1/4->0.25). If you cannot find a scale note, omit both.\n2) SIZE LABELS: find EVERY duct SIZE label like "20x16" (width x height, inches) or "12\\"\u00d8"/"12 DIA" (round). IGNORE diffuser/grille/equipment tags (CD1-320, EF1), CFM values, notes. For each, return its text and normalized center x,y in 0..1 (top-left origin).\nAnswer ONLY JSON, no prose or fences: {"scale_text":"3/32\\"=1\'-0\\"","scale_inches_per_foot":0.09375,"labels":[{"text":"20x16","x":0.12,"y":0.34}]}.';
-  out.innerHTML='<div class="hint"><span class="spin"></span> sweeping the whole sheet for size labels\u2026 (15\u201360s)</div>';
+  var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
+  // helper: one AI call (image + prompt) through the worker pass-through -> parsed JSON or null
+  async function ask(b64, prompt, maxtok){ var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},45000);
+    try{ var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:maxtok||1200,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},{type:'text',text:prompt}]}]})}); clearTimeout(to);
+      if(!resp.ok) return null; var data=await resp.json(); if(data.error) return null;
+      var raw=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
+      try{ return JSON.parse(raw); }catch(e){ return null; } }catch(e){ clearTimeout(to); return null; } }
+  function pSegD(px,py,x1,y1,x2,y2){ var dx=x2-x1,dy=y2-y1,L2=dx*dx+dy*dy,t=L2?((px-x1)*dx+(py-y1)*dy)/L2:0; t=t<0?0:(t>1?1:t); return Math.hypot(px-(x1+t*dx),py-(y1+t*dy)); }
+  function cropB64(x,y,w,h){ var c=document.createElement('canvas'); var S=Math.min(2,1400/Math.max(w,h,1)); c.width=Math.max(8,Math.round(w*S)); c.height=Math.max(8,Math.round(h*S)); var cx=c.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,c.width,c.height); cx.drawImage(pc,x,y,w,h,0,0,c.width,c.height); return c.toDataURL('image/jpeg',0.85).split(',')[1]; }
+  // region to sweep: the work-area box if one is drawn, else the whole sheet (in pdfCanvas px)
+  var rx=0,ry=0,rw=pc.width,rh=pc.height;
+  if(typeof workArea!=='undefined' && workArea && typeof viewport!=='undefined' && viewport){ try{ var P0=applyM(viewport.transform,workArea.ux0,workArea.uy0),P1=applyM(viewport.transform,workArea.ux1,workArea.uy1); rx=Math.min(P0[0],P1[0]); ry=Math.min(P0[1],P1[1]); rw=Math.abs(P1[0]-P0[0]); rh=Math.abs(P1[1]-P0[1]); }catch(e){} }
+  var TILE=950, OV=0.12; var cols=Math.max(1,Math.round(rw/TILE)), rows=Math.max(1,Math.round(rh/TILE)); var nTiles=cols*rows;
+  out.innerHTML='<div class="hint"><span class="spin"></span> reading scale + sweeping '+nTiles+' tile'+(nTiles!==1?'s':'')+'\u2026</div>';
+  // 1) SCALE — one full-sheet call; scale needs no position so a whole-sheet read is reliable
+  var scaleMsg='';
   try{
-    var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},90000);
-    var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:4000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:img}},{type:'text',text:prompt}]}]})});
-    clearTimeout(to);
-    if(!resp.ok){ var et=await resp.text(); out.innerHTML='<div class="hint">HTTP '+resp.status+': '+vhEsc(et.slice(0,200))+'</div>'; return; }
-    var data=await resp.json(); if(data.error){ out.innerHTML='<div class="hint">AI error: '+vhEsc(String(data.error.message||'err').slice(0,160))+'</div>'; return; }
-    var raw=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
-    var res; try{ res=JSON.parse(raw); }catch(e){ window.__lastSweep=raw; out.innerHTML='<div class="hint">AI didn\u2019t return clean JSON \u2014 raw saved to window.__lastSweep.</div>'; return; }
-    var labels=(res.labels||[]).filter(function(L){ return L && L.text && _sweepDims(L.text) && L.x!=null && L.y!=null; });
-    // ---- apply the visually-read scale (only when scale is still on auto — don't clobber a manual set) ----
-    var scaleMsg='';
-    try{
-      if(typeof scaleAuto==='undefined' || scaleAuto){
-        var sv=(typeof res.scale_inches_per_foot==='number' && res.scale_inches_per_foot>0 && res.scale_inches_per_foot<=12)?res.scale_inches_per_foot:null;
-        if(sv){ scaleIPF=sv; try{updateScaleUI();}catch(e){} scaleMsg=' \u00b7 scale set to '+(typeof scaleLabel==='function'?scaleLabel(sv):sv)+'=1\u2032 from the print'; }
-        else if(res.scale_text){ try{ detectScaleFromText(String(res.scale_text)); scaleMsg=' \u00b7 scale read: '+vhEsc(String(res.scale_text)); }catch(e){} }
-      }
-    }catch(e){}
-    var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
-    var added=0, dup=0;
-    labels.forEach(function(L){
-      var px=L.x*pc.width, py=L.y*pc.height;          // normalized -> full-res pdfCanvas px
-      var nx=px/K, ny=py/K;                            // -> the same nx/ny frame runs + matcher use
-      var near=false;                                  // dedupe vs any size tag already within ~28px
-      for(var i=0;i<tags.length;i++){ var t=tags[i]; if(!_sweepDims(t.text)) continue; var tpx=(t.x!=null?t.x:(t.nx*K)), tpy=(t.y!=null?t.y:(t.ny*K)); if(Math.hypot(tpx-px,tpy-py)<28){ near=true; break; } }
+    var ssc=Math.min(1,2000/Math.max(pc.width,pc.height)); var sct=document.createElement('canvas'); sct.width=Math.round(pc.width*ssc); sct.height=Math.round(pc.height*ssc); sct.getContext('2d').drawImage(pc,0,0,sct.width,sct.height);
+    var sres=await ask(sct.toDataURL('image/jpeg',0.85).split(',')[1],'Find the DRAWING SCALE note on this HVAC sheet (e.g. "3/32\\"=1\'-0\\"","1/8\\"=1\'-0\\"","1/4\\"=1\'-0\\""). Answer ONLY JSON: {"scale_text":"3/32\\"=1\'-0\\"","scale_inches_per_foot":0.09375}. If none, {}.',300);
+    if(sres && (typeof scaleAuto==='undefined'||scaleAuto)){
+      var sv=(typeof sres.scale_inches_per_foot==='number'&&sres.scale_inches_per_foot>0&&sres.scale_inches_per_foot<=12)?sres.scale_inches_per_foot:null;
+      if(sv){ scaleIPF=sv; try{updateScaleUI();}catch(e){} scaleMsg=' \u00b7 scale '+(typeof scaleLabel==='function'?scaleLabel(sv):sv)+'=1\u2032'; }
+      else if(sres.scale_text){ try{ detectScaleFromText(String(sres.scale_text)); scaleMsg=' \u00b7 scale '+vhEsc(String(sres.scale_text)); }catch(e){} }
+    }
+  }catch(e){}
+  // 2) TILED label sweep — each label's position comes from the KNOWN tile origin, not the AI's whole-sheet guess
+  var stepX=rw/cols, stepY=rh/rows, padX=stepX*OV, padY=stepY*OV;
+  var tprompt='This is a small crop from an HVAC plan drawing. List EVERY duct SIZE label you can read in THIS image: rectangular like "20x16" (width x height in inches) or round like "12\\"\u00d8"/"12 DIA". Only report a size you can ACTUALLY READ printed in THIS crop \u2014 do NOT invent, guess, or infer. IGNORE diffuser/grille/equipment tags (e.g. CD1-320, EF1), CFM numbers, and notes, and do NOT read sizes from schedules, tables, legends, equipment lists, or the title block \u2014 only sizes printed on or beside a duct line in the plan view. For each, give its text and normalized center x,y in 0..1 of THIS crop (top-left origin). Answer ONLY JSON, no prose: {"labels":[{"text":"20x16","x":0.5,"y":0.5}]}. If none, {"labels":[]}.';
+  var added=0, dup=0, read=0, done=0, offduct=0; var DUCTNEAR=130;   // px: a real size label sits within ~this of a duct line
+  for(var rr=0; rr<rows; rr++){ for(var cc=0; cc<cols; cc++){
+    var x0=Math.max(0, rx+cc*stepX-padX), y0=Math.max(0, ry+rr*stepY-padY);
+    var w0=Math.min(pc.width-x0, stepX+2*padX), h0=Math.min(pc.height-y0, stepY+2*padY);
+    done++; try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> tile '+done+' / '+nTiles+'\u2026 ('+added+' sizes)'; }catch(e){}
+    var jr=await ask(cropB64(x0,y0,w0,h0), tprompt, 1200); if(!jr||!jr.labels) continue;
+    jr.labels.forEach(function(L){ if(!L||!L.text||!_sweepDims(L.text)||L.x==null||L.y==null) return; read++;
+      var px=x0 + L.x*w0, py=y0 + L.y*h0;   // tile-local -> full-sheet px
+      var md=1e9; for(var si=0; si<segments.length; si++){ var sg=segments[si]; if(sg.cls!=='duct') continue; var dd=pSegD(px,py,sg.x1,sg.y1,sg.x2,sg.y2); if(dd<md){ md=dd; if(md<DUCTNEAR) break; } }
+      if(md>DUCTNEAR){ offduct++; return; }   // not near any duct line -> hallucination or a schedule/legend size; drop it
+      var nx=px/K, ny=py/K, near=false;
+      for(var i=0;i<tags.length;i++){ var t=tags[i]; if(!_sweepDims(t.text)) continue; var tpx=(t.x!=null?t.x:(t.nx*K)), tpy=(t.y!=null?t.y:(t.ny*K)); if(Math.hypot(tpx-px,tpy-py)<24){ near=true; break; } }
       if(near){ dup++; return; }
       tags.push({x:px,y:py,nx:nx,ny:ny,text:String(L.text).replace(/\s+/g,''),_ai:true}); added++;
     });
     try{ drawOverlay(); }catch(e){}
-    out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Size sweep done.</b> '+added+' size tag(s) placed'+(dup?(', '+dup+' already present'):'')+' from '+labels.length+' read'+scaleMsg+'. Now hit <b>\u2795 Build takeoff</b>.</div>';
-  }catch(e){ out.innerHTML='<div class="hint">'+(e.name==='AbortError'?'Timed out \u2014 try a tighter work area / single sheet.':('Error: '+vhEsc(e.message||e)))+'</div>'; }
+  } }
+  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Tiled sweep done.</b> '+added+' size tag(s) placed'+(dup?(', '+dup+' deduped'):'')+(offduct?(', '+offduct+' off-duct dropped'):'')+' across '+nTiles+' tile'+(nTiles!==1?'s':'')+scaleMsg+'. Check the magenta dots sit on the ducts, then hit <b>\u2795 Build takeoff</b>.</div>';
 }
 window.aiSizeSweep=aiSizeSweep;
 function strongDuct(s){
