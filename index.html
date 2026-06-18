@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t26 · tiled sweep + duct-proximity guard</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t28 · geometry-located size read</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -297,6 +297,7 @@
         <button class="btn go" id="aiFullTakeoff" style="background:#2a1a3a;border-color:#6a3fb8;color:#dcccff;margin-top:6px">🤖 Run full AI takeoff (whole sheet)</button>
         <button class="btn go" id="aiSizeRuns" style="background:#1a2a3a;border-color:#3f8ab8;color:#cce6ff;margin-top:4px">🔎 AI read sizes per run → fix tags</button>
         <button class="btn go" id="aiSizeSweep" style="background:#1a3a2a;border-color:#3fb87a;color:#ccffe0;margin-top:4px">🧹 AI size sweep (whole sheet → tags)</button>
+        <button class="btn go" id="aiSizeGeo" style="background:#2a1a3a;border-color:#8a5fd0;color:#e6d8ff;margin-top:4px">🔢 Read sizes at detected text (geometry-located)</button>
         <button class="btn go" id="dimFind" style="background:#13351f;border-color:#2a6b40;color:#bdf5cf;margin-top:6px">📐 Find duct by dimension (tag-match)</button>
         <button class="btn go" id="buildRuns" style="background:#1f1430;border-color:#7a4fd0;color:#e6d8ff;margin-top:6px">📊 Preview runs (optional — Build takeoff does this for you)</button>
         <div class="row" style="margin-top:6px;display:flex;gap:6px">
@@ -1929,13 +1930,39 @@ function refreshSel(){
   function hexA(hex,a){ var h=(hex||'#15e06a').replace('#',''); if(h.length===3)h=h.split('').map(function(c){return c+c;}).join(''); var r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16); return 'rgba('+r+','+g+','+b+','+a+')'; }
   function vh(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
 
+  // Research-backed text-to-line association (from P&ID / floorplan digitization): assign each size tag
+  // to its SINGLE best run by perpendicular proximity + footprint overlap — the tag must project ONTO the
+  // run's span and sit within the duct body. One tag -> one run (no double-claiming), and a tag that lands
+  // on no run footprint (a stray/hallucinated read) is assigned to nothing and never reaches sizing.
+  function assignTagsToRuns(){
+    var sg=window.__sgRuns||[];
+    var geom=sg.map(function(r){ var c=r.corners; if(!c||c.length<4) return null;
+      var dx=c[1][0]-c[0][0], dy=c[1][1]-c[0][1], Lpt=Math.hypot(dx,dy)||1, ux=dx/Lpt, uy=dy/Lpt;
+      return {sx:(c[0][0]+c[3][0])/2, sy:(c[0][1]+c[3][1])/2, ux:ux, uy:uy, pnx:-uy, pny:ux, Lpt:Lpt, widthIn:r.widthIn}; });
+    var assign=new Array(tags.length).fill(-1);
+    for(var ti=0; ti<tags.length; ti++){ var tg=tags[ti]; if(!tg||tg.nx==null) continue; var pd=parseTagDims(tg.text); if(!pd) continue;
+      var best=-1, bestScore=1e9;
+      for(var gi=0; gi<geom.length; gi++){ var g=geom[gi]; if(!g) continue;
+        var along=(tg.nx-g.sx)*g.ux+(tg.ny-g.sy)*g.uy;
+        var perp=Math.abs((tg.nx-g.sx)*g.pnx+(tg.ny-g.sy)*g.pny);
+        if(along < -inToPt(12) || along > g.Lpt+inToPt(12)) continue;          // must project near the run's span (footprint)
+        if(perp > inToPt(Math.max(g.widthIn, pd.w)/2 + 24)) continue;          // must sit within the duct body (+margin)
+        var over=Math.max(0,-along)+Math.max(0, along-g.Lpt);                  // distance projected past the run ends
+        var score=ptToIn(perp) + ptToIn(over)*0.5;                            // proximity + footprint-overlap penalty
+        if(score<bestScore){ bestScore=score; best=gi; }
+      }
+      assign[ti]=best;
+    }
+    return assign;
+  }
   function runsFromPreview(){
     // One click: always (re)build the segment-graph runs from the freshest duct selection,
     // THEN build the takeoff. (Was a separate, easy-to-skip 'Build runs' step that went stale.)
     if(typeof buildSegmentRuns==='function'){ try{ buildSegmentRuns(); }catch(e){} }
     if(!window.__sgRuns || !window.__sgRuns.length){ setStatus('No runs to build yet — mark or scan your duct and set the scale first, then hit Build takeoff.'); return; }
+    var _tagAssign = assignTagsToRuns();
     window.__runs2d=[]; var ci=0;
-    window.__sgRuns.forEach(function(r){
+    window.__sgRuns.forEach(function(r, _sgi){
       var c=r.corners; if(!c||c.length<4) return;
       var dx=c[1][0]-c[0][0], dy=c[1][1]-c[0][1]; var Lpt=Math.hypot(dx,dy)||1; var ux=dx/Lpt, uy=dy/Lpt;
       var nx=c[3][0]-c[0][0], ny=c[3][1]-c[0][1]; var Wn=Math.hypot(nx,ny)||1; var pnx=nx/Wn, pny=ny/Wn;
@@ -1943,20 +1970,12 @@ function refreshSel(){
       var lenIn=ptToIn(Lpt);
       // ── SIZE EVENTS along the run (rule 1: read tags; first number = width on the print) ──
       var ev=[];
-      (r.tagIdx||[]).forEach(function(ti){ var tg=tags[ti]; if(!tg||tg.nx==null) return; var pd=parseTagDims(tg.text); if(!pd) return;
-        ev.push({alongIn:ptToIn((tg.nx-sx)*ux+(tg.ny-sy)*uy), tagNx:tg.nx, tagNy:tg.ny, w:pd.w, h:pd.h, round:pd.round, str:pd.round?('\u00d8'+pd.w):(pd.w+'\u00d7'+pd.h)});
-      });
-      // nearest-tag snap: claim ANY parseable size tag that sits on/near this run, even if the
-      // matcher didn't bind it — robust to AI/PDF coords being a few inches off the centerline.
-      tags.forEach(function(tg){ if(tg.nx==null) return; var pd=parseTagDims(tg.text); if(!pd) return;
-        var along=(tg.nx-sx)*ux+(tg.ny-sy)*uy, perp=Math.abs((tg.nx-sx)*pnx+(tg.ny-sy)*pny);
-        if(along<-inToPt(10) || along>Lpt+inToPt(10)) return;
-        if(perp > inToPt(Math.max(r.widthIn, pd.w)/2 + 24)) return;     // inside the duct body + margin
-        var str=pd.round?('\u00d8'+pd.w):(pd.w+'\u00d7'+pd.h);
-        var ai=ptToIn(along);
-        if(ev.some(function(e){ return Math.abs(e.alongIn-ai)<6 && e.str===str; })) return;
+      // one-to-one footprint association: use only the size tags ASSIGNED to this run (assignTagsToRuns)
+      for(var _ti=0; _ti<tags.length; _ti++){ if(_tagAssign[_ti]!==_sgi) continue; var tg=tags[_ti]; if(!tg||tg.nx==null) continue; var pd=parseTagDims(tg.text); if(!pd) continue;
+        var str=pd.round?('\u00d8'+pd.w):(pd.w+'\u00d7'+pd.h); var ai=ptToIn((tg.nx-sx)*ux+(tg.ny-sy)*uy);
+        if(ev.some(function(e){ return Math.abs(e.alongIn-ai)<6 && e.str===str; })) continue;
         ev.push({alongIn:ai, tagNx:tg.nx, tagNy:tg.ny, w:pd.w, h:pd.h, round:pd.round, str:str});
-      });
+      }
       // YOLO sizetag recovery: if the dimension-match linked nothing, read PDF text under a YOLO sizetag box sitting on this run
       if(!ev.length){
         (window.__yoloDets||[]).forEach(function(d){ if((d.cls||'').replace(/^(rect|round)-/,'')!=='sizetag'||d.nx==null) return;
@@ -2790,7 +2809,7 @@ function renderVisionSummary(p, meta){
   h+='<div class="hint" style="margin-top:6px">This is the AI\u2019s read of the whole sheet \u2014 eyeball it against the print. If the runs and sizes look right, the next step is turning these into placed, editable 3D pieces.</div>';
   return h;
 }
-(function(){ try{ var b=document.getElementById('aiFullTakeoff'); if(b) b.addEventListener('click', runFullAITakeoff); var s=document.getElementById('aiSizeRuns'); if(s) s.addEventListener('click', aiReadSizesPerRun); var z=document.getElementById('aiSizeSweep'); if(z) z.addEventListener('click', aiSizeSweep); }catch(e){} })();
+(function(){ try{ var b=document.getElementById('aiFullTakeoff'); if(b) b.addEventListener('click', runFullAITakeoff); var s=document.getElementById('aiSizeRuns'); if(s) s.addEventListener('click', aiReadSizesPerRun); var z=document.getElementById('aiSizeSweep'); if(z) z.addEventListener('click', aiSizeSweep); var zg=document.getElementById('aiSizeGeo'); if(zg) zg.addEventListener('click', aiReadSizesAtClusters); }catch(e){} })();
 // ---- Per-run size reader: crop each detected run, read ordered W×D + fittings, write back as size tags ----
 function groupDuctRuns(){
   var segs=(typeof segments!=='undefined'?segments:[]).filter(function(s){return s.cls==='duct';}); if(!segs.length) return [];
@@ -2905,6 +2924,56 @@ async function aiSizeSweep(){
   out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Tiled sweep done.</b> '+added+' size tag(s) placed'+(dup?(', '+dup+' deduped'):'')+(offduct?(', '+offduct+' off-duct dropped'):'')+' across '+nTiles+' tile'+(nTiles!==1?'s':'')+scaleMsg+'. Check the magenta dots sit on the ducts, then hit <b>\u2795 Build takeoff</b>.</div>';
 }
 window.aiSizeSweep=aiSizeSweep;
+
+// ---- Geometry-located size read: the line scan already captures the digit strokes of size labels.
+// Cluster those short strokes into label "spots", read a tight crop of each with the AI, and place the
+// size at the geometry-known cluster center. Position comes from geometry (reliable); the AI only READS.
+// A spot that isn't really a label reads as nothing and self-discards. (Detection-bounded OCR.) ----
+async function aiReadSizesAtClusters(){
+  var out=document.getElementById('aiOut'); if(!out)return;
+  var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,''); if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
+  var pc=document.getElementById('pdfCanvas'); if(!pc||!pc.width){ out.innerHTML='<div class="hint">Load a PDF page first.</div>'; return; }
+  if(typeof segments==='undefined' || !segments || !segments.length){ out.innerHTML='<div class="hint">Scan the print first so geometry can find the text.</div>'; return; }
+  var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
+  var inWA=function(cx,cy){ if(typeof workArea==='undefined'||!workArea||typeof viewport==='undefined'||!viewport) return true; try{ var P0=applyM(viewport.transform,workArea.ux0,workArea.uy0),P1=applyM(viewport.transform,workArea.ux1,workArea.uy1); var x0=Math.min(P0[0],P1[0]),y0=Math.min(P0[1],P1[1]),x1=Math.max(P0[0],P1[0]),y1=Math.max(P0[1],P1[1]); return cx>=x0&&cx<=x1&&cy>=y0&&cy<=y1; }catch(e){ return true; } };
+  // 1) cluster SHORT segments (digit strokes) into tight blobs = candidate text-label spots
+  var pts=[]; for(var i=0;i<segments.length;i++){ var s=segments[i]; if((s.len||0)>46) continue; var mx=(s.x1+s.x2)/2,my=(s.y1+s.y2)/2; if(!inWA(mx,my)) continue; pts.push({idx:i,mx:mx,my:my}); }
+  var R=18, taken=new Array(pts.length).fill(false), clusters=[];
+  for(var i=0;i<pts.length;i++){ if(taken[i])continue; var stack=[i]; taken[i]=true; var grp=[];
+    while(stack.length){ var k=stack.pop(); grp.push(pts[k]); for(var j=0;j<pts.length;j++){ if(!taken[j] && Math.abs(pts[j].mx-pts[k].mx)<R && Math.abs(pts[j].my-pts[k].my)<R){ taken[j]=true; stack.push(j); } } }
+    if(grp.length<5) continue;
+    var x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; grp.forEach(function(g){ var s=segments[g.idx]; x0=Math.min(x0,s.x1,s.x2); y0=Math.min(y0,s.y1,s.y2); x1=Math.max(x1,s.x1,s.x2); y1=Math.max(y1,s.y1,s.y2); });
+    var w=x1-x0,h=y1-y0; if(w<14||w>190||h<8||h>95) continue;   // label-sized box
+    clusters.push({bbox:[x0,y0,x1,y1], cx:(x0+x1)/2, cy:(y0+y1)/2, idxs:grp.map(function(g){return g.idx;})});
+  }
+  // 2) keep clusters that sit on/near a duct line (size labels live on ducts)
+  var duct=segments.filter(function(s){return s.cls==='duct';});
+  clusters=clusters.filter(function(c){ for(var i=0;i<duct.length;i++){ var s=duct[i]; if(Math.hypot(c.cx-(s.x1+s.x2)/2, c.cy-(s.y1+s.y2)/2)<200) return true; } return false; });
+  clusters=clusters.slice(0,60);
+  if(!clusters.length){ out.innerHTML='<div class="hint">No text-label spots found near duct. Detect duct (green) first, and check the work area covers the labels.</div>'; return; }
+  out.innerHTML='<div class="hint"><span class="spin"></span> reading '+clusters.length+' detected label spot(s)\u2026</div>';
+  var prompt='This is a tiny crop from an HVAC plan, with a red box around one feature. If that boxed feature is a duct SIZE label, read it: rectangular "20x16" (width x height, inches) or round "12\\"\u00d8". If it is NOT a duct size (a diffuser/equipment/grille tag like CD1-320 or EF1, a CFM value, a note, or unreadable), return null. Do NOT guess. Answer ONLY JSON: {"size":"20x16"} or {"size":null}.';
+  var added=0, done=0;
+  for(var ci=0; ci<clusters.length; ci++){ var c=clusters[ci]; done++;
+    try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> reading spot '+done+' / '+clusters.length+'\u2026 ('+added+' sizes)'; }catch(e){}
+    var b64; try{ b64=cropDataURL(c.bbox, c.idxs); }catch(e){ continue; }
+    var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},25000);
+    try{ var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:120,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:prompt}]}]})}); clearTimeout(to);
+      if(!resp.ok) continue; var data=await resp.json(); if(data.error) continue;
+      var raw=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
+      var res; try{ res=JSON.parse(raw); }catch(e){ continue; }
+      if(!res || !res.size || !_sweepDims(res.size)) continue;
+      var px=c.cx, py=c.cy, nx=px/K, ny=py/K, near=false;
+      for(var t=0;t<tags.length;t++){ var tg=tags[t]; if(!_sweepDims(tg.text)) continue; var tpx=(tg.x!=null?tg.x:(tg.nx*K)), tpy=(tg.y!=null?tg.y:(tg.ny*K)); if(Math.hypot(tpx-px,tpy-py)<22){ near=true; break; } }
+      if(near) continue;
+      tags.push({x:px,y:py,nx:nx,ny:ny,text:String(res.size).replace(/\s+/g,''),_ai:true}); added++;
+      try{ drawOverlay(); }catch(e){}
+    }catch(e){ clearTimeout(to); }
+  }
+  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Geometry-located read done.</b> '+added+' size(s) placed at detected label spots (of '+clusters.length+' candidates). Magenta dots sit where geometry found the text \u2014 now hit <b>\u2795 Build takeoff</b>.</div>';
+}
+window.aiReadSizesAtClusters=aiReadSizesAtClusters;
+
 function strongDuct(s){
   if(s._userMark && s.lock==='duct') return true;             // you said so
   if(!(s.paired && (s.ulen||0)>=40)) return false;            // only PAIRED parallel walls (a real run) qualify — single dark lines (text, leaders, dimensions) and short device boxes stay reviewable
