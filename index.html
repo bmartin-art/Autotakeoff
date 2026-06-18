@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t28 · geometry-located size read</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t29 · vertical labels + candidate boxes</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -1696,6 +1696,7 @@ function drawOverlay(){
     html+='<circle cx="'+_t.x.toFixed(1)+'" cy="'+_t.y.toFixed(1)+'" r="4" fill="'+_c+'" stroke="#000" stroke-width="0.7" pointer-events="none"/>'
         +'<text x="'+(_t.x+6).toFixed(1)+'" y="'+(_t.y-6).toFixed(1)+'" font-size="13" font-weight="700" fill="'+_c+'" stroke="#000" stroke-width="0.5" pointer-events="none">'+String(_t.text)+'</text>';
   } }catch(e){}
+  try{ var _gc=window.__geoClusters||[]; for(var _gi=0;_gi<_gc.length;_gi++){ var b=_gc[_gi]; html+='<rect x="'+b[0].toFixed(1)+'" y="'+b[1].toFixed(1)+'" width="'+(b[2]-b[0]).toFixed(1)+'" height="'+(b[3]-b[1]).toFixed(1)+'" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="4 3" pointer-events="none"/>'; } }catch(e){}
   g.innerHTML=html;
   if((document.getElementById('shadeBoxes')||{}).checked && viewport){ try{ shadeBoxesInto(g, viewport.transform); }catch(e){} }
 }
@@ -2937,40 +2938,41 @@ async function aiReadSizesAtClusters(){
   var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
   var inWA=function(cx,cy){ if(typeof workArea==='undefined'||!workArea||typeof viewport==='undefined'||!viewport) return true; try{ var P0=applyM(viewport.transform,workArea.ux0,workArea.uy0),P1=applyM(viewport.transform,workArea.ux1,workArea.uy1); var x0=Math.min(P0[0],P1[0]),y0=Math.min(P0[1],P1[1]),x1=Math.max(P0[0],P1[0]),y1=Math.max(P0[1],P1[1]); return cx>=x0&&cx<=x1&&cy>=y0&&cy<=y1; }catch(e){ return true; } };
   // 1) cluster SHORT segments (digit strokes) into tight blobs = candidate text-label spots
-  var pts=[]; for(var i=0;i<segments.length;i++){ var s=segments[i]; if((s.len||0)>46) continue; var mx=(s.x1+s.x2)/2,my=(s.y1+s.y2)/2; if(!inWA(mx,my)) continue; pts.push({idx:i,mx:mx,my:my}); }
+  var pts=[]; for(var i=0;i<segments.length;i++){ var s=segments[i]; if((s.len||0)>70) continue; var mx=(s.x1+s.x2)/2,my=(s.y1+s.y2)/2; if(!inWA(mx,my)) continue; pts.push({idx:i,mx:mx,my:my}); }
   var R=18, taken=new Array(pts.length).fill(false), clusters=[];
   for(var i=0;i<pts.length;i++){ if(taken[i])continue; var stack=[i]; taken[i]=true; var grp=[];
     while(stack.length){ var k=stack.pop(); grp.push(pts[k]); for(var j=0;j<pts.length;j++){ if(!taken[j] && Math.abs(pts[j].mx-pts[k].mx)<R && Math.abs(pts[j].my-pts[k].my)<R){ taken[j]=true; stack.push(j); } } }
-    if(grp.length<5) continue;
+    if(grp.length<4) continue;
     var x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; grp.forEach(function(g){ var s=segments[g.idx]; x0=Math.min(x0,s.x1,s.x2); y0=Math.min(y0,s.y1,s.y2); x1=Math.max(x1,s.x1,s.x2); y1=Math.max(y1,s.y1,s.y2); });
-    var w=x1-x0,h=y1-y0; if(w<14||w>190||h<8||h>95) continue;   // label-sized box
+    var w=x1-x0,h=y1-y0, _lo=Math.min(w,h), _hi=Math.max(w,h); if(_hi<14||_hi>220||_lo<5||_lo>95) continue;   // label-sized box, either orientation
     clusters.push({bbox:[x0,y0,x1,y1], cx:(x0+x1)/2, cy:(y0+y1)/2, idxs:grp.map(function(g){return g.idx;})});
   }
   // 2) keep clusters that sit on/near a duct line (size labels live on ducts)
   var duct=segments.filter(function(s){return s.cls==='duct';});
   clusters=clusters.filter(function(c){ for(var i=0;i<duct.length;i++){ var s=duct[i]; if(Math.hypot(c.cx-(s.x1+s.x2)/2, c.cy-(s.y1+s.y2)/2)<200) return true; } return false; });
   clusters=clusters.slice(0,60);
+  window.__geoClusters=clusters.map(function(c){return c.bbox;}); try{ drawOverlay(); }catch(e){}
   if(!clusters.length){ out.innerHTML='<div class="hint">No text-label spots found near duct. Detect duct (green) first, and check the work area covers the labels.</div>'; return; }
   out.innerHTML='<div class="hint"><span class="spin"></span> reading '+clusters.length+' detected label spot(s)\u2026</div>';
   var prompt='This is a tiny crop from an HVAC plan, with a red box around one feature. If that boxed feature is a duct SIZE label, read it: rectangular "20x16" (width x height, inches) or round "12\\"\u00d8". If it is NOT a duct size (a diffuser/equipment/grille tag like CD1-320 or EF1, a CFM value, a note, or unreadable), return null. Do NOT guess. Answer ONLY JSON: {"size":"20x16"} or {"size":null}.';
-  var added=0, done=0;
+  var added=0, done=0, empty=0, errs=0;
   for(var ci=0; ci<clusters.length; ci++){ var c=clusters[ci]; done++;
     try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> reading spot '+done+' / '+clusters.length+'\u2026 ('+added+' sizes)'; }catch(e){}
     var b64; try{ b64=cropDataURL(c.bbox, c.idxs); }catch(e){ continue; }
     var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},25000);
     try{ var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:120,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:prompt}]}]})}); clearTimeout(to);
-      if(!resp.ok) continue; var data=await resp.json(); if(data.error) continue;
+      if(!resp.ok){ errs++; continue; } var data=await resp.json(); if(data.error){ errs++; continue; }
       var raw=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
       var res; try{ res=JSON.parse(raw); }catch(e){ continue; }
-      if(!res || !res.size || !_sweepDims(res.size)) continue;
+      if(!res || !res.size || !_sweepDims(res.size)){ empty++; continue; }
       var px=c.cx, py=c.cy, nx=px/K, ny=py/K, near=false;
       for(var t=0;t<tags.length;t++){ var tg=tags[t]; if(!_sweepDims(tg.text)) continue; var tpx=(tg.x!=null?tg.x:(tg.nx*K)), tpy=(tg.y!=null?tg.y:(tg.ny*K)); if(Math.hypot(tpx-px,tpy-py)<22){ near=true; break; } }
       if(near) continue;
       tags.push({x:px,y:py,nx:nx,ny:ny,text:String(res.size).replace(/\s+/g,''),_ai:true}); added++;
       try{ drawOverlay(); }catch(e){}
-    }catch(e){ clearTimeout(to); }
+    }catch(e){ clearTimeout(to); errs++; }
   }
-  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Geometry-located read done.</b> '+added+' size(s) placed at detected label spots (of '+clusters.length+' candidates). Magenta dots sit where geometry found the text \u2014 now hit <b>\u2795 Build takeoff</b>.</div>';
+  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Geometry-located read done.</b> '+added+' size(s) placed of '+clusters.length+' candidate spot(s) ('+empty+' not a size, '+errs+' errors). Magenta dots sit where geometry found the text \u2014 now hit <b>\u2795 Build takeoff</b>.</div>';
 }
 window.aiReadSizesAtClusters=aiReadSizesAtClusters;
 
