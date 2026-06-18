@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t13 · wa-fix</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t20 · sizing diagnostic</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -297,12 +297,12 @@
         <button class="btn go" id="aiFullTakeoff" style="background:#2a1a3a;border-color:#6a3fb8;color:#dcccff;margin-top:6px">🤖 Run full AI takeoff (whole sheet)</button>
         <button class="btn go" id="aiSizeRuns" style="background:#1a2a3a;border-color:#3f8ab8;color:#cce6ff;margin-top:4px">🔎 AI read sizes per run → fix tags</button>
         <button class="btn go" id="dimFind" style="background:#13351f;border-color:#2a6b40;color:#bdf5cf;margin-top:6px">📐 Find duct by dimension (tag-match)</button>
-        <button class="btn go" id="buildRuns" style="background:#1f1430;border-color:#7a4fd0;color:#e6d8ff;margin-top:6px">📊 Build runs (segment graph)</button>
+        <button class="btn go" id="buildRuns" style="background:#1f1430;border-color:#7a4fd0;color:#e6d8ff;margin-top:6px">📊 Preview runs (optional — Build takeoff does this for you)</button>
         <div class="row" style="margin-top:6px;display:flex;gap:6px">
           <button class="btn go" id="itemsFromRunsBtn" style="flex:2;background:#0c2a1a;border-color:#2b9e5c;color:#bfffd2;font-weight:700">➕ Build takeoff (joints)</button>
           <button class="btn adv" id="itemsClearBtn" style="flex:1;background:#3a2030;border-color:#7a3b4b;color:#fbb">Clear</button>
         </div>
-        <div class="hint" style="margin-top:4px">Breaks each run into 5′ joint pieces (round = 10′). Click a joint to change its length (chain reflows), insert a reducer/tee/elbow (reducer resizes downstream), shift-click to multi-select, color/label runs. <b>Scan with YOLO first</b> and Build takeoff will auto-split runs at detected fittings and drop in transitions. Wheel = zoom to cursor.</div>
+        <div class="hint" style="margin-top:4px"><b>One click:</b> Build takeoff (re)builds the runs from your current duct selection and breaks each into 5′ joint pieces (round = 10′) — no need to hit Preview first. Click a joint to change its length (chain reflows), insert a reducer/tee/elbow (reducer resizes downstream), shift-click to multi-select, color/label runs. <b>Scan with YOLO first</b> and it will auto-split runs at detected fittings and drop in shape-correct fittings. Wheel = zoom to cursor.</div>
         <div class="row" style="margin-top:6px;display:flex;gap:6px;align-items:center">
           <button class="btn" id="yoloCleanBtn" style="flex:2;background:#1a2a0c;border-color:#7a9e2b;color:#e6ffbf">🧹 Clean with YOLO</button>
           <span style="font-size:11px;opacity:.7">reach</span>
@@ -1076,18 +1076,19 @@ function classify(){
       s.cls = __d2 ? 'duct' : 'not'; continue;
     }   // color and/or shade pickers: tapped colors/shades become duct
     if(s.lock){ s.cls=s.lock; continue; }
-    if(__ductRuns){ s.cls = (s.ductRun ? (__aiFirst?'maybe':'duct') : 'not'); continue; }   // precision geometry mode
+    if(__ductRuns){ var __dDiag=(s._u&&s._u.o==='D'&&s.paired); s.cls = ((s.ductRun||__dDiag) ? (__aiFirst?'maybe':'duct') : 'not'); continue; }   // precision geometry mode (+ paired diagonal runs the H/V detector can't see)
     if(matchSample && ductRef){ s.cls=(darkOf(s) >= __blkT)?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY color takeoff: every black line (slider controls the cutoff)
     if(__black){ s.cls=(darkOf(s) >= __blkT)?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY black mode: every black line (slider controls the cutoff)
     if(pickHeavy){ s.cls=((s.lw||0) >= __lwT)?(__aiFirst?'maybe':'duct'):'not'; continue; }   // HEAVY mode: thicker-than-cutoff lines are duct (line-weight slider controls it)
     if(s.labelBox){ s.cls='not'; continue; }   // dimension-text box border, not duct (auto mode only)
     if(s.curved && s.ulen<26){ s.cls='not'; continue; }  // round symbols (diffusers, registers, T/H sensors) are never duct
-    if(isStructural(s)){ s.cls='not'; continue; }        // sheet border / match lines are never duct
+    if(isStructural(s) && !s.paired && !s.blkRescue){ s.cls='not'; continue; }        // sheet border / match lines are never duct — but SPARE a wall that paired with a parallel partner (real duct, including diagonal runs)
     if(__heavy && (s.lw||0) < __lwT){ s.cls='not'; continue; }  // line-weight filter: light background lines are not duct
     if(__aiFirst){ s.cls='not'; continue; }               // AI-first: blank canvas; the AI review promotes the duct
     const onDuctLayer = __ductReliable && s.layer && layers[s.layer] && layers[s.layer].isDuct;
     if(onDuctLayer) s.cls = __aiFirst ? 'maybe' : 'duct';
     else if(s.paired && s.nearTag) s.cls = __aiFirst ? 'maybe' : 'duct';
+    else if(s._u && s._u.o==='D' && s.paired) s.cls = __aiFirst ? 'maybe' : 'duct';   // paired DIAGONAL walls = strong duct signal (lone diagonals were dropped as fold lines)
     else if(s.paired || s.nearTag) s.cls='maybe';
     else s.cls='not';
   }
@@ -1921,7 +1922,10 @@ function refreshSel(){
   function vh(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
 
   function runsFromPreview(){
-    if(!window.__sgRuns || !window.__sgRuns.length){ setStatus('Build runs first, then convert to a takeoff.'); return; }
+    // One click: always (re)build the segment-graph runs from the freshest duct selection,
+    // THEN build the takeoff. (Was a separate, easy-to-skip 'Build runs' step that went stale.)
+    if(typeof buildSegmentRuns==='function'){ try{ buildSegmentRuns(); }catch(e){} }
+    if(!window.__sgRuns || !window.__sgRuns.length){ setStatus('No runs to build yet — mark or scan your duct and set the scale first, then hit Build takeoff.'); return; }
     window.__runs2d=[]; var ci=0;
     window.__sgRuns.forEach(function(r){
       var c=r.corners; if(!c||c.length<4) return;
@@ -1929,41 +1933,97 @@ function refreshSel(){
       var nx=c[3][0]-c[0][0], ny=c[3][1]-c[0][1]; var Wn=Math.hypot(nx,ny)||1; var pnx=nx/Wn, pny=ny/Wn;
       var sx=(c[0][0]+c[3][0])/2, sy=(c[0][1]+c[3][1])/2;
       var lenIn=ptToIn(Lpt);
-      var sz=(r.sizes&&r.sizes.length)?r.sizes[0]:(r.widthIn+'"');
-      var depth=r.widthIn, m=/(\d+)\s*[x\u00d7]\s*(\d+)/.exec(sz); if(m){depth=+m[2];}
-      // round/spiral duct comes in 10' joints; rectangular in 5'. Detect round by a Ø in the size or a single-dim round tag.
-      var isRound = /\u00f8|dia|round|\bO\b/i.test(sz) || (!!(r.sizes&&r.sizes.some(function(x){return /\u00f8/.test(x);})));
-      var jointLen = isRound ? 120 : JOINT_DEFAULT;
-      var pieces=[], rem=lenIn;
-      while(rem>0.5){ var L=Math.min(jointLen,rem); pieces.push({kind:'straight',lenIn:Math.round(L*10)/10,widthIn:r.widthIn,depthIn:depth,size:sz,cid:(isRound?'spiral':'st'),camduct:(isRound?'Spiral':'Straight Duct'),round:isRound}); rem-=L; }
-      if(!pieces.length) pieces.push({kind:'straight',lenIn:Math.round(lenIn*10)/10,widthIn:r.widthIn,depthIn:depth,size:sz,cid:(isRound?'spiral':'st'),camduct:(isRound?'Spiral':'Straight Duct'),round:isRound});
-      window.__runs2d.push({id:uid(),axis:r.axis,start:[sx,sy],dir:[ux,uy],normal:[pnx,pny],widthIn:r.widthIn,color:palette[ci%palette.length],label:'',confirmed:!!r.confirmed,pieces:pieces,
+      // ── SIZE EVENTS along the run (rule 1: read tags; first number = width on the print) ──
+      var ev=[];
+      (r.tagIdx||[]).forEach(function(ti){ var tg=tags[ti]; if(!tg||tg.nx==null) return; var pd=parseTagDims(tg.text); if(!pd) return;
+        ev.push({alongIn:ptToIn((tg.nx-sx)*ux+(tg.ny-sy)*uy), tagNx:tg.nx, tagNy:tg.ny, w:pd.w, h:pd.h, round:pd.round, str:pd.round?('\u00d8'+pd.w):(pd.w+'\u00d7'+pd.h)});
+      });
+      // YOLO sizetag recovery: if the dimension-match linked nothing, read PDF text under a YOLO sizetag box sitting on this run
+      if(!ev.length){
+        (window.__yoloDets||[]).forEach(function(d){ if((d.cls||'').replace(/^(rect|round)-/,'')!=='sizetag'||d.nx==null) return;
+          var along=(d.nx-sx)*ux+(d.ny-sy)*uy, perp=Math.abs((d.nx-sx)*(-uy)+(d.ny-sy)*ux);
+          if(along<-inToPt(6)||along>Lpt+inToPt(6)||perp>inToPt(r.widthIn/2+18)) return;
+          var best=null, bd=inToPt(20);
+          for(var ti=0;ti<tags.length;ti++){ var tg=tags[ti]; if(tg.nx==null) continue; var pd=parseTagDims(tg.text); if(!pd) continue;
+            var dd=Math.hypot(tg.nx-d.nx, tg.ny-d.ny); if(dd<bd){ bd=dd; best=pd; } }
+          if(best) ev.push({alongIn:ptToIn(along), tagNx:d.nx, tagNy:d.ny, w:best.w, h:best.h, round:best.round, str:best.round?('\u00d8'+best.w):(best.w+'\u00d7'+best.h)});
+        });
+      }
+      ev.sort(function(a,b){return a.alongIn-b.alongIn;});
+      // #3 single-wall / mispaired run: if the tag width is much bigger than the geometric gap, a wall
+      // was missed. The size tag sits inside the duct body, so trust it for BOTH the width and the
+      // position — re-center the run on the tag so the duct lands where it really is.
+      if(ev.length && ev[0].w > r.widthIn*1.4 && ev[0].tagNx!=null){
+        var perp=(ev[0].tagNx-sx)*pnx+(ev[0].tagNy-sy)*pny;
+        sx+=pnx*perp; sy+=pny*perp;
+      }
+      var scaled=!ev.length;     // rule 2: no tag anywhere -> fall back to scaling off the print (wall gap)
+      function rnd(v){ return Math.round(v*10)/10; }
+      var pieces=[];
+      if(scaled){
+        var rem=lenIn; while(rem>0.5){ var L=Math.min(JOINT_DEFAULT,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:r.widthIn,depthIn:r.widthIn,size:r.widthIn+'"',cid:'st',camduct:'Straight Duct',round:false,_scaled:true}); rem-=L; }
+        if(!pieces.length) pieces.push({kind:'straight',lenIn:rnd(lenIn),widthIn:r.widthIn,depthIn:r.widthIn,size:r.widthIn+'"',cid:'st',camduct:'Straight Duct',round:false,_scaled:true});
+      } else {
+        // rule 3: a size holds until the next tag; build spans, drop a transition wherever it steps with no fitting
+        var spans=[], prev={start:0,size:ev[0]};
+        for(var k=1;k<ev.length;k++){ if(ev[k].str!==prev.size.str){ spans.push({a:prev.start,b:ev[k].alongIn,size:prev.size}); prev={start:ev[k].alongIn,size:ev[k]}; } }
+        spans.push({a:prev.start,b:lenIn,size:prev.size});
+        var prevRound=null;
+        spans.forEach(function(sp,si){
+          var s=sp.size, depth=s.round?s.w:s.h;
+          if(si>0){
+            var rc='tr', rn='Transition';
+            if(prevRound!==null && prevRound!==s.round){ rc='s2r'; rn='Sq to Round'; }   // round<->rect = square-to-round
+            else if(s.round){ rc='reducer'; rn='Reducer'; }                              // round->round = reducer
+            pieces.push({kind:'fitting',cid:rc,camduct:rn,round:s.round,lenIn:0,widthIn:s.w,depthIn:depth,size:s.str,_sizeStep:true});
+          }
+          var rem=Math.max(0,sp.b-sp.a), jl=s.round?120:JOINT_DEFAULT;
+          while(rem>0.5){ var L=Math.min(jl,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:s.w,depthIn:depth,size:s.str,cid:s.round?'spiral':'st',camduct:s.round?'Spiral':'Straight Duct',round:s.round}); rem-=L; }
+          prevRound=s.round;
+        });
+        if(!pieces.length){ var s0=ev[0]; pieces.push({kind:'straight',lenIn:rnd(lenIn),widthIn:s0.w,depthIn:s0.round?s0.w:s0.h,size:s0.str,cid:s0.round?'spiral':'st',camduct:s0.round?'Spiral':'Straight Duct',round:s0.round}); }
+      }
+      window.__runs2d.push({id:uid(),axis:r.axis,start:[sx,sy],dir:[ux,uy],normal:[pnx,pny],widthIn:(pieces[0]&&pieces[0].widthIn)||r.widthIn,color:palette[ci%palette.length],label:'',confirmed:!!r.confirmed,scaled:scaled,pieces:pieces,
         _startN:[c[0],c[3]], _Lpt:Lpt});
       ci++;
     });
+    try{ var _st=(window.__yoloDets||[]).filter(function(d){return /sizetag/.test(d.cls||'');}).length;
+      console.log('[takeoff sizing] '+window.__runs2d.length+' runs | '+_st+' YOLO sizetags | '+((typeof tags!=='undefined'&&tags)?tags.length:0)+' PDF text tags extracted');
+      window.__runs2d.forEach(function(r,i){ var p=r.pieces[0]||{}; console.log('  run#'+i+' '+r.axis+' gapW='+r.widthIn+'" scaled='+!!r.scaled+' size='+(p.size||'?')+' linkedTags='+((r.tagIdx&&r.tagIdx.length)||0)); });
+    }catch(e){ console.log('[takeoff sizing] diag error', e); }
+    var nOut = containYoloToGreen();
+    var nJoin = joinRunsAtElbows();
     var nFit = integrateYoloFittings();
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Created '+window.__runs2d.length+' runs as joint-chains'+(nFit?(' \u00b7 placed '+nFit+' YOLO fitting(s) (runs split, transitions inserted)'):'')+'. Click a joint to edit.');
+    setStatus('Created '+window.__runs2d.length+' runs'+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 joined '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+'. Click a joint to edit.');
   }
   window.__runsFromPreview=runsFromPreview;
 
   // ---- integrate YOLO detections: split runs at fittings, insert transitions/reducers ----
   function projOnRun(run, nx, ny){
-    // returns {along: inches from start along dir, perp: inches off centerline}
-    var sx=run.start[0], sy=run.start[1], ux=run.dir[0], uy=run.dir[1], px=run.normal[0], py=run.normal[1];
-    var dxp=nx-sx, dyp=ny-sy;
-    var alongPt=dxp*ux+dyp*uy, perpPt=dxp*px+dyp*py;
-    return {alongIn:ptToIn(alongPt), perpIn:ptToIn(perpPt), alongPt:alongPt};
+    // project (nx,ny) onto the run's chain polyline; returns arc-length along (in) + perp distance (in)
+    var fr=runFrames(run); var bestPerp=1e9, bestAlong=0, accIn=0;
+    for(var i=0;i<fr.length;i++){
+      var p=run.pieces[i]; if(p.kind==='fitting' && p.turn) continue;   // elbows are bend points, zero length
+      var f=fr[i]; var Lpt=inToPt(p.lenIn||0);
+      var dx=nx-f.x, dy=ny-f.y; var t=dx*f.ux+dy*f.uy; var tc=Math.max(0,Math.min(Lpt,t));
+      var perp=ptToIn(Math.hypot(nx-(f.x+f.ux*tc), ny-(f.y+f.uy*tc)));
+      if(perp<bestPerp){ bestPerp=perp; bestAlong=accIn+ptToIn(tc); }
+      accIn+=(p.lenIn||0);
+    }
+    return {alongIn:bestAlong, perpIn:bestPerp, alongPt:0};
   }
   function parseWH(sz){ var m=/(\d+)\s*[x\u00d7]\s*(\d+)/.exec(sz||''); if(m) return {w:+m[1],h:+m[2],round:false}; var r=/(\d+)\s*\u00f8/.exec(sz||''); if(r) return {w:+r[1],h:+r[1],round:true}; return null; }
   function integrateYoloFittings(){
     var dets=window.__yoloDets; if(!dets||!dets.length||!window.__runs2d.length) return 0;
     // only fittings that break/insert into runs (skip straight + sizetag — geometry/text own those)
     var FITMAP={ sizechange:'__size__', transition:'tr', reducer:'reducer', sq2round:'s2r', elbow:'e90', tap:'stap', tee:'sqt', offset:'reo', cap:'ec' };
-    var placed=0;
+    var placed=0, skipNoRun=0, skipNoPiece=0, fitDets=0;
     dets.forEach(function(d){
+      if(d._used) return;                                   // already consumed by the corner-join
       var base=(d.cls||'').replace(/^(rect|round)-/,'');   // merged or fine -> base
-      var target=FITMAP[base]; if(!target) return;          // not an insertable fitting
+      var target=FITMAP[base]; if(!target) return;          // not an insertable fitting (straight/sizetag own their own path)
+      fitDets++;
       if(d.nx==null) return;
       // find the nearest run whose centerline this detection sits on
       var best=null,bestPerp=1e9,bestRun=null;
@@ -1973,42 +2033,125 @@ function refreshSel(){
         var perp=Math.abs(pr.perpIn); if(perp> (run.widthIn/2 + 12)) return;  // must sit on the duct (within half-width + slack)
         if(perp<bestPerp){ bestPerp=perp; best=pr; bestRun=run; }
       });
-      if(!bestRun) return;
+      if(!bestRun){ skipNoRun++; return; }   // no run lay on this detection's centerline within reach (e.g. fitting at a corner where no run was built)
       // walk the chain to find which piece the 'along' position lands in, split there, insert the fitting
       var run=bestRun, posIn=Math.max(0,best.alongIn), acc=0, idx=-1, into=0;
       for(var i=0;i<run.pieces.length;i++){ var pl=run.pieces[i].lenIn; if(posIn<=acc+pl || i===run.pieces.length-1){ idx=i; into=posIn-acc; break; } acc+=pl; }
-      if(idx<0) return;
+      if(idx<0){ skipNoPiece++; return; }
       var piece=run.pieces[idx];
-      // resolve sizechange -> transition/reducer/sq2round by duct shape before/after (use run.isRound + size tags)
-      var cid=target, name;
+      // resolve coarse YOLO class -> the SHAPE-CORRECT CamDuct fitting, using the run's
+      // own known shape (piece.round, set from the size tag: Wx H = rect, Nø = round).
+      // YOLO says WHERE + WHAT-KIND; the run geometry says round-vs-rect. So this works
+      // on the merged model — no split model needed for correct fitting types.
+      var cid=target, name, isRound=!!piece.round;
       if(target==='__size__'){
-        // before size = this piece; after size = next size tag along the run if any (else same)
-        var beforeRound=!!piece.round;
-        // try to read an 'after' size from r.sizes order — approximate: if run has 2+ sizes, second is downstream
-        cid = beforeRound ? 'reducer' : 'tr';     // round->reducer, rect->transition (sq2round handled if shapes differ)
-        name = cid==='reducer'?'Reducer':'Transition';
+        // size change: round duct -> reducer, rect duct -> transition
+        cid  = isRound ? 'reducer' : 'tr';
+        name = isRound ? 'Reducer'  : 'Transition';
       } else {
-        var defn={tr:'Transition',reducer:'Reducer',s2r:'Sq to Round',e90:'90 Elbow',stap:'Straight Tap',sqt:'Sq Tee',reo:'Rect Offset',ec:'End Cap'};
-        name=defn[target]||target;
+        // [SHAPE-CORRECT FITTING TABLE] rect/square path keeps your existing cids unchanged;
+        // round path uses round items. EDIT the round cid/name strings to your exact CamDuct items.
+        var FIT={ e90:  {r:{cid:'e90r', name:'Round 90 Elbow'}, s:{cid:'e90', name:'Square 90 Elbow'}},
+                  stap: {r:{cid:'rtap', name:'Round Tap'},      s:{cid:'stap',name:'Straight Tap'}},
+                  sqt:  {r:{cid:'rtee', name:'Round Tee'},      s:{cid:'sqt', name:'Sq Tee'}},
+                  reo:  {r:{cid:'roff', name:'Round Offset'},   s:{cid:'reo', name:'Rect Offset'}},
+                  ec:   {r:{cid:'ecr',  name:'Round End Cap'},  s:{cid:'ec',  name:'End Cap'}} };
+        var f=FIT[target];
+        if(f){ var pick=isRound?f.r:f.s; cid=pick.cid; name=pick.name; }
+        else { name=target; }   // transition/reducer/s2r from a fine model fall through as-is
       }
-      var fitLenIn = (cid==='e90'||cid==='sqt'||cid==='ec'||cid==='reo')?0:(cid==='reducer'||cid==='tr'||cid==='s2r'?12:6);
+      var fitLenIn = (target==='e90'||target==='sqt'||target==='ec'||target==='reo')?0:(target==='__size__'?12:6);
       // split the straight piece at 'into'
       var newPieces=[];
       if(piece.kind==='straight' && into>2 && into<piece.lenIn-2){
         var a=Object.assign({},piece); a.lenIn=Math.round(into*10)/10;
         var b=Object.assign({},piece); b.lenIn=Math.round((piece.lenIn-into)*10)/10;
-        newPieces=[a,{kind:'fitting',cid:cid,camduct:name,lenIn:fitLenIn,widthIn:piece.widthIn,depthIn:piece.depthIn,fromYolo:true,score:d.score},b];
+        newPieces=[a,{kind:'fitting',cid:cid,camduct:name,round:isRound,lenIn:fitLenIn,widthIn:piece.widthIn,depthIn:piece.depthIn,fromYolo:true,score:d.score},b];
       } else {
-        newPieces=[{kind:'fitting',cid:cid,camduct:name,lenIn:fitLenIn,widthIn:piece.widthIn,depthIn:piece.depthIn,fromYolo:true,score:d.score}];
+        newPieces=[{kind:'fitting',cid:cid,camduct:name,round:isRound,lenIn:fitLenIn,widthIn:piece.widthIn,depthIn:piece.depthIn,fromYolo:true,score:d.score}];
       }
       run.pieces.splice.apply(run.pieces,[idx, (piece.kind==='straight'&&into>2&&into<piece.lenIn-2)?1:0].concat(newPieces));
       placed++;
     });
     // re-apply downstream sizing for any reducers we inserted
     window.__runs2d.forEach(function(r){ try{ applyReducerDownstream(r); }catch(e){} });
+    window.__yoloFitStats={insertable:fitDets, placed:placed, skipped_no_run_nearby:skipNoRun, skipped_no_piece:skipNoPiece};
+    console.log('[takeoff] YOLO fittings — insertable:'+fitDets+'  placed:'+placed+'  skipped(no run on centerline):'+skipNoRun+'  skipped(no piece):'+skipNoPiece);
     return placed;
   }
   window.__integrateYoloFittings=integrateYoloFittings;
+
+  // ---- AUTO-JOIN: two straight runs meeting at a detected elbow become ONE turning chain,
+  // with the elbow as the bend joint (mirrors how the 3D run mode chains direction). Consumes
+  // the elbow detection (d._used) so it isn't also dropped in as a loose marker. ----
+  function reverseRun(r){ var e=runEnd(r); r.start=[e.x,e.y]; r.dir=[-r.dir[0],-r.dir[1]]; r.normal=[-r.normal[0],-r.normal[1]]; r.pieces.reverse(); }
+  function joinRunsAtElbows(){
+    var dets=window.__yoloDets||[]; if(!dets.length || !(window.__runs2d||[]).length) return 0;
+    dets.forEach(function(x){ x._used=false; });   // fresh each build
+    function base(c){ return (c||'').replace(/^(rect|round)-/,''); }
+    var reach=inToPt(36);   // an endpoint must be within ~3' of the elbow detection to count as its corner
+    var joined=0;
+    dets.forEach(function(d){
+      if(d._used || base(d.cls)!=='elbow' || d.nx==null) return;
+      var hits=[];
+      (window.__runs2d||[]).forEach(function(r){
+        var e=runEnd(r);
+        var ds=Math.hypot(r.start[0]-d.nx, r.start[1]-d.ny), de=Math.hypot(e.x-d.nx, e.y-d.ny);
+        if(ds<=reach) hits.push({run:r, atStart:true,  dist:ds});
+        if(de<=reach) hits.push({run:r, atStart:false, dist:de});
+      });
+      if(hits.length<2) return;
+      hits.sort(function(a,b){return a.dist-b.dist;});
+      function leaveDir(h){ if(h.atStart) return [h.run.dir[0],h.run.dir[1]]; var e=runEnd(h.run); return [-e.ux,-e.uy]; }
+      var P=null,Q=null;
+      for(var i=0;i<hits.length&&!Q;i++) for(var j=i+1;j<hits.length;j++){
+        if(hits[i].run===hits[j].run) continue;
+        var a=leaveDir(hits[i]), b=leaveDir(hits[j]);
+        if(a[0]*b[0]+a[1]*b[1] > 0.94) continue;     // nearly same heading -> not a bend, skip
+        P=hits[i]; Q=hits[j]; break;
+      }
+      if(!P||!Q) return;
+      if(P.atStart) reverseRun(P.run);     // trunk must END at the corner
+      if(!Q.atStart) reverseRun(Q.run);    // branch must START at the corner
+      var trunk=P.run, branch=Q.run;
+      var te=runEnd(trunk); var tinto=[te.ux,te.uy], bout=[branch.dir[0],branch.dir[1]];
+      var turn=Math.atan2(tinto[0]*bout[1]-tinto[1]*bout[0], tinto[0]*bout[0]+tinto[1]*bout[1]);
+      var lastP=trunk.pieces[trunk.pieces.length-1]||{}, isR=!!lastP.round;
+      trunk.pieces.push({kind:'fitting', cid:isR?'e90r':'e90', camduct:isR?'Round 90 Elbow':'Square 90 Elbow', round:isR, turn:turn, lenIn:0, widthIn:lastP.widthIn||trunk.widthIn, fromYolo:true, score:d.score});
+      // rule 3 across the join: if the branch starts at a different size, the corner is also a size change -> drop a transition
+      var bFirst=null; for(var bi=0;bi<branch.pieces.length;bi++){ if(branch.pieces[bi].kind==='straight'){ bFirst=branch.pieces[bi]; break; } }
+      if(bFirst && lastP.size && bFirst.size && lastP.size!==bFirst.size){
+        var dr=(!!lastP.round)!==(!!bFirst.round), rc=dr?'s2r':(bFirst.round?'reducer':'tr'), rn=dr?'Sq to Round':(bFirst.round?'Reducer':'Transition');
+        trunk.pieces.push({kind:'fitting', cid:rc, camduct:rn, round:!!bFirst.round, lenIn:0, widthIn:bFirst.widthIn, depthIn:bFirst.depthIn, size:bFirst.size, _sizeStep:true});
+      }
+      branch.pieces.forEach(function(p){ trunk.pieces.push(Object.assign({},p)); });
+      window.__runs2d=window.__runs2d.filter(function(r){ return r!==branch; });
+      d._used=true; joined++;
+    });
+    return joined;
+  }
+  window.__joinRunsAtElbows=joinRunsAtElbows;
+
+  // ---- CONTAINMENT: green geometry is the boundary. A YOLO detection must sit inside a run's
+  // resolved footprint (centerline ± width, from tag or scale). Detections outside ALL green are
+  // dropped — UNLESS the model is very confident, in which case it's allowed through as duct the
+  // green missed (the rescue case). Size tags are exempt (they sit just off the duct body). ----
+  function containYoloToGreen(){
+    var dets=window.__yoloDets||[], runs=window.__runs2d||[]; if(!dets.length||!runs.length) return 0;
+    function base(c){ return (c||'').replace(/^(rect|round)-/,''); }
+    var HIGH=0.60;   // confidence to override geometry and keep an out-of-green detection
+    var n0=dets.length;
+    window.__yoloDets=dets.filter(function(d){
+      if(d.nx==null) return true;
+      if(base(d.cls)==='sizetag') return true;
+      var inside=false;
+      for(var i=0;i<runs.length;i++){ var L=runLenIn(runs[i]); var pr=projOnRun(runs[i],d.nx,d.ny);
+        if(pr.alongIn>=-6 && pr.alongIn<=L+6 && pr.perpIn<=runs[i].widthIn/2+12){ inside=true; break; } }
+      return inside || (d.score||0)>=HIGH;
+    });
+    return n0-window.__yoloDets.length;
+  }
+  window.__containYoloToGreen=containYoloToGreen;
 
   // ---- Clean with YOLO: flag/remove runs with no nearby YOLO support ----
   var cleanFlagged=[];   // run ids previewed for removal
@@ -2051,13 +2194,36 @@ function refreshSel(){
   (function(){ var b=document.getElementById('yoloCleanBtn'); if(b) b.onclick=cleanPreview;
     var rs=document.getElementById('cleanReach'); if(rs) rs.oninput=function(){ var v=document.getElementById('cleanReachV'); if(v)v.textContent=this.value+'"'; }; })();
 
+  // Walk the chain: each piece advances a cursor (pos + heading); a fitting carrying a
+  // signed `turn` (radians) rotates the heading so everything downstream reflows in the new
+  // direction — mirrors the 3D run-mode buildRunGeometry. No turn anywhere => identical to the
+  // old single-axis behavior, so straight runs are unchanged.
+  function runFrames(run){
+    var frames=[]; var x=run.start[0], y=run.start[1], ux=run.dir[0], uy=run.dir[1];
+    for(var i=0;i<run.pieces.length;i++){
+      var p=run.pieces[i];
+      frames.push({x:x,y:y,ux:ux,uy:uy,nx:-uy,ny:ux});     // left normal of the heading
+      if(p.kind==='fitting' && p.turn){                    // elbow: bend at a point, then continue turned
+        var a=p.turn, cu=Math.cos(a), su=Math.sin(a);
+        var rx=ux*cu-uy*su, ry=ux*su+uy*cu; ux=rx; uy=ry;
+      } else {
+        var L=inToPt(p.lenIn||0); x+=ux*L; y+=uy*L;
+      }
+    }
+    return frames;
+  }
+  function runEnd(run){ var fr=runFrames(run); var f=fr[fr.length-1]||{x:run.start[0],y:run.start[1],ux:run.dir[0],uy:run.dir[1]};
+    var p=run.pieces[run.pieces.length-1]; var L=(p&&!(p.kind==='fitting'&&p.turn))?inToPt(p.lenIn||0):0;
+    return {x:f.x+f.ux*L, y:f.y+f.uy*L, ux:f.ux, uy:f.uy}; }
   function piecePolyPts(run,i){
-    var off=0; for(var k=0;k<i;k++) off+=run.pieces[k].lenIn;
-    var p=run.pieces[i]; var a=inToPt(off), b=inToPt(off+(p.lenIn||0.1));
-    var hw=inToPt((p.widthIn||run.widthIn)/2);
-    var sx=run.start[0], sy=run.start[1], ux=run.dir[0], uy=run.dir[1], nx=run.normal[0], ny=run.normal[1];
-    function P(t,s){ return [sx+ux*t+nx*s, sy+uy*t+ny*s]; }
-    return [P(a,-hw),P(b,-hw),P(b,hw),P(a,hw)].map(function(q){ return n2s(q[0],q[1]); });
+    var fr=runFrames(run); var f=fr[i]; if(!f) return [null];
+    var p=run.pieces[i]; var hw=inToPt((p.widthIn||run.widthIn)/2);
+    function P(t,s){ return [f.x+f.ux*t+f.nx*s, f.y+f.uy*t+f.ny*s]; }
+    if(p.kind==='fitting' && p.turn){          // elbow footprint: a width-square at the corner
+      return [P(-hw,-hw),P(hw,-hw),P(hw,hw),P(-hw,hw)].map(function(q){return n2s(q[0],q[1]);});
+    }
+    var b=inToPt(p.lenIn||0.1);
+    return [P(0,-hw),P(b,-hw),P(b,hw),P(0,hw)].map(function(q){ return n2s(q[0],q[1]); });
   }
   function runLenIn(run){ return run.pieces.reduce(function(a,b){return a+(b.lenIn||0);},0); }
 
@@ -2087,10 +2253,19 @@ function refreshSel(){
           if(e.shiftKey){ if(sel.has(key))sel.delete(key); else sel.add(key); } else { sel.clear(); sel.add(key); }
           selRun=run.id; renderItems(); renderPanel(); },true);
         lay.appendChild(poly);
-        var t=document.createElementNS(ns,'text'); t.setAttribute('x',(pts[0][0]+pts[2][0])/2); t.setAttribute('y',(pts[0][1]+pts[2][1])/2);
+        var cxm=(pts[0][0]+pts[2][0])/2, cym=(pts[0][1]+pts[2][1])/2;
+        if(p.kind!=='straight'){
+          // visible fitting marker — FIXED screen size, so zero-length fittings (elbow/tee/cap/offset) always show at the corner
+          var R=8, mk=document.createElementNS(ns,'path');
+          mk.setAttribute('d','M'+cxm+' '+(cym-R)+'L'+(cxm+R)+' '+cym+'L'+cxm+' '+(cym+R)+'L'+(cxm-R)+' '+cym+'Z');
+          mk.setAttribute('fill','#f59e0b'); mk.setAttribute('stroke','#7a3d00'); mk.setAttribute('stroke-width',on?'2.5':'1.5'); mk.style.cursor='pointer';
+          mk.addEventListener('mousedown',function(e){ e.stopPropagation(); if(e.shiftKey){ if(sel.has(key))sel.delete(key); else sel.add(key);} else { sel.clear(); sel.add(key);} selRun=run.id; renderItems(); renderPanel(); },true);
+          lay.appendChild(mk);
+        }
+        var t=document.createElementNS(ns,'text'); t.setAttribute('x',cxm); t.setAttribute('y',p.kind==='straight'?cym:(cym-12));
         t.setAttribute('text-anchor','middle'); t.setAttribute('font-size','9'); t.setAttribute('font-weight','700');
-        t.setAttribute('fill','#063'); t.setAttribute('stroke','#eafff1'); t.setAttribute('stroke-width','2'); t.setAttribute('paint-order','stroke');
-        t.textContent=(p.kind==='straight'?fmtFt(p.lenIn):(p.cid||'fit')); lay.appendChild(t);
+        t.setAttribute('fill',p.kind==='straight'?'#063':'#7a3d00'); t.setAttribute('stroke','#eafff1'); t.setAttribute('stroke-width','2'); t.setAttribute('paint-order','stroke');
+        t.textContent=(p.kind==='straight'?fmtFt(p.lenIn):(p.camduct||p.cid||'fit')); lay.appendChild(t);
       });
       if(run.label){ var s0=n2s(run.start[0],run.start[1]); if(s0){ var lt=document.createElementNS(ns,'text'); lt.setAttribute('x',s0[0]); lt.setAttribute('y',s0[1]-6); lt.setAttribute('font-size','12'); lt.setAttribute('font-weight','800'); lt.setAttribute('fill',run.color); lt.setAttribute('stroke','#0a0f16'); lt.setAttribute('stroke-width','3'); lt.setAttribute('paint-order','stroke'); lt.textContent=run.label; lay.appendChild(lt); } }
     });
@@ -2103,7 +2278,7 @@ function refreshSel(){
   function renderPanel(){
     var p=document.getElementById('itemPanelBody'); if(!p) return;
     var runs=window.__runs2d||[];
-    if(!runs.length){ p.innerHTML='<div class="hint">No takeoff yet. Detect duct, 📊 Build runs, then ➕ Build takeoff.</div>'; return; }
+    if(!runs.length){ p.innerHTML='<div class="hint">No takeoff yet. Detect duct, then hit ➕ Build takeoff (it builds the runs for you).</div>'; return; }
     var totLF=0,totJ=0; runs.forEach(function(r){ r.pieces.forEach(function(pc){ if(pc.kind==='straight'){ totLF+=pc.lenIn/12; totJ++; } }); });
     var h='<div class="hint" style="margin-bottom:6px;color:#bfe6ff"><b>'+runs.length+'</b> runs \u00b7 <b>'+totJ+'</b> joints \u00b7 <b>'+Math.round(totLF)+' LF</b></div>';
     // multi-select action bar
@@ -2123,7 +2298,7 @@ function refreshSel(){
             +'<span style="flex:0 0 18px;font-size:10px;opacity:.6">'+(i+1)+'</span>';
           if(pc.kind==='straight'){
             h+='<input type="number" step="0.5" value="'+pc.lenIn+'" onchange="__pcLen(\''+run.id+'\','+i+',this.value)" style="width:54px;padding:3px;border:1px solid #345;border-radius:4px;background:#0b1420;color:#fff"><span style="font-size:10px;opacity:.6">in</span>'
-              +'<span style="flex:1;font-size:11px">'+vh(pc.size)+'</span>';
+              +'<span style="flex:1;font-size:11px;color:'+(pc._scaled?'#f5b342':'#bfe6ff')+'" title="'+(pc._scaled?'scaled from the print \u2014 no size tag found':'read from a size tag')+'">'+vh(pc.size)+(pc._scaled?' ~':'')+'</span>';
           } else {
             h+='<span style="flex:1;font-size:11px;color:#f5b342">\u25c8 '+vh(pc.camduct||pc.cid)+(pc.outW?(' \u2192'+pc.outW+(pc.cid==='s2r'?'\u00f8':'x'+(pc.outD||pc.outW))):'')+'</span>';
           }
@@ -2384,6 +2559,26 @@ function refreshSel(){
           nx:nC[0], ny:nC[1], nx0:n0[0], ny0:n0[1], nx1:n1[0], ny1:n1[1] });
       });
       window.__yoloDets=dets;
+      // CROSS-CHECK (safe, single-frame): a 'sizechange' box that sits on a 'sizetag' box is
+      // a misread tag, not a real size change — drop it. Compares detections to each other in
+      // the SAME nvt frame, so there's no coordinate-frame risk. (The fuller text-extraction
+      // cross-check against OCR'd tag positions needs a one-time live frame calibration first.)
+      var nXC=(function(){
+        var D=window.__yoloDets; function base(c){return (c||'').replace(/^(rect|round)-/,'');}
+        var tg=D.filter(function(d){return base(d.cls)==='sizetag'&&d.nx0!=null;});
+        if(!tg.length) return 0;
+        function cen(d){return [(d.nx0+d.nx1)/2,(d.ny0+d.ny1)/2];}
+        var n0=D.length;
+        window.__yoloDets=D.filter(function(d){
+          if(base(d.cls)!=='sizechange'||d.nx0==null) return true;
+          var x0=Math.min(d.nx0,d.nx1),x1=Math.max(d.nx0,d.nx1),y0=Math.min(d.ny0,d.ny1),y1=Math.max(d.ny0,d.ny1);
+          var px=(x1-x0)*0.5, py=(y1-y0)*0.5;   // pad: a tag may be drawn just beside the symbol
+          for(var i=0;i<tg.length;i++){var c=cen(tg[i]); if(c[0]>=x0-px&&c[0]<=x1+px&&c[1]>=y0-py&&c[1]<=y1+py) return false;}
+          return true;
+        });
+        return n0-window.__yoloDets.length;
+      })();
+      if(nXC) console.log('[takeoff] cross-check dropped '+nXC+' false sizechange (sat on a size tag)');
       renderYolo();
       var summary=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a];}).map(function(k){return counts[k]+' '+k;}).join(', ');
       // per-index breakdown — exposes any class-order mismatch (index N -> name)
@@ -2392,7 +2587,7 @@ function refreshSel(){
       console.log('[takeoff t13] class index breakdown:', idxStr, '| total classes in model output =', (use16?16:8));
       $('yoloOut').innerHTML='<div class="hint" style="color:#bfe0ff"><b>'+kept.length+' fittings</b> on full sheet ('+(use16?'16':'8')+'-class, '+total+' tiles)<br>'+(summary||'none')+'<br><span style="opacity:.6;font-size:10px">'+idxStr+'</span></div>';
       setY('✓ '+kept.length+' on sheet');
-      setStatus('Full-sheet scan done — '+kept.length+' fittings detected. Stored for the run-builder.');
+      setStatus('Full-sheet scan done — '+kept.length+' fittings detected'+(nXC?(' · cross-check removed '+nXC+' false sizechange on size tags'):'')+'. Stored for the run-builder.');
     }catch(err){ setY('scan failed'); setStatus('Scan failed: '+((err&&err.message)||err)); console.error(err); $('yoloOut').innerHTML='<div class="hint" style="color:#f99">'+String((err&&err.message)||err).slice(0,300)+'</div>'; }
   });
 })();
