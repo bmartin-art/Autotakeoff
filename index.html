@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t39 · zoom settles on latest scale (no stale repaint)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t41 · AI tags in nvt frame (link to runs -> WxH)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2881,6 +2881,25 @@ function groupDuctRuns(){
   var runs=cluster(V,true).concat(cluster(H,false)).filter(function(r){return r.span>=70;});   // skip short noise
   runs.sort(function(a,b){ return b.span-a.span; }); return runs;
 }
+// Pull a placed dim onto the LOCAL duct centerline near (px,py): find the nearest duct wall on each
+// side (same orientation as the run) whose along-extent covers the point, and return their midpoint
+// (= the duct centerline there). Falls back to the single nearest wall. null if nothing is close.
+function snapToDuct(px,py,vertical){
+  var pc=vertical?px:py, lo=null, hi=null, best=null, bestd=1e9, MAXW=150, MARG=22;
+  for(var i=0;i<segments.length;i++){ var s=segments[i]; if(s.cls!=='duct') continue;
+    var sdx=Math.abs(s.x2-s.x1), sdy=Math.abs(s.y2-s.y1); if((sdy>=sdx)!==vertical) continue;
+    var cross, a0, a1;
+    if(vertical){ cross=(s.x1+s.x2)/2; a0=Math.min(s.y1,s.y2); a1=Math.max(s.y1,s.y2); if(py<a0-MARG||py>a1+MARG) continue; }
+    else { cross=(s.y1+s.y2)/2; a0=Math.min(s.x1,s.x2); a1=Math.max(s.x1,s.x2); if(px<a0-MARG||px>a1+MARG) continue; }
+    var d=Math.abs(cross-pc); if(d>MAXW) continue;
+    if(cross<=pc){ if(lo==null||Math.abs(pc-cross)<Math.abs(pc-lo)) lo=cross; }
+    else { if(hi==null||Math.abs(cross-pc)<Math.abs(hi-pc)) hi=cross; }
+    if(d<bestd){ bestd=d; best=cross; }
+  }
+  if(lo!=null&&hi!=null&&(hi-lo)<=MAXW) return (lo+hi)/2;   // straddling walls -> centerline
+  if(best!=null) return best;                              // single nearby wall
+  return null;
+}
 // hi-res tile crop of a run between along-coords a0..a1 (px) at native resolution, so labels stay legible
 // hi-DPI crop: RE-RENDER the run region straight from the PDF (crisp vector glyphs), not upscale the
 // low-res canvas. Falls back to a canvas crop if the PDF re-render isn't available.
@@ -2944,8 +2963,12 @@ async function aiReadSizesPerRun(){
     found.sort(function(p,q){return p.along-q.along;});
     var merged=[]; found.forEach(function(f){ var last=merged[merged.length-1]; if(last && last.size===f.size) return; merged.push(f); });   // a straight run is ONE size; only a real change down the run starts a new tag
     if(!merged.length){ report.push('run '+(i+1)+': no sizes read'); continue; }
-    tags=tags.filter(function(t){ if(!_sweepDims(String(t.text||''))) return true; var px=(t.nx!=null?t.nx*K:t.x), py=(t.ny!=null?t.ny*K:t.y); var cc=r.vertical?px:py, aa=r.vertical?py:px; if(Math.abs(cc-r.c)<=30 && aa>=lo-20 && aa<=hi+20){ fixed++; return false; } return true; });   // drop stale size tags on this run only
-    merged.forEach(function(m){ var px=r.vertical?r.c:m.along, py=r.vertical?m.along:r.c; var u=(typeof invVP==='function')?invVP(px,py):null; var tag={x:px,y:py,nx:px/K,ny:py/K,text:m.size}; if(u){ tag.ux=u[0]; tag.uy=u[1]; } tags.push(tag); added++; });   // ux/uy anchor the tag to the PDF so it tracks zoom
+    tags=tags.filter(function(t){ if(!_sweepDims(String(t.text||''))) return true; var px=(t.x!=null?t.x:0), py=(t.y!=null?t.y:0); var cc=r.vertical?px:py, aa=r.vertical?py:px; if(Math.abs(cc-r.c)<=30 && aa>=lo-20 && aa<=hi+20){ fixed++; return false; } return true; });   // drop stale size tags on this run only (screen px)
+    merged.forEach(function(m){ var px=r.vertical?r.c:m.along, py=r.vertical?m.along:r.c;
+      var sc=snapToDuct(px,py,r.vertical); if(sc!=null){ if(r.vertical) px=sc; else py=sc; }   // pull onto the local duct centerline
+      var u=(typeof invVP==='function')?invVP(px,py):null;
+      var nn=(u&&window.__nvt&&typeof applyM==='function')?applyM(window.__nvt,u[0],u[1]):[px/K,py/K];   // nvt frame = the frame runs+assignment use
+      var tag={x:px,y:py,nx:nn[0],ny:nn[1],text:m.size}; if(u){ tag.ux=u[0]; tag.uy=u[1]; } tags.push(tag); added++; });   // ux/uy anchor to PDF for zoom; nx/ny in nvt frame so tags link to runs
     report.push('run '+(i+1)+': '+merged.map(function(m){return m.size;}).join(' \u2192 '));
   }
   // GLOBAL dedup: a label read by two overlapping tiles, or grabbed by two adjacent runs, lands as
