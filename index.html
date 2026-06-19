@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t41 · AI tags in nvt frame (link to runs -> WxH)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t42 · place dims at AI-reported label position</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2918,14 +2918,14 @@ async function cropRunTileB64(r, a0, a1){
       var o=document.createElement('canvas'); o.width=Math.max(8,Math.round(w*f)); o.height=Math.max(8,Math.round(h*f));
       var ctx=o.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,o.width,o.height);
       await withPageRender(function(){ return page.render({canvasContext:ctx, viewport:vp, transform:[1,0,0,1,-x*f,-y*f], optionalContentConfigPromise:(typeof ocConfig!=='undefined'&&ocConfig)?Promise.resolve(ocConfig):undefined}).promise; });
-      return o.toDataURL('image/png').split(',')[1];
+      return {b64:o.toDataURL('image/png').split(',')[1], x:x, y:y, w:w, h:h};
     }
   }catch(e){}
   // fallback: upscale the rendered canvas (less sharp, but better than nothing)
   var S=Math.min(2,1450/Math.max(w,h,1));
   var o2=document.createElement('canvas'); o2.width=Math.max(8,Math.round(w*S)); o2.height=Math.max(8,Math.round(h*S));
   var c2=o2.getContext('2d'); c2.fillStyle='#fff'; c2.fillRect(0,0,o2.width,o2.height); c2.drawImage(cv,x,y,w,h,0,0,o2.width,o2.height);
-  return o2.toDataURL('image/png').split(',')[1];
+  return {b64:o2.toDataURL('image/png').split(',')[1], x:x, y:y, w:w, h:h};
 }
 async function aiReadSizesPerRun(){
   var out=document.getElementById('aiOut'); if(!out)return;
@@ -2943,33 +2943,40 @@ async function aiReadSizesPerRun(){
     while(a < hi-8 && tilesDone<MAXTILES && guard<24){ guard++;
       var a1=Math.min(hi, a+TILELEN);
       try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> run '+(i+1)+'/'+runs.length+' \u00b7 tile '+(tilesDone+1)+'\u2026 ('+added+' sizes)'; }catch(e){}
-      var b64=null; try{ b64=await cropRunTileB64(r,a,a1); }catch(e){}
+      var crop=null; try{ crop=await cropRunTileB64(r,a,a1); }catch(e){}
+      var b64=crop&&crop.b64;
       if(b64){ tilesDone++;
-        var prompt='This is a HIGH-RES crop of part of ONE '+(r.vertical?'vertical':'horizontal')+' duct from an HVAC plan. Read ONLY the duct SIZE label(s) actually PRINTED on the duct in THIS crop, in order '+ord+'. RECTANGULAR duct is WIDTHxHEIGHT in inches like "20x8". ROUND duct is a single diameter marked with \u00f8 or DIA, like "12\\"\u00f8" or "14 DIA" \u2014 report those as "\u00f814". Do NOT invent sizes and do NOT repeat a size to fill space \u2014 if you cannot clearly read a printed size in this crop, return an empty list. Ignore diffuser/equipment/grille tags (CD1-320, EF1) and CFM values. Answer ONLY JSON, no prose: {"sizes":["20x8"]} or {"sizes":[]}.';
+        var prompt='This is a HIGH-RES crop of part of ONE '+(r.vertical?'vertical':'horizontal')+' duct from an HVAC plan. Read ONLY the duct SIZE label(s) actually PRINTED on the duct in THIS crop. RECTANGULAR duct is WIDTHxHEIGHT in inches like "20x8". ROUND duct is a single diameter marked with \u00f8 or DIA, like "12\\"\u00f8" or "14 DIA" \u2014 report those as "\u00f814". For EACH size give its CENTER position in THIS image as fractions cx (0=left .. 1=right) and cy (0=top .. 1=bottom). Do NOT invent sizes and do NOT repeat a size to fill space \u2014 if you cannot clearly read a printed size, return an empty list. Ignore diffuser/equipment/grille tags (CD1-320, EF1) and CFM values. Answer ONLY JSON, no prose: {"sizes":[{"size":"20x8","cx":0.5,"cy":0.3}]} or {"sizes":[]}.';
         try{
           var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},25000);
-          var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:200,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:prompt}]}]})});
+          var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:300,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:prompt}]}]})});
           clearTimeout(to);
           if(resp.ok){ var data=await resp.json(); if(!data.error){
             var txt=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
             var res=null; try{res=JSON.parse(txt);}catch(e){}
-            var sizes=((res&&res.sizes)||[]).filter(function(s){ s=String(s); return /\d+\s*[xX\u00d7]\s*\d+/.test(s) || /\u00f8|\u00d8|dia/i.test(s); }).map(function(s){ s=String(s).trim(); var m=/(\d+)\s*[xX\u00d7]\s*(\d+)/.exec(s); if(m) return m[1]+'\u00d7'+m[2]; var d=/(\d+)/.exec(s); return d?('\u00f8'+d[1]):s; });
-            var n=sizes.length; for(var k=0;k<n;k++){ var ap=a+((k+0.5)/n)*(a1-a); found.push({along:ap,size:sizes[k]}); }
+            ((res&&res.sizes)||[]).forEach(function(it){
+              var sraw=(it&&it.size!=null)?it.size:it; var s=String(sraw);
+              if(!(/\d+\s*[xX\u00d7]\s*\d+/.test(s) || /\u00f8|\u00d8|dia/i.test(s))) return;
+              var mm=/(\d+)\s*[xX\u00d7]\s*(\d+)/.exec(s); var size=mm?(mm[1]+'\u00d7'+mm[2]):(function(){var d=/(\d+)/.exec(s);return d?('\u00f8'+d[1]):s;})();
+              var cx=(it&&typeof it.cx==='number')?Math.max(0,Math.min(1,it.cx)):0.5;
+              var cy=(it&&typeof it.cy==='number')?Math.max(0,Math.min(1,it.cy)):0.5;
+              found.push({px:crop.x+cx*crop.w, py:crop.y+cy*crop.h, size:size});   // map the label's position back to sheet px
+            });
           }}
         }catch(e){}
       }
       if(a1>=hi) break; a=a1-OVER;
     }
-    found.sort(function(p,q){return p.along-q.along;});
-    var merged=[]; found.forEach(function(f){ var last=merged[merged.length-1]; if(last && last.size===f.size) return; merged.push(f); });   // a straight run is ONE size; only a real change down the run starts a new tag
+    // dedup within the run: the same size read by two overlapping tiles lands at ~the same spot -> keep one
+    var merged=[]; found.forEach(function(f){ if(merged.some(function(e){ return e.size===f.size && Math.hypot(e.px-f.px,e.py-f.py)<70; })) return; merged.push(f); });
     if(!merged.length){ report.push('run '+(i+1)+': no sizes read'); continue; }
     tags=tags.filter(function(t){ if(!_sweepDims(String(t.text||''))) return true; var px=(t.x!=null?t.x:0), py=(t.y!=null?t.y:0); var cc=r.vertical?px:py, aa=r.vertical?py:px; if(Math.abs(cc-r.c)<=30 && aa>=lo-20 && aa<=hi+20){ fixed++; return false; } return true; });   // drop stale size tags on this run only (screen px)
-    merged.forEach(function(m){ var px=r.vertical?r.c:m.along, py=r.vertical?m.along:r.c;
-      var sc=snapToDuct(px,py,r.vertical); if(sc!=null){ if(r.vertical) px=sc; else py=sc; }   // pull onto the local duct centerline
+    merged.forEach(function(m){ var px=m.px, py=m.py;
+      var sc=snapToDuct(px,py,r.vertical); if(sc!=null){ if(r.vertical) px=sc; else py=sc; }   // pull onto local duct centerline (perp only; along = where the label actually is)
       var u=(typeof invVP==='function')?invVP(px,py):null;
       var nn=(u&&window.__nvt&&typeof applyM==='function')?applyM(window.__nvt,u[0],u[1]):[px/K,py/K];   // nvt frame = the frame runs+assignment use
       var tag={x:px,y:py,nx:nn[0],ny:nn[1],text:m.size}; if(u){ tag.ux=u[0]; tag.uy=u[1]; } tags.push(tag); added++; });   // ux/uy anchor to PDF for zoom; nx/ny in nvt frame so tags link to runs
-    report.push('run '+(i+1)+': '+merged.map(function(m){return m.size;}).join(' \u2192 '));
+    report.push('run '+(i+1)+': '+merged.map(function(m){return m.size;}).join(', '));
   }
   // GLOBAL dedup: a label read by two overlapping tiles, or grabbed by two adjacent runs, lands as
   // duplicate same-text tags on top of each other -> keep one.
