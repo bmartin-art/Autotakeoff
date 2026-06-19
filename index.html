@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t37 · single-wall rescue (tag+scale finds/synths partner)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t39 · zoom settles on latest scale (no stale repaint)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -611,19 +611,26 @@ let _painting=false, _pendingPaint=false;
 // to two canvases at once. Region renders (YOLO crop, size-read crops) share this lock with the main repaint.
 var __renderBusy=false;
 async function withPageRender(fn){ while(__renderBusy){ await new Promise(function(r){setTimeout(r,12);}); } __renderBusy=true; try{ return await fn(); } finally{ __renderBusy=false; } }
+var _paintReq=0, _paintDone=0;
 async function repaintCanvas(){
   if(!pdfDoc||!viewport) return;
-  if(_painting){ _pendingPaint=true; return; }
+  _paintReq++;                       // mark this as the latest request
+  if(_painting) return;              // a paint loop is already running; it will pick up the latest request
   _painting=true;
   try{
-    const page=await pdfDoc.getPage(pageNum);
-    if(ocConfig){ for(const id in layers){ try{ ocConfig.setVisibility(id, layers[id].visible); }catch(_){} } }
-    const cv=$('pdfCanvas'); const ctx=cv.getContext('2d');
-    await withPageRender(function(){ return page.render({canvasContext:ctx, viewport, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
-    drawOverlay();
-  }catch(e){}
+    while(_paintDone < _paintReq){   // keep painting until the canvas matches the newest request
+      var target=_paintReq;
+      const page=await pdfDoc.getPage(pageNum);
+      if(ocConfig){ for(const id in layers){ try{ ocConfig.setVisibility(id, layers[id].visible); }catch(_){} } }
+      const cv=$('pdfCanvas'); var vpNow=viewport;     // snapshot the viewport this render targets
+      cv.width=Math.ceil(vpNow.width); cv.height=Math.ceil(vpNow.height);   // canvas size must match the render
+      const ctx=cv.getContext('2d');
+      await withPageRender(function(){ return page.render({canvasContext:ctx, viewport:vpNow, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
+      drawOverlay();
+      _paintDone=target;             // if more requests arrived during this render, the loop repaints again
+    }
+  }catch(e){ _paintDone=_paintReq; }
   _painting=false;
-  if(_pendingPaint){ _pendingPaint=false; repaintCanvas(); }
 }
 async function rescaleView(){
   if(!pdfDoc) return;
@@ -1397,7 +1404,7 @@ function buildSegmentRuns(){
     var myTags=[];
     for(var ti2=0; ti2<tags.length; ti2++){ var tg2=tags[ti2]; if(tg2.nx==null) continue; var pd2=parseTagDims(tg2.text); if(!pd2) continue;
       var ax2=W0.ux*tg2.nx+W0.uy*tg2.ny; if(ax2<W0.t0-PADAX||ax2>W0.t1+PADAX) continue;
-      var of2=W0.nxn*tg2.nx+W0.nyn*tg2.ny-W0.c; if(Math.abs(of2)>inToPt(MAXW)) continue;   // tag within a duct-width
+      var of2=W0.nxn*tg2.nx+W0.nyn*tg2.ny-W0.c; if(Math.abs(of2)>inToPt(pd2.w)+inToPt(3)) continue;   // tag must sit within ~one duct-width of THIS wall
       myTags.push({ti:ti2,ta:ax2,dims:pd2,side:of2>=0?1:-1});
     }
     if(!myTags.length) continue;
@@ -2880,7 +2887,7 @@ function groupDuctRuns(){
 async function cropRunTileB64(r, a0, a1){
   var cv=document.getElementById('pdfCanvas');
   var crossExt=r.vertical?(r.bbox[2]-r.bbox[0]):(r.bbox[3]-r.bbox[1]);
-  var cp=Math.min(180,Math.max(80,crossExt*0.9)), ap=48, x,y,w,h;
+  var cp=Math.min(105,Math.max(48,crossExt*0.65)), ap=46, x,y,w,h;
   if(r.vertical){ x=Math.max(0,r.bbox[0]-cp); w=Math.min(cv.width-x,(r.bbox[2]-r.bbox[0])+cp*2); y=Math.max(0,a0-ap); h=Math.min(cv.height-y,(a1-a0)+ap*2); }
   else { y=Math.max(0,r.bbox[1]-cp); h=Math.min(cv.height-y,(r.bbox[3]-r.bbox[1])+cp*2); x=Math.max(0,a0-ap); w=Math.min(cv.width-x,(a1-a0)+ap*2); }
   var f=Math.max(1, Math.min(8, 1450/Math.max(w,h,1)));   // render the region up to ~1450px on the long edge
@@ -2935,12 +2942,15 @@ async function aiReadSizesPerRun(){
       if(a1>=hi) break; a=a1-OVER;
     }
     found.sort(function(p,q){return p.along-q.along;});
-    var merged=[]; found.forEach(function(f){ var last=merged[merged.length-1]; if(last && last.size===f.size && Math.abs(f.along-last.along)<OVER*1.6) return; merged.push(f); });
+    var merged=[]; found.forEach(function(f){ var last=merged[merged.length-1]; if(last && last.size===f.size) return; merged.push(f); });   // a straight run is ONE size; only a real change down the run starts a new tag
     if(!merged.length){ report.push('run '+(i+1)+': no sizes read'); continue; }
     tags=tags.filter(function(t){ if(!_sweepDims(String(t.text||''))) return true; var px=(t.nx!=null?t.nx*K:t.x), py=(t.ny!=null?t.ny*K:t.y); var cc=r.vertical?px:py, aa=r.vertical?py:px; if(Math.abs(cc-r.c)<=30 && aa>=lo-20 && aa<=hi+20){ fixed++; return false; } return true; });   // drop stale size tags on this run only
     merged.forEach(function(m){ var px=r.vertical?r.c:m.along, py=r.vertical?m.along:r.c; var u=(typeof invVP==='function')?invVP(px,py):null; var tag={x:px,y:py,nx:px/K,ny:py/K,text:m.size}; if(u){ tag.ux=u[0]; tag.uy=u[1]; } tags.push(tag); added++; });   // ux/uy anchor the tag to the PDF so it tracks zoom
     report.push('run '+(i+1)+': '+merged.map(function(m){return m.size;}).join(' \u2192 '));
   }
+  // GLOBAL dedup: a label read by two overlapping tiles, or grabbed by two adjacent runs, lands as
+  // duplicate same-text tags on top of each other -> keep one.
+  (function(){ var R2=42*42; for(var i=tags.length-1;i>=0;i--){ var ti=tags[i]; if(!_sweepDims(String(ti.text||''))) continue; for(var j=0;j<i;j++){ var tj=tags[j]; if(String(tj.text||'')!==String(ti.text||'')||!_sweepDims(String(tj.text||''))) continue; var dx=(ti.x||0)-(tj.x||0), dy=(ti.y||0)-(tj.y||0); if(dx*dx+dy*dy<R2){ tags.splice(i,1); break; } } } })();
   try{ drawOverlay(); }catch(e){}
   var h='<div class="hint" style="color:#cce6ff"><b>Sizes read (hi-res tiles).</b> '+added+' size tags written, '+fixed+' replaced \u00b7 '+tilesDone+' tiles across '+runs.length+' run'+(runs.length!==1?'s':'')+'. Now hit <b>\u2795 Build takeoff</b>.</div>';
   h+='<div style="font-size:11px;color:#9fb4c8;font-family:ui-monospace,monospace;margin-top:4px">'+report.map(function(x){return vhEsc(x);}).join('<br>')+'</div>';
