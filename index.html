@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t35 · work-area-only hi-DPI YOLO</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t37 · single-wall rescue (tag+scale finds/synths partner)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -607,6 +607,10 @@ async function renderPage(){
   if(!ductRef){ pickMode=true; try{ document.getElementById('overlay').style.cursor='crosshair'; }catch(e){} }
 }
 let _painting=false, _pendingPaint=false;
+// All page.render() calls must serialize — PDF.js corrupts (mirrors/garbles) if the same page renders
+// to two canvases at once. Region renders (YOLO crop, size-read crops) share this lock with the main repaint.
+var __renderBusy=false;
+async function withPageRender(fn){ while(__renderBusy){ await new Promise(function(r){setTimeout(r,12);}); } __renderBusy=true; try{ return await fn(); } finally{ __renderBusy=false; } }
 async function repaintCanvas(){
   if(!pdfDoc||!viewport) return;
   if(_painting){ _pendingPaint=true; return; }
@@ -615,7 +619,7 @@ async function repaintCanvas(){
     const page=await pdfDoc.getPage(pageNum);
     if(ocConfig){ for(const id in layers){ try{ ocConfig.setVisibility(id, layers[id].visible); }catch(_){} } }
     const cv=$('pdfCanvas'); const ctx=cv.getContext('2d');
-    await page.render({canvasContext:ctx, viewport, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise;
+    await withPageRender(function(){ return page.render({canvasContext:ctx, viewport, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
     drawOverlay();
   }catch(e){}
   _painting=false;
@@ -1383,6 +1387,46 @@ function buildSegmentRuns(){
       tagIdx:P.inside.map(function(o){return o.ti;}),
       sizes:P.inside.map(function(o){return o.dims.round?('\u00d8'+o.dims.w):(o.dims.w+'\u00d7'+o.dims.h);}) });
   });
+  // 3.5) SINGLE-WALL RESCUE: an unclaimed wall with a size tag on it -> the tag's WIDTH (first number =
+  // screen-facing side) gives the true span. Convert to px via the scale, look for a real parallel line
+  // at that distance on the tag's side; pair it if found, else SYNTHESIZE the opposite wall at that width.
+  var SWTOL=Math.max(3, inToPt(5));   // partner-distance tolerance (~5")
+  var swCount=0, swSynth=0;
+  for(var wi=0; wi<walls.length; wi++){
+    if(used[wi]) continue; var W0=walls[wi]; if(W0.len < inToPt(10)) continue;
+    var myTags=[];
+    for(var ti2=0; ti2<tags.length; ti2++){ var tg2=tags[ti2]; if(tg2.nx==null) continue; var pd2=parseTagDims(tg2.text); if(!pd2) continue;
+      var ax2=W0.ux*tg2.nx+W0.uy*tg2.ny; if(ax2<W0.t0-PADAX||ax2>W0.t1+PADAX) continue;
+      var of2=W0.nxn*tg2.nx+W0.nyn*tg2.ny-W0.c; if(Math.abs(of2)>inToPt(MAXW)) continue;   // tag within a duct-width
+      myTags.push({ti:ti2,ta:ax2,dims:pd2,side:of2>=0?1:-1});
+    }
+    if(!myTags.length) continue;
+    var pd0=myTags[0].dims; var wIn=pd0.w; var gapW=inToPt(wIn); if(!(gapW>0)) continue;   // first number = screen-facing span
+    var side=myTags[0].side||1;
+    // (1) look for a REAL parallel line at ~gapW on the tag side
+    var partner=-1, bestd=1e9;
+    for(var wj=0; wj<walls.length; wj++){ if(wj===wi||used[wj]) continue; var Wj=walls[wj];
+      if(adiff(W0.th,Wj.th)>PAIRANG) continue;
+      var off=W0.nxn*Wj.mid[0]+W0.nyn*Wj.mid[1]-W0.c; if(off*side<=0) continue;            // must be on the tag side
+      if(Math.abs(Math.abs(off)-gapW)>SWTOL) continue;                                       // at the tag-specified width
+      var pb0=W0.ux*Wj.A[0]+W0.uy*Wj.A[1], pb1=W0.ux*Wj.B[0]+W0.uy*Wj.B[1]; if(pb0>pb1){var t=pb0;pb0=pb1;pb1=t;}
+      var ov2=Math.min(W0.t1,pb1)-Math.max(W0.t0,pb0); if(ov2<inToPt(6)) continue;
+      var sc=Math.abs(Math.abs(off)-gapW); if(sc<bestd){ bestd=sc; partner=wj; }
+    }
+    var off1=W0.c, off2, t0r=W0.t0, t1r=W0.t1, synth=false;
+    if(partner>=0){ var PW=walls[partner]; off2=W0.nxn*PW.mid[0]+W0.nyn*PW.mid[1];
+      var qb0=W0.ux*PW.A[0]+W0.uy*PW.A[1], qb1=W0.ux*PW.B[0]+W0.uy*PW.B[1];
+      t0r=Math.min(t0r,Math.min(qb0,qb1)); t1r=Math.max(t1r,Math.max(qb0,qb1)); used[partner]=1;
+    } else { off2=W0.c+side*gapW; synth=true; swSynth++; }
+    used[wi]=1; swCount++;
+    var thn2=W0.th, ax3=(thn2<0.35||thn2>Math.PI-0.35)?'horizontal':(Math.abs(thn2-Math.PI/2)<0.35?'vertical':'diagonal');
+    function pt2(o,t){ return [o*W0.nxn+t*W0.ux, o*W0.nyn+t*W0.uy]; }
+    runs.push({axis:ax3, widthIn:Math.round(wIn), lenP:(t1r-t0r),
+      corners:[pt2(off1,t0r),pt2(off1,t1r),pt2(off2,t1r),pt2(off2,t0r)],
+      confirmed:true, synthetic:synth, singleWall:true,
+      tagIdx:myTags.map(function(o){return o.ti;}),
+      sizes:myTags.map(function(o){return o.dims.round?('\u00d8'+o.dims.w):(o.dims.w+'\u00d7'+o.dims.h);}) });
+  }
   runs.sort(function(p,q){ if(!!q.confirmed!==!!p.confirmed) return (q.confirmed?1:0)-(p.confirmed?1:0); return q.lenP-p.lenP; });
   if(runs.length>400) runs=runs.slice(0,400);
   window.__sgRuns=runs;
@@ -1390,11 +1434,11 @@ function buildSegmentRuns(){
   function fmtLen(p){ var ti=p/k6, ft=Math.floor(ti/12), inn=Math.round(ti-ft*12); if(inn>=12){ft++;inn-=12;} return ft<=0?(inn+'\u2033'):(ft+'\u2032'+inn+'\u2033'); }
   if(!runs.length){ out.innerHTML='<div class="hint">No runs passed. This merges duct walls, then keeps a pair only if a size tag matches the wall gap or the pair is clearly elongated \u2014 so the squarish pockets between ducts drop out'+(squares?' ('+squares+' suppressed)':'')+'. If real duct is missing, mark it first, or untick \u201ctag matches the width\u201d.</div>'; setStatus('Build runs: 0 runs'+(squares?', '+squares+' pockets suppressed.':'.')); return; }
   var totTags=0, conf=0; runs.forEach(function(r){ totTags+=r.tagIdx.length; if(r.confirmed) conf++; });
-  var h='<div class="hint" style="margin-bottom:8px;color:#e6d8ff;border:1px solid #5a3fa0;background:rgba(90,63,160,.12);padding:8px;border-radius:7px"><b>Segment graph:</b> merged '+cand.length+' duct fragment'+(cand.length===1?'':'s')+' \u2192 '+walls.length+' wall'+(walls.length===1?'':'s')+' \u2192 <b>'+runs.length+' run'+(runs.length===1?'':'s')+'</b> ('+conf+' size-matched). '+totTags+' size tag'+(totTags===1?'':'s')+' linked'+(squares?', '+squares+' squarish pocket'+(squares===1?'':'s')+' between ducts suppressed':'')+'.<br>Read-only preview \u2014 nothing locked, nothing sent. Hover a run to circle it on the sheet.</div>';
+  var h='<div class="hint" style="margin-bottom:8px;color:#e6d8ff;border:1px solid #5a3fa0;background:rgba(90,63,160,.12);padding:8px;border-radius:7px"><b>Segment graph:</b> merged '+cand.length+' duct fragment'+(cand.length===1?'':'s')+' \u2192 '+walls.length+' wall'+(walls.length===1?'':'s')+' \u2192 <b>'+runs.length+' run'+(runs.length===1?'':'s')+'</b> ('+conf+' size-matched). '+totTags+' size tag'+(totTags===1?'':'s')+' linked'+(squares?', '+squares+' squarish pocket'+(squares===1?'':'s')+' between ducts suppressed':'')+(swCount?', '+swCount+' single-wall run'+(swCount===1?'':'s')+' rescued'+(swSynth?' ('+swSynth+' synthesized at tag width)':''):'')+'.<br>Read-only preview \u2014 nothing locked, nothing sent. Hover a run to circle it on the sheet.</div>';
   runs.forEach(function(r,ri){
     var sizeStr=r.sizes.length? r.sizes.join(' \u2192 ') : '\u2014 none';
     h+='<div class="aicard" onmouseenter="aiCircleRun('+ri+')" onmouseleave="(function(){var e=document.getElementById(\'aihl\');if(e)e.remove();})()">'
-      +'<div class="h">'+(r.confirmed?'\u2713 ':'')+r.axis+' run \u00b7 '+r.widthIn+'\u2033 wide \u00b7 '+fmtLen(r.lenP)+' long</div>'
+      +'<div class="h">'+(r.confirmed?'\u2713 ':'')+(r.singleWall?(r.synthetic?'\u26a0 1-wall ':'\u2192| 1-wall '):'')+r.axis+' run \u00b7 '+r.widthIn+'\u2033 wide \u00b7 '+fmtLen(r.lenP)+' long</div>'
       +'<div class="r">'+(r.confirmed?'':'<span style="color:#caa45a">no tag matches this width \u00b7 </span>')+'sizes inside: '+vhEsc(sizeStr)+'</div></div>';
   });
   out.innerHTML=h;
@@ -2543,12 +2587,12 @@ function refreshSel(){
         waOX=Math.floor(WX0); waOY=Math.floor(WY0);
         rc.width=Math.max(8,Math.ceil(WX1-WX0)); rc.height=Math.max(8,Math.ceil(WY1-WY0));
         var rxw=rc.getContext('2d',{willReadFrequently:true}); rxw.fillStyle='#fff'; rxw.fillRect(0,0,rc.width,rc.height);
-        await page.render({canvasContext:rxw, viewport:rvp, transform:[1,0,0,1,-waOX,-waOY], optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise;
+        await withPageRender(function(){ return page.render({canvasContext:rxw, viewport:rvp, transform:[1,0,0,1,-waOX,-waOY], optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
         console.log('[takeoff] work-area-only render', rc.width+'x'+rc.height,'at rScale',rScale.toFixed(2));
       } else {
         rc.width=Math.ceil(rvp.width); rc.height=Math.ceil(rvp.height);
         var rxf=rc.getContext('2d',{willReadFrequently:true}); rxf.fillStyle='#fff'; rxf.fillRect(0,0,rc.width,rc.height);
-        await page.render({canvasContext:rxf, viewport:rvp, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise;
+        await withPageRender(function(){ return page.render({canvasContext:rxf, viewport:rvp, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
       }
       var W=rc.width, H=rc.height;
       var TILE=1024, OV=200, stepT=TILE-OV;
@@ -2847,7 +2891,7 @@ async function cropRunTileB64(r, a0, a1){
       var vp=page.getViewport({scale:HS});
       var o=document.createElement('canvas'); o.width=Math.max(8,Math.round(w*f)); o.height=Math.max(8,Math.round(h*f));
       var ctx=o.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,o.width,o.height);
-      await page.render({canvasContext:ctx, viewport:vp, transform:[1,0,0,1,-x*f,-y*f], optionalContentConfigPromise:(typeof ocConfig!=='undefined'&&ocConfig)?Promise.resolve(ocConfig):undefined}).promise;
+      await withPageRender(function(){ return page.render({canvasContext:ctx, viewport:vp, transform:[1,0,0,1,-x*f,-y*f], optionalContentConfigPromise:(typeof ocConfig!=='undefined'&&ocConfig)?Promise.resolve(ocConfig):undefined}).promise; });
       return o.toDataURL('image/png').split(',')[1];
     }
   }catch(e){}
