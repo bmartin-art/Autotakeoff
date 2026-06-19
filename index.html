@@ -127,7 +127,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t46 · loosen label clustering + locate funnel diag</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t47 · full-sheet OCR finds + reads sizes (no API)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -300,6 +300,7 @@
         <button class="btn go" id="aiSizeSweep" style="background:#1a3a2a;border-color:#3fb87a;color:#ccffe0;margin-top:4px">🧹 AI size sweep (whole sheet → tags)</button>
         <button class="btn go" id="aiSizeGeo" style="background:#2a1a3a;border-color:#8a5fd0;color:#e6d8ff;margin-top:4px">🔢 Read sizes at detected text (geometry-located)</button>
         <button class="btn go" id="aiSizeYolo" style="background:#3a2a1a;border-color:#b8853f;color:#ffe6cc;margin-top:4px">🎯 Read sizes at YOLO sizetag boxes</button>
+        <button class="btn go" id="ocrSheet" style="background:#1a3a3a;border-color:#3fb8b8;color:#ccffff;margin-top:4px">🔤 OCR sheet for sizes (no API, finds + reads)</button>
         <label style="display:block;font-size:11px;color:#9fb4c8;margin-top:4px"><input type="checkbox" id="ocrOff"> AI-only (skip in-browser OCR)</label>
         <button class="btn go" id="dimFind" style="background:#13351f;border-color:#2a6b40;color:#bdf5cf;margin-top:6px">📐 Find duct by dimension (tag-match)</button>
         <button class="btn go" id="buildRuns" style="background:#1f1430;border-color:#7a4fd0;color:#e6d8ff;margin-top:6px">📊 Preview runs (optional — Build takeoff does this for you)</button>
@@ -2869,7 +2870,7 @@ function renderVisionSummary(p, meta){
   h+='<div class="hint" style="margin-top:6px">This is the AI\u2019s read of the whole sheet \u2014 eyeball it against the print. If the runs and sizes look right, the next step is turning these into placed, editable 3D pieces.</div>';
   return h;
 }
-(function(){ try{ var b=document.getElementById('aiFullTakeoff'); if(b) b.addEventListener('click', runFullAITakeoff); var s=document.getElementById('aiSizeRuns'); if(s) s.addEventListener('click', aiReadSizesPerRun); var z=document.getElementById('aiSizeSweep'); if(z) z.addEventListener('click', aiSizeSweep); var zg=document.getElementById('aiSizeGeo'); if(zg) zg.addEventListener('click', aiReadSizesAtClusters); var zy=document.getElementById('aiSizeYolo'); if(zy) zy.addEventListener('click', aiReadSizesFromYolo); }catch(e){} })();
+(function(){ try{ var b=document.getElementById('aiFullTakeoff'); if(b) b.addEventListener('click', runFullAITakeoff); var s=document.getElementById('aiSizeRuns'); if(s) s.addEventListener('click', aiReadSizesPerRun); var z=document.getElementById('aiSizeSweep'); if(z) z.addEventListener('click', aiSizeSweep); var zg=document.getElementById('aiSizeGeo'); if(zg) zg.addEventListener('click', aiReadSizesAtClusters); var zy=document.getElementById('aiSizeYolo'); if(zy) zy.addEventListener('click', aiReadSizesFromYolo); var zo=document.getElementById('ocrSheet'); if(zo) zo.addEventListener('click', ocrSheetForSizes); }catch(e){} })();
 // ---- Per-run size reader: crop each detected run, read ordered W×D + fittings, write back as size tags ----
 function groupDuctRuns(){
   var segs=(typeof segments!=='undefined'?segments:[]).filter(function(s){return s.cls==='duct';}); if(!segs.length) return [];
@@ -3094,6 +3095,61 @@ async function ocrSize(b64){
     if(/[\u00f8\u00d8]/.test(raw)||/dia/i.test(raw)){ var dm=/(\d{1,3})/.exec(t); if(dm){ var dv=+dm[1]; if(dv>=3&&dv<=120) return '\u00f8'+dv; } }
     return null;
   }catch(e){ return null; }
+}
+// ---- Full-sheet OCR size finder: the size labels on many prints are font glyphs (not selectable text
+// and not path strokes), so geometry can't see them. But they ARE on the rendered canvas. OCR the sheet
+// in hi-DPI tiles; Tesseract returns each WORD and its bounding box, so it both LOCATES and READS every
+// label regardless of how the PDF encoded it (works on scans too). Place the dim at the word's box.
+async function renderTileForOCR(tx0,ty0,tx1,ty1,f){
+  var page=await pdfDoc.getPage(pageNum);
+  var HS=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))*f;
+  var vp=page.getViewport({scale:HS});
+  var w=tx1-tx0,h=ty1-ty0;
+  var o=document.createElement('canvas'); o.width=Math.max(8,Math.round(w*f)); o.height=Math.max(8,Math.round(h*f));
+  var ctx=o.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,o.width,o.height);
+  await withPageRender(function(){ return page.render({canvasContext:ctx, viewport:vp, transform:[1,0,0,1,-tx0*f,-ty0*f], optionalContentConfigPromise:(typeof ocConfig!=='undefined'&&ocConfig)?Promise.resolve(ocConfig):undefined}).promise; });
+  return o.toDataURL('image/png');
+}
+function sizeFromWord(s){ s=String(s||'').replace(/\s+/g,''); var m=/(\d{1,3})[xX\u00d7\/](\d{1,3})/.exec(s); if(m){ var w=+m[1],h=+m[2]; if(w>=2&&w<=200&&h>=2&&h<=200) return w+'\u00d7'+h; } if(/[\u00f8\u00d8]/.test(s)||/dia/i.test(s)){ var d=/(\d{1,3})/.exec(s); if(d){ var dv=+d[1]; if(dv>=3&&dv<=120) return '\u00f8'+dv; } } return null; }
+async function ocrSheetForSizes(){
+  var out=document.getElementById('aiOut'); if(!out)return;
+  if(typeof Tesseract==='undefined'){ out.innerHTML='<div class="hint">OCR library not loaded (Tesseract). Check the network/CDN.</div>'; return; }
+  var cv=document.getElementById('pdfCanvas'); if(!cv||!cv.width){ out.innerHTML='<div class="hint">Load a PDF page first.</div>'; return; }
+  if(!window.__nvt||typeof viewport==='undefined'||!viewport){ out.innerHTML='<div class="hint">Render the page first.</div>'; return; }
+  // region: work area if set, else the whole sheet
+  var rx0=0,ry0=0,rx1=cv.width,ry1=cv.height;
+  if(typeof workArea!=='undefined'&&workArea){ try{ var P0=applyM(viewport.transform,workArea.ux0,workArea.uy0),P1=applyM(viewport.transform,workArea.ux1,workArea.uy1); rx0=Math.max(0,Math.min(P0[0],P1[0])); ry0=Math.max(0,Math.min(P0[1],P1[1])); rx1=Math.min(cv.width,Math.max(P0[0],P1[0])); ry1=Math.min(cv.height,Math.max(P0[1],P1[1])); }catch(e){} }
+  var f=2;                                   // render tiles at ~2x so glyphs are ~30-60px tall for OCR
+  var STEP=700, OV=90;                        // pdfCanvas-px tile step (rendered ~1400px) with overlap
+  var cols=[], rows=[];
+  for(var x=rx0; x<rx1; x+=STEP-OV) cols.push(x);
+  for(var y=ry0; y<ry1; y+=STEP-OV) rows.push(y);
+  var nTiles=cols.length*rows.length;
+  out.innerHTML='<div class="hint"><span class="spin"></span> OCR scanning sheet \u2014 '+nTiles+' tile(s)\u2026 (first tile loads the OCR engine)</div>';
+  var w=null; try{ w=await getOCR(); }catch(e){}
+  if(!w){ out.innerHTML='<div class="hint">Could not start the OCR engine.</div>'; return; }
+  try{ await w.setParameters({ tessedit_char_whitelist:'0123456789xX\u00d7\u00f8\u00d8/"', tessedit_pageseg_mode:'11' }); }catch(e){}   // sparse text across the tile
+  var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
+  var placed=0, words=0, done=0;
+  for(var ci=0; ci<cols.length; ci++){ for(var ri=0; ri<rows.length; ri++){ done++;
+    var tx0=cols[ci], ty0=rows[ri], tx1=Math.min(rx1,tx0+STEP), ty1=Math.min(ry1,ty0+STEP);
+    try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> OCR tile '+done+' / '+nTiles+'\u2026 ('+placed+' sizes found)'; }catch(e){}
+    var url; try{ url=await renderTileForOCR(tx0,ty0,tx1,ty1,f); }catch(e){ continue; }
+    var data; try{ var r=await w.recognize(url); data=r&&r.data; }catch(e){ continue; }
+    var wl=(data&&data.words)||[];
+    for(var wi=0; wi<wl.length; wi++){ var wd=wl[wi]; words++;
+      var sz=sizeFromWord(wd.text); if(!sz) continue;
+      var bb=wd.bbox||{}; var icx=((bb.x0||0)+(bb.x1||0))/2, icy=((bb.y0||0)+(bb.y1||0))/2;
+      var px=tx0+icx/f, py=ty0+icy/f;                       // image px -> pdfCanvas px
+      var near=false; for(var t=0;t<tags.length;t++){ var tg=tags[t]; if(!_sweepDims(tg.text)) continue; var tpx=(tg.x!=null?tg.x:0), tpy=(tg.y!=null?tg.y:0); if(Math.hypot(tpx-px,tpy-py)<34){ near=true; break; } }
+      if(near) continue;
+      var _u=(typeof invVP==='function')?invVP(px,py):null;
+      var nn=(_u&&typeof applyM==='function')?applyM(window.__nvt,_u[0],_u[1]):[px/K,py/K];
+      var _t={x:px,y:py,nx:nn[0],ny:nn[1],text:sz,_ai:true,_by:'ocr'}; if(_u){_t.ux=_u[0];_t.uy=_u[1];} tags.push(_t); placed++;
+    }
+    try{ drawOverlay(); }catch(e){}
+  } }
+  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Sheet OCR done.</b> '+placed+' size label(s) found across '+nTiles+' tile(s). These are located by OCR on the rendered sheet, so they don\u2019t depend on vector text. Now hit <b>\u2795 Build takeoff</b>.</div>';
 }
 async function aiReadSizesAtClusters(){
   var out=document.getElementById('aiOut'); if(!out)return;
