@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t33 · re-render crops from PDF at high DPI</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t35 · work-area-only hi-DPI YOLO</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2533,20 +2533,26 @@ function refreshSel(){
       var rScale=Math.min(3.0, 3000/un.width)*detail; if(!(rScale>0.3)) rScale=2.0;
       console.log('[takeoff build t10] scan render scale =',rScale.toFixed(3),'| page',Math.round(un.width)+'x'+Math.round(un.height),'| detail',detail);
       var rvp=page.getViewport({scale:rScale});
-      var rc=document.createElement('canvas'); rc.width=Math.ceil(rvp.width); rc.height=Math.ceil(rvp.height);
-      var rx=rc.getContext('2d',{willReadFrequently:true}); rx.fillStyle='#fff'; rx.fillRect(0,0,rc.width,rc.height);
-      await page.render({canvasContext:rx, viewport:rvp, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise;
+      var rc=document.createElement('canvas'), waOX=0, waOY=0;
+      if(workArea){
+        // Render ONLY the work area at the (possibly high-detail) scale -> more pixels per symbol for
+        // the starved small classes (tee/tap/sizetag), without a memory-blowing full-sheet canvas.
+        var wa0=applyM(rvp.transform, workArea.ux0, workArea.uy0), wa1=applyM(rvp.transform, workArea.ux1, workArea.uy1);
+        var WX0=Math.max(0,Math.min(wa0[0],wa1[0])-40), WY0=Math.max(0,Math.min(wa0[1],wa1[1])-40);
+        var WX1=Math.max(wa0[0],wa1[0])+40, WY1=Math.max(wa0[1],wa1[1])+40;
+        waOX=Math.floor(WX0); waOY=Math.floor(WY0);
+        rc.width=Math.max(8,Math.ceil(WX1-WX0)); rc.height=Math.max(8,Math.ceil(WY1-WY0));
+        var rxw=rc.getContext('2d',{willReadFrequently:true}); rxw.fillStyle='#fff'; rxw.fillRect(0,0,rc.width,rc.height);
+        await page.render({canvasContext:rxw, viewport:rvp, transform:[1,0,0,1,-waOX,-waOY], optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise;
+        console.log('[takeoff] work-area-only render', rc.width+'x'+rc.height,'at rScale',rScale.toFixed(2));
+      } else {
+        rc.width=Math.ceil(rvp.width); rc.height=Math.ceil(rvp.height);
+        var rxf=rc.getContext('2d',{willReadFrequently:true}); rxf.fillStyle='#fff'; rxf.fillRect(0,0,rc.width,rc.height);
+        await page.render({canvasContext:rxf, viewport:rvp, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise;
+      }
       var W=rc.width, H=rc.height;
       var TILE=1024, OV=200, stepT=TILE-OV;
-      // if a work area is set, restrict scanning to it (user-space -> render px)
-      var WA=null;
-      if(workArea){
-        // map work-area user-space corners through the RENDER viewport transform (not naive *rScale)
-        var wa0=applyM(rvp.transform, workArea.ux0, workArea.uy0);
-        var wa1=applyM(rvp.transform, workArea.ux1, workArea.uy1);
-        WA={x0:Math.min(wa0[0],wa1[0]), y0:Math.min(wa0[1],wa1[1]), x1:Math.max(wa0[0],wa1[0]), y1:Math.max(wa0[1],wa1[1])};
-        console.log('[takeoff t13] work area render-px:', WA, '| canvas', rc.width+'x'+rc.height);
-      }
+      var WA=null;   // rc is already the work-area crop (or full sheet); detections get offset by waOX/waOY below
       var xs=[], ys=[];
       for(var x=0;x<W;x+=stepT){ xs.push(Math.min(x,Math.max(0,W-TILE))); if(x+TILE>=W) break; }
       for(var y=0;y<H;y+=stepT){ ys.push(Math.min(y,Math.max(0,H-TILE))); if(y+TILE>=H) break; }
@@ -2574,9 +2580,8 @@ function refreshSel(){
         var t=new ort.Tensor('float32',f,[1,3,TILE,TILE]); var feeds={}; feeds[session.inputNames[0]]=t;
         var outMap=await session.run(feeds); var out=outMap[session.outputNames[0]]; var nc=out.dims[1]-4;
         var raw=decode(out,nc,confT);
-        raw.forEach(function(b){ var cx=b.x+ox+b.w/2, cy=b.y+oy+b.h/2;
-          if(WA && (cx<WA.x0||cx>WA.x1||cy<WA.y0||cy>WA.y1)) return;   // drop detections outside the work area
-          all.push({x:b.x+ox,y:b.y+oy,w:b.w,h:b.h,cls:b.cls,score:b.score}); });
+        raw.forEach(function(b){
+          all.push({x:b.x+ox+waOX,y:b.y+oy+waOY,w:b.w,h:b.h,cls:b.cls,score:b.score}); });   // crop px -> full-sheet render px
         done++; if(done%2===0||done===total){ setY('tile '+done+'/'+total); setStatus('Scanning… tile '+done+' of '+total+' ('+all.length+' raw)'); await new Promise(function(r){setTimeout(r,0);}); }
       }
       // NMS across the whole sheet (render px)
@@ -2870,7 +2875,7 @@ async function aiReadSizesPerRun(){
       try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> run '+(i+1)+'/'+runs.length+' \u00b7 tile '+(tilesDone+1)+'\u2026 ('+added+' sizes)'; }catch(e){}
       var b64=null; try{ b64=await cropRunTileB64(r,a,a1); }catch(e){}
       if(b64){ tilesDone++;
-        var prompt='This is a HIGH-RES crop of part of ONE '+(r.vertical?'vertical':'horizontal')+' rectangular duct from an HVAC plan. Read ONLY the duct SIZE labels actually PRINTED on the duct in THIS crop, in order '+ord+'. Sizes are WIDTHxHEIGHT in inches, e.g. "20x8". Do NOT invent sizes and do NOT repeat a size to fill space \u2014 if you cannot clearly read a printed size in this crop, return an empty list. Ignore diffuser/equipment/grille tags (CD1-320, EF1) and CFM values. Answer ONLY JSON, no prose: {"sizes":["20x8"]} or {"sizes":[]}.';
+        var prompt='This is a HIGH-RES crop of part of ONE '+(r.vertical?'vertical':'horizontal')+' duct from an HVAC plan. Read ONLY the duct SIZE label(s) actually PRINTED on the duct in THIS crop, in order '+ord+'. RECTANGULAR duct is WIDTHxHEIGHT in inches like "20x8". ROUND duct is a single diameter marked with \u00f8 or DIA, like "12\\"\u00f8" or "14 DIA" \u2014 report those as "\u00f814". Do NOT invent sizes and do NOT repeat a size to fill space \u2014 if you cannot clearly read a printed size in this crop, return an empty list. Ignore diffuser/equipment/grille tags (CD1-320, EF1) and CFM values. Answer ONLY JSON, no prose: {"sizes":["20x8"]} or {"sizes":[]}.';
         try{
           var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},25000);
           var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:200,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:prompt}]}]})});
@@ -2878,8 +2883,8 @@ async function aiReadSizesPerRun(){
           if(resp.ok){ var data=await resp.json(); if(!data.error){
             var txt=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
             var res=null; try{res=JSON.parse(txt);}catch(e){}
-            var sizes=((res&&res.sizes)||[]).filter(function(s){return /\d+\s*[xX]\s*\d+/.test(String(s));});
-            var n=sizes.length; for(var k=0;k<n;k++){ var ap=a+((k+0.5)/n)*(a1-a); found.push({along:ap,size:String(sizes[k]).replace(/\s+/g,'')}); }
+            var sizes=((res&&res.sizes)||[]).filter(function(s){ s=String(s); return /\d+\s*[xX\u00d7]\s*\d+/.test(s) || /\u00f8|\u00d8|dia/i.test(s); }).map(function(s){ s=String(s).trim(); var m=/(\d+)\s*[xX\u00d7]\s*(\d+)/.exec(s); if(m) return m[1]+'\u00d7'+m[2]; var d=/(\d+)/.exec(s); return d?('\u00f8'+d[1]):s; });
+            var n=sizes.length; for(var k=0;k<n;k++){ var ap=a+((k+0.5)/n)*(a1-a); found.push({along:ap,size:sizes[k]}); }
           }}
         }catch(e){}
       }
@@ -2888,8 +2893,8 @@ async function aiReadSizesPerRun(){
     found.sort(function(p,q){return p.along-q.along;});
     var merged=[]; found.forEach(function(f){ var last=merged[merged.length-1]; if(last && last.size===f.size && Math.abs(f.along-last.along)<OVER*1.6) return; merged.push(f); });
     if(!merged.length){ report.push('run '+(i+1)+': no sizes read'); continue; }
-    tags=tags.filter(function(t){ if(!/\d+\s*[xX]\s*\d+/.test(String(t.text||''))) return true; var px=(t.nx!=null?t.nx*K:t.x), py=(t.ny!=null?t.ny*K:t.y); var cc=r.vertical?px:py, aa=r.vertical?py:px; if(Math.abs(cc-r.c)<=30 && aa>=lo-20 && aa<=hi+20){ fixed++; return false; } return true; });   // drop stale size tags on this run only
-    merged.forEach(function(m){ var px=r.vertical?r.c:m.along, py=r.vertical?m.along:r.c; tags.push({x:px,y:py,nx:px/K,ny:py/K,text:m.size}); added++; });
+    tags=tags.filter(function(t){ if(!_sweepDims(String(t.text||''))) return true; var px=(t.nx!=null?t.nx*K:t.x), py=(t.ny!=null?t.ny*K:t.y); var cc=r.vertical?px:py, aa=r.vertical?py:px; if(Math.abs(cc-r.c)<=30 && aa>=lo-20 && aa<=hi+20){ fixed++; return false; } return true; });   // drop stale size tags on this run only
+    merged.forEach(function(m){ var px=r.vertical?r.c:m.along, py=r.vertical?m.along:r.c; var u=(typeof invVP==='function')?invVP(px,py):null; var tag={x:px,y:py,nx:px/K,ny:py/K,text:m.size}; if(u){ tag.ux=u[0]; tag.uy=u[1]; } tags.push(tag); added++; });   // ux/uy anchor the tag to the PDF so it tracks zoom
     report.push('run '+(i+1)+': '+merged.map(function(m){return m.size;}).join(' \u2192 '));
   }
   try{ drawOverlay(); }catch(e){}
@@ -2948,7 +2953,7 @@ async function aiSizeSweep(){
       var nx=px/K, ny=py/K, near=false;
       for(var i=0;i<tags.length;i++){ var t=tags[i]; if(!_sweepDims(t.text)) continue; var tpx=(t.x!=null?t.x:(t.nx*K)), tpy=(t.y!=null?t.y:(t.ny*K)); if(Math.hypot(tpx-px,tpy-py)<24){ near=true; break; } }
       if(near){ dup++; return; }
-      tags.push({x:px,y:py,nx:nx,ny:ny,text:String(L.text).replace(/\s+/g,''),_ai:true}); added++;
+      var _u=(typeof invVP==='function')?invVP(px,py):null; var _t={x:px,y:py,nx:nx,ny:ny,text:String(L.text).replace(/\s+/g,''),_ai:true}; if(_u){_t.ux=_u[0];_t.uy=_u[1];} tags.push(_t); added++;
     });
     try{ drawOverlay(); }catch(e){}
   } }
@@ -3001,7 +3006,7 @@ async function aiReadSizesAtClusters(){
       var px=c.cx, py=c.cy, nx=px/K, ny=py/K, near=false;
       for(var t=0;t<tags.length;t++){ var tg=tags[t]; if(!_sweepDims(tg.text)) continue; var tpx=(tg.x!=null?tg.x:(tg.nx*K)), tpy=(tg.y!=null?tg.y:(tg.ny*K)); if(Math.hypot(tpx-px,tpy-py)<22){ near=true; break; } }
       if(near) continue;
-      tags.push({x:px,y:py,nx:nx,ny:ny,text:String(res.size).replace(/\s+/g,''),_ai:true}); added++;
+      var _u=(typeof invVP==='function')?invVP(px,py):null; var _t={x:px,y:py,nx:nx,ny:ny,text:String(res.size).replace(/\s+/g,''),_ai:true}; if(_u){_t.ux=_u[0];_t.uy=_u[1];} tags.push(_t); added++;
       try{ drawOverlay(); }catch(e){}
     }catch(e){ clearTimeout(to); errs++; }
   }
