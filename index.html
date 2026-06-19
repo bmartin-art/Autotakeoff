@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t31 · hi-res tiled per-run size read</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t32 · wide hi-res crops (labels sit beside duct)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2826,9 +2826,12 @@ function groupDuctRuns(){
   runs.sort(function(a,b){ return b.span-a.span; }); return runs;
 }
 // hi-res tile crop of a run between along-coords a0..a1 (px) at native resolution, so labels stay legible
-function cropRunTileB64(r, a0, a1){ var cv=document.getElementById('pdfCanvas'); var pad=22, x,y,w,h;
-  if(r.vertical){ x=Math.max(0, r.bbox[0]-pad); w=Math.min(cv.width-x,(r.bbox[2]-r.bbox[0])+pad*2); y=Math.max(0,a0-pad); h=Math.min(cv.height-y,(a1-a0)+pad*2); }
-  else { y=Math.max(0, r.bbox[1]-pad); h=Math.min(cv.height-y,(r.bbox[3]-r.bbox[1])+pad*2); x=Math.max(0,a0-pad); w=Math.min(cv.width-x,(a1-a0)+pad*2); }
+function cropRunTileB64(r, a0, a1){ var cv=document.getElementById('pdfCanvas');
+  // labels usually sit BESIDE the duct, so pad the cross-axis generously; keep along-axis tighter
+  var crossExt=r.vertical?(r.bbox[2]-r.bbox[0]):(r.bbox[3]-r.bbox[1]);
+  var cp=Math.min(180, Math.max(80, crossExt*0.9)), ap=48, x,y,w,h;
+  if(r.vertical){ x=Math.max(0, r.bbox[0]-cp); w=Math.min(cv.width-x,(r.bbox[2]-r.bbox[0])+cp*2); y=Math.max(0,a0-ap); h=Math.min(cv.height-y,(a1-a0)+ap*2); }
+  else { y=Math.max(0, r.bbox[1]-cp); h=Math.min(cv.height-y,(r.bbox[3]-r.bbox[1])+cp*2); x=Math.max(0,a0-ap); w=Math.min(cv.width-x,(a1-a0)+ap*2); }
   var S=Math.min(2, 1450/Math.max(w,h,1));   // keep ~native; cap long edge ~1450 (under the vision API limit)
   var o=document.createElement('canvas'); o.width=Math.max(8,Math.round(w*S)); o.height=Math.max(8,Math.round(h*S));
   var ctx=o.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,o.width,o.height); ctx.drawImage(cv,x,y,w,h,0,0,o.width,o.height);
