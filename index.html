@@ -127,7 +127,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t45 · in-browser OCR (Tesseract) reads, AI fallback</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t46 · loosen label clustering + locate funnel diag</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3104,21 +3104,22 @@ async function aiReadSizesAtClusters(){
   var inWA=function(cx,cy){ if(typeof workArea==='undefined'||!workArea||typeof viewport==='undefined'||!viewport) return true; try{ var P0=applyM(viewport.transform,workArea.ux0,workArea.uy0),P1=applyM(viewport.transform,workArea.ux1,workArea.uy1); var x0=Math.min(P0[0],P1[0]),y0=Math.min(P0[1],P1[1]),x1=Math.max(P0[0],P1[0]),y1=Math.max(P0[1],P1[1]); return cx>=x0&&cx<=x1&&cy>=y0&&cy<=y1; }catch(e){ return true; } };
   // 1) cluster SHORT segments (digit strokes) into tight blobs = candidate text-label spots
   var pts=[]; for(var i=0;i<segments.length;i++){ var s=segments[i]; if((s.len||0)>70) continue; var mx=(s.x1+s.x2)/2,my=(s.y1+s.y2)/2; if(!inWA(mx,my)) continue; pts.push({idx:i,mx:mx,my:my}); }
-  var R=18, taken=new Array(pts.length).fill(false), clusters=[];
+  var R=22, taken=new Array(pts.length).fill(false), clusters=[];
   for(var i=0;i<pts.length;i++){ if(taken[i])continue; var stack=[i]; taken[i]=true; var grp=[];
     while(stack.length){ var k=stack.pop(); grp.push(pts[k]); for(var j=0;j<pts.length;j++){ if(!taken[j] && Math.abs(pts[j].mx-pts[k].mx)<R && Math.abs(pts[j].my-pts[k].my)<R){ taken[j]=true; stack.push(j); } } }
-    if(grp.length<4) continue;
+    if(grp.length<3) continue;
     var x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; grp.forEach(function(g){ var s=segments[g.idx]; x0=Math.min(x0,s.x1,s.x2); y0=Math.min(y0,s.y1,s.y2); x1=Math.max(x1,s.x1,s.x2); y1=Math.max(y1,s.y1,s.y2); });
-    var w=x1-x0,h=y1-y0, _lo=Math.min(w,h), _hi=Math.max(w,h); if(_hi<14||_hi>220||_lo<5||_lo>95) continue;   // label-sized box, either orientation
+    var w=x1-x0,h=y1-y0, _lo=Math.min(w,h), _hi=Math.max(w,h); if(_hi<12||_hi>260||_lo<4||_lo>120) continue;   // label-sized box, either orientation
     clusters.push({bbox:[x0,y0,x1,y1], cx:(x0+x1)/2, cy:(y0+y1)/2, idxs:grp.map(function(g){return g.idx;})});
   }
-  // 2) keep clusters that sit on/near a duct LINE (point-to-segment distance, not segment-center)
-  var duct=segments.filter(function(s){return s.cls==='duct';});
+  // 2) keep clusters that sit on/near a duct or maybe-duct LINE (point-to-segment distance)
+  var duct=segments.filter(function(s){return s.cls==='duct'||s.cls==='maybe';});
   function pSegD(px,py,x1,y1,x2,y2){ var dx=x2-x1,dy=y2-y1,L2=dx*dx+dy*dy,t=L2?((px-x1)*dx+(py-y1)*dy)/L2:0; t=t<0?0:(t>1?1:t); return Math.hypot(px-(x1+t*dx),py-(y1+t*dy)); }
   var rawCount=clusters.length;
-  clusters=clusters.filter(function(c){ for(var i=0;i<duct.length;i++){ var s=duct[i]; if(pSegD(c.cx,c.cy,s.x1,s.y1,s.x2,s.y2)<160) return true; } return false; });
+  clusters=clusters.filter(function(c){ for(var i=0;i<duct.length;i++){ var s=duct[i]; if(pSegD(c.cx,c.cy,s.x1,s.y1,s.x2,s.y2)<210) return true; } return false; });
   var nearCount=clusters.length;
-  clusters=clusters.slice(0,60);
+  clusters=clusters.slice(0,90);
+  console.log('[geo size] funnel: '+pts.length+' short strokes \u2192 '+rawCount+' clusters \u2192 '+nearCount+' near duct/maybe \u2192 reading '+clusters.length);
   window.__geoClusters=clusters.map(function(c){return c.bbox;}); try{ drawOverlay(); }catch(e){}
   if(!clusters.length){ out.innerHTML='<div class="hint">No label spots kept: '+rawCount+' text-like cluster(s) formed, 0 near a duct line. '+(rawCount?'They formed but none sit near green duct \u2014 widen the duct-proximity, or the green isn\u2019t on the labels.':'No clusters formed \u2014 the digit strokes aren\u2019t being grouped (wrong size cutoff).')+'</div>'; return; }
   var useOCR=!((document.getElementById('ocrOff')||{}).checked);   // OCR on by default; checkbox disables it
@@ -3148,7 +3149,7 @@ async function aiReadSizesAtClusters(){
     var _t={x:px,y:py,nx:nn[0],ny:nn[1],text:size,_ai:true,_by:by}; if(_u){_t.ux=_u[0];_t.uy=_u[1];} tags.push(_t); added++;
     try{ drawOverlay(); }catch(e){}
   }
-  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Geometry-located read done.</b> '+added+' size(s) placed of '+clusters.length+' spot(s) \u2014 '+viaOCR+' by OCR, '+viaAI+' by AI ('+empty+' not a size, '+errs+' errors). Now hit <b>\u2795 Build takeoff</b>.</div>';
+  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Geometry-located read done.</b> '+added+' size(s) placed \u2014 '+viaOCR+' by OCR, '+viaAI+' by AI ('+empty+' not a size, '+errs+' errors).<br><span style="color:#9fb4c8">locate funnel: '+pts.length+' short strokes \u2192 '+rawCount+' clusters \u2192 '+nearCount+' near duct \u2192 '+clusters.length+' read.</span> Now hit <b>\u2795 Build takeoff</b>.</div>';
 }
 window.aiReadSizesAtClusters=aiReadSizesAtClusters;
 
