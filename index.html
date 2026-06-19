@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t32 · wide hi-res crops (labels sit beside duct)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t33 · re-render crops from PDF at high DPI</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2826,16 +2826,31 @@ function groupDuctRuns(){
   runs.sort(function(a,b){ return b.span-a.span; }); return runs;
 }
 // hi-res tile crop of a run between along-coords a0..a1 (px) at native resolution, so labels stay legible
-function cropRunTileB64(r, a0, a1){ var cv=document.getElementById('pdfCanvas');
-  // labels usually sit BESIDE the duct, so pad the cross-axis generously; keep along-axis tighter
+// hi-DPI crop: RE-RENDER the run region straight from the PDF (crisp vector glyphs), not upscale the
+// low-res canvas. Falls back to a canvas crop if the PDF re-render isn't available.
+async function cropRunTileB64(r, a0, a1){
+  var cv=document.getElementById('pdfCanvas');
   var crossExt=r.vertical?(r.bbox[2]-r.bbox[0]):(r.bbox[3]-r.bbox[1]);
-  var cp=Math.min(180, Math.max(80, crossExt*0.9)), ap=48, x,y,w,h;
-  if(r.vertical){ x=Math.max(0, r.bbox[0]-cp); w=Math.min(cv.width-x,(r.bbox[2]-r.bbox[0])+cp*2); y=Math.max(0,a0-ap); h=Math.min(cv.height-y,(a1-a0)+ap*2); }
-  else { y=Math.max(0, r.bbox[1]-cp); h=Math.min(cv.height-y,(r.bbox[3]-r.bbox[1])+cp*2); x=Math.max(0,a0-ap); w=Math.min(cv.width-x,(a1-a0)+ap*2); }
-  var S=Math.min(2, 1450/Math.max(w,h,1));   // keep ~native; cap long edge ~1450 (under the vision API limit)
-  var o=document.createElement('canvas'); o.width=Math.max(8,Math.round(w*S)); o.height=Math.max(8,Math.round(h*S));
-  var ctx=o.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,o.width,o.height); ctx.drawImage(cv,x,y,w,h,0,0,o.width,o.height);
-  return o.toDataURL('image/png').split(',')[1];
+  var cp=Math.min(180,Math.max(80,crossExt*0.9)), ap=48, x,y,w,h;
+  if(r.vertical){ x=Math.max(0,r.bbox[0]-cp); w=Math.min(cv.width-x,(r.bbox[2]-r.bbox[0])+cp*2); y=Math.max(0,a0-ap); h=Math.min(cv.height-y,(a1-a0)+ap*2); }
+  else { y=Math.max(0,r.bbox[1]-cp); h=Math.min(cv.height-y,(r.bbox[3]-r.bbox[1])+cp*2); x=Math.max(0,a0-ap); w=Math.min(cv.width-x,(a1-a0)+ap*2); }
+  var f=Math.max(1, Math.min(8, 1450/Math.max(w,h,1)));   // render the region up to ~1450px on the long edge
+  try{
+    if(typeof pdfDoc!=='undefined' && pdfDoc && typeof pageNum!=='undefined'){
+      var page=await pdfDoc.getPage(pageNum);
+      var HS=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))*f;
+      var vp=page.getViewport({scale:HS});
+      var o=document.createElement('canvas'); o.width=Math.max(8,Math.round(w*f)); o.height=Math.max(8,Math.round(h*f));
+      var ctx=o.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,o.width,o.height);
+      await page.render({canvasContext:ctx, viewport:vp, transform:[1,0,0,1,-x*f,-y*f], optionalContentConfigPromise:(typeof ocConfig!=='undefined'&&ocConfig)?Promise.resolve(ocConfig):undefined}).promise;
+      return o.toDataURL('image/png').split(',')[1];
+    }
+  }catch(e){}
+  // fallback: upscale the rendered canvas (less sharp, but better than nothing)
+  var S=Math.min(2,1450/Math.max(w,h,1));
+  var o2=document.createElement('canvas'); o2.width=Math.max(8,Math.round(w*S)); o2.height=Math.max(8,Math.round(h*S));
+  var c2=o2.getContext('2d'); c2.fillStyle='#fff'; c2.fillRect(0,0,o2.width,o2.height); c2.drawImage(cv,x,y,w,h,0,0,o2.width,o2.height);
+  return o2.toDataURL('image/png').split(',')[1];
 }
 async function aiReadSizesPerRun(){
   var out=document.getElementById('aiOut'); if(!out)return;
@@ -2853,7 +2868,7 @@ async function aiReadSizesPerRun(){
     while(a < hi-8 && tilesDone<MAXTILES && guard<24){ guard++;
       var a1=Math.min(hi, a+TILELEN);
       try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> run '+(i+1)+'/'+runs.length+' \u00b7 tile '+(tilesDone+1)+'\u2026 ('+added+' sizes)'; }catch(e){}
-      var b64=null; try{ b64=cropRunTileB64(r,a,a1); }catch(e){}
+      var b64=null; try{ b64=await cropRunTileB64(r,a,a1); }catch(e){}
       if(b64){ tilesDone++;
         var prompt='This is a HIGH-RES crop of part of ONE '+(r.vertical?'vertical':'horizontal')+' rectangular duct from an HVAC plan. Read ONLY the duct SIZE labels actually PRINTED on the duct in THIS crop, in order '+ord+'. Sizes are WIDTHxHEIGHT in inches, e.g. "20x8". Do NOT invent sizes and do NOT repeat a size to fill space \u2014 if you cannot clearly read a printed size in this crop, return an empty list. Ignore diffuser/equipment/grille tags (CD1-320, EF1) and CFM values. Answer ONLY JSON, no prose: {"sizes":["20x8"]} or {"sizes":[]}.';
         try{
