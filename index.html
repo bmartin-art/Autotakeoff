@@ -126,7 +126,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t42 · place dims at AI-reported label position</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t43 · geometry-located size read (hi-DPI + nvt frame)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3049,6 +3049,29 @@ window.aiSizeSweep=aiSizeSweep;
 // Cluster those short strokes into label "spots", read a tight crop of each with the AI, and place the
 // size at the geometry-known cluster center. Position comes from geometry (reliable); the AI only READS.
 // A spot that isn't really a label reads as nothing and self-discards. (Detection-bounded OCR.) ----
+// hi-DPI crop of an arbitrary box (a digit-stroke cluster): re-render straight from the PDF so the
+// glyphs are crisp, the same trick that made the per-run reader work.
+async function cropBoxHiDPI(bbox){
+  var cv=document.getElementById('pdfCanvas'); var pad=44;
+  var x=Math.max(0,bbox[0]-pad), y=Math.max(0,bbox[1]-pad);
+  var w=Math.min(cv.width-x,(bbox[2]-bbox[0])+pad*2), h=Math.min(cv.height-y,(bbox[3]-bbox[1])+pad*2);
+  var f=Math.max(1, Math.min(10, 900/Math.max(w,h,1)));   // small box -> big upscale -> crisp digits, long edge ~900px
+  try{
+    if(typeof pdfDoc!=='undefined' && pdfDoc && typeof pageNum!=='undefined'){
+      var page=await pdfDoc.getPage(pageNum);
+      var HS=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))*f;
+      var vp=page.getViewport({scale:HS});
+      var o=document.createElement('canvas'); o.width=Math.max(8,Math.round(w*f)); o.height=Math.max(8,Math.round(h*f));
+      var ctx=o.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,o.width,o.height);
+      await withPageRender(function(){ return page.render({canvasContext:ctx, viewport:vp, transform:[1,0,0,1,-x*f,-y*f], optionalContentConfigPromise:(typeof ocConfig!=='undefined'&&ocConfig)?Promise.resolve(ocConfig):undefined}).promise; });
+      return o.toDataURL('image/png').split(',')[1];
+    }
+  }catch(e){}
+  var S=Math.min(3,900/Math.max(w,h,1));
+  var o2=document.createElement('canvas'); o2.width=Math.max(8,Math.round(w*S)); o2.height=Math.max(8,Math.round(h*S));
+  var c2=o2.getContext('2d'); c2.fillStyle='#fff'; c2.fillRect(0,0,o2.width,o2.height); c2.drawImage(cv,x,y,w,h,0,0,o2.width,o2.height);
+  return o2.toDataURL('image/png').split(',')[1];
+}
 async function aiReadSizesAtClusters(){
   var out=document.getElementById('aiOut'); if(!out)return;
   var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,''); if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
@@ -3076,21 +3099,23 @@ async function aiReadSizesAtClusters(){
   window.__geoClusters=clusters.map(function(c){return c.bbox;}); try{ drawOverlay(); }catch(e){}
   if(!clusters.length){ out.innerHTML='<div class="hint">No label spots kept: '+rawCount+' text-like cluster(s) formed, 0 near a duct line. '+(rawCount?'They formed but none sit near green duct \u2014 widen the duct-proximity, or the green isn\u2019t on the labels.':'No clusters formed \u2014 the digit strokes aren\u2019t being grouped (wrong size cutoff).')+'</div>'; return; }
   out.innerHTML='<div class="hint"><span class="spin"></span> reading '+clusters.length+' detected label spot(s)\u2026</div>';
-  var prompt='This is a tiny crop from an HVAC plan, with a red box around one feature. If that boxed feature is a duct SIZE label, read it: rectangular "20x16" (width x height, inches) or round "12\\"\u00d8". If it is NOT a duct size (a diffuser/equipment/grille tag like CD1-320 or EF1, a CFM value, a note, or unreadable), return null. Do NOT guess. Answer ONLY JSON: {"size":"20x16"} or {"size":null}.';
+  var prompt='This is a tiny HIGH-RES crop from an HVAC plan, centered on one feature. If the feature is a duct SIZE label, read it: rectangular "20x16" (width x height, inches) or round "12\\"\u00d8" (report as "\u00f812"). If it is NOT a duct size (a diffuser/equipment/grille tag like CD1-320 or EF1, a CFM value, a note, or unreadable), return null. Do NOT guess. Answer ONLY JSON: {"size":"20x16"} or {"size":null}.';
   var added=0, done=0, empty=0, errs=0;
   for(var ci=0; ci<clusters.length; ci++){ var c=clusters[ci]; done++;
     try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> reading spot '+done+' / '+clusters.length+'\u2026 ('+added+' sizes)'; }catch(e){}
-    var b64; try{ b64=cropDataURL(c.bbox, c.idxs); }catch(e){ continue; }
+    var b64; try{ b64=await cropBoxHiDPI(c.bbox); }catch(e){ continue; }
     var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},25000);
     try{ var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:120,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:prompt}]}]})}); clearTimeout(to);
       if(!resp.ok){ errs++; continue; } var data=await resp.json(); if(data.error){ errs++; continue; }
       var raw=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
       var res; try{ res=JSON.parse(raw); }catch(e){ continue; }
       if(!res || !res.size || !_sweepDims(res.size)){ empty++; continue; }
-      var px=c.cx, py=c.cy, nx=px/K, ny=py/K, near=false;
+      var px=c.cx, py=c.cy, near=false;
       for(var t=0;t<tags.length;t++){ var tg=tags[t]; if(!_sweepDims(tg.text)) continue; var tpx=(tg.x!=null?tg.x:(tg.nx*K)), tpy=(tg.y!=null?tg.y:(tg.ny*K)); if(Math.hypot(tpx-px,tpy-py)<22){ near=true; break; } }
       if(near) continue;
-      var _u=(typeof invVP==='function')?invVP(px,py):null; var _t={x:px,y:py,nx:nx,ny:ny,text:String(res.size).replace(/\s+/g,''),_ai:true}; if(_u){_t.ux=_u[0];_t.uy=_u[1];} tags.push(_t); added++;
+      var _u=(typeof invVP==='function')?invVP(px,py):null;
+      var nn=(_u&&window.__nvt&&typeof applyM==='function')?applyM(window.__nvt,_u[0],_u[1]):[px/K,py/K];   // nvt frame so the tag links to a run
+      var _t={x:px,y:py,nx:nn[0],ny:nn[1],text:String(res.size).replace(/\s+/g,''),_ai:true}; if(_u){_t.ux=_u[0];_t.uy=_u[1];} tags.push(_t); added++;
       try{ drawOverlay(); }catch(e){}
     }catch(e){ clearTimeout(to); errs++; }
   }
