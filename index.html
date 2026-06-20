@@ -127,7 +127,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t50 · AI-vision tiled sheet sweep (reads busy CAD)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t51 · AI sweep raw-response logging</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3193,7 +3193,8 @@ async function aiSweepTiled(){
     try{ var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:900,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:prompt}]}]})}); clearTimeout(to);
       if(!resp.ok){ errs++; continue; } var data=await resp.json(); if(data.error){ errs++; continue; }
       var raw=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
-      var res; try{ res=JSON.parse(raw); }catch(e){ continue; }
+      console.log('[ai sweep] tile '+done+' raw:', raw.slice(0,300));
+      var res; try{ res=JSON.parse(raw); }catch(e){ console.log('[ai sweep] tile '+done+' JSON parse failed'); continue; }
       ((res&&res.sizes)||[]).forEach(function(it){
         var sraw=(it&&it.size!=null)?it.size:it; var sz=sizeFromWord(String(sraw)); if(!sz) return;
         var cx=(it&&typeof it.cx==='number')?Math.max(0,Math.min(1,it.cx)):0.5;
