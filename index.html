@@ -127,7 +127,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t47 · full-sheet OCR finds + reads sizes (no API)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t48 · OCR fixes (no whitelist, block output, raw-word diag)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3082,7 +3082,7 @@ async function getOCR(){
   if(typeof Tesseract==='undefined') return null;
   if(__ocrWorker) return __ocrWorker;
   if(!__ocrInit){ __ocrInit=(async function(){ var w=await Tesseract.createWorker('eng');
-    try{ await w.setParameters({ tessedit_char_whitelist:'0123456789xX\u00d7\u00f8\u00d8/"DIAdia ', tessedit_pageseg_mode:'7' }); }catch(e){}
+    try{ await w.setParameters({ tessedit_pageseg_mode:'7' }); }catch(e){}   // single line for tight label crops; no char whitelist (it suppresses detection)
     __ocrWorker=w; return w; })(); }
   return __ocrInit;
 }
@@ -3120,24 +3120,27 @@ async function ocrSheetForSizes(){
   var rx0=0,ry0=0,rx1=cv.width,ry1=cv.height;
   if(typeof workArea!=='undefined'&&workArea){ try{ var P0=applyM(viewport.transform,workArea.ux0,workArea.uy0),P1=applyM(viewport.transform,workArea.ux1,workArea.uy1); rx0=Math.max(0,Math.min(P0[0],P1[0])); ry0=Math.max(0,Math.min(P0[1],P1[1])); rx1=Math.min(cv.width,Math.max(P0[0],P1[0])); ry1=Math.min(cv.height,Math.max(P0[1],P1[1])); }catch(e){} }
   var f=2;                                   // render tiles at ~2x so glyphs are ~30-60px tall for OCR
-  var STEP=700, OV=90;                        // pdfCanvas-px tile step (rendered ~1400px) with overlap
+  var STEP=520, OV=80;                         // pdfCanvas-px tile step (rendered ~1040px) with overlap
+  if(!(rx1>rx0)||!(ry1>ry0)){ rx0=0;ry0=0;rx1=cv.width;ry1=cv.height; }   // guard bad work-area
   var cols=[], rows=[];
   for(var x=rx0; x<rx1; x+=STEP-OV) cols.push(x);
   for(var y=ry0; y<ry1; y+=STEP-OV) rows.push(y);
+  if(!cols.length) cols=[rx0]; if(!rows.length) rows=[ry0];
   var nTiles=cols.length*rows.length;
   out.innerHTML='<div class="hint"><span class="spin"></span> OCR scanning sheet \u2014 '+nTiles+' tile(s)\u2026 (first tile loads the OCR engine)</div>';
   var w=null; try{ w=await getOCR(); }catch(e){}
   if(!w){ out.innerHTML='<div class="hint">Could not start the OCR engine.</div>'; return; }
-  try{ await w.setParameters({ tessedit_char_whitelist:'0123456789xX\u00d7\u00f8\u00d8/"', tessedit_pageseg_mode:'11' }); }catch(e){}   // sparse text across the tile
+  try{ await w.setParameters({ tessedit_pageseg_mode:'11', tessedit_char_whitelist:'' }); }catch(e){}   // sparse text, NO whitelist (regex filters after)
+  function collectWords(data){ if(!data) return []; if(data.words&&data.words.length) return data.words; var o=[]; (data.blocks||[]).forEach(function(b){ (b.paragraphs||[]).forEach(function(p){ (p.lines||[]).forEach(function(l){ (l.words||[]).forEach(function(wd){ o.push(wd); }); }); }); }); return o; }
   var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
-  var placed=0, words=0, done=0;
+  var placed=0, rawWords=0, done=0;
   for(var ci=0; ci<cols.length; ci++){ for(var ri=0; ri<rows.length; ri++){ done++;
     var tx0=cols[ci], ty0=rows[ri], tx1=Math.min(rx1,tx0+STEP), ty1=Math.min(ry1,ty0+STEP);
-    try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> OCR tile '+done+' / '+nTiles+'\u2026 ('+placed+' sizes found)'; }catch(e){}
+    try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> OCR tile '+done+' / '+nTiles+'\u2026 ('+placed+' sizes, '+rawWords+' words read)'; }catch(e){}
     var url; try{ url=await renderTileForOCR(tx0,ty0,tx1,ty1,f); }catch(e){ continue; }
-    var data; try{ var r=await w.recognize(url); data=r&&r.data; }catch(e){ continue; }
-    var wl=(data&&data.words)||[];
-    for(var wi=0; wi<wl.length; wi++){ var wd=wl[wi]; words++;
+    var data; try{ var r=await w.recognize(url,{},{blocks:true,text:true}); data=r&&r.data; }catch(e){ continue; }
+    var wl=collectWords(data); rawWords+=wl.length;
+    for(var wi=0; wi<wl.length; wi++){ var wd=wl[wi];
       var sz=sizeFromWord(wd.text); if(!sz) continue;
       var bb=wd.bbox||{}; var icx=((bb.x0||0)+(bb.x1||0))/2, icy=((bb.y0||0)+(bb.y1||0))/2;
       var px=tx0+icx/f, py=ty0+icy/f;                       // image px -> pdfCanvas px
@@ -3149,7 +3152,8 @@ async function ocrSheetForSizes(){
     }
     try{ drawOverlay(); }catch(e){}
   } }
-  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Sheet OCR done.</b> '+placed+' size label(s) found across '+nTiles+' tile(s). These are located by OCR on the rendered sheet, so they don\u2019t depend on vector text. Now hit <b>\u2795 Build takeoff</b>.</div>';
+  console.log('[sheet OCR] '+rawWords+' raw words read, '+placed+' matched a duct size, across '+nTiles+' tiles');
+  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Sheet OCR done.</b> '+placed+' size label(s) found ('+rawWords+' words read) across '+nTiles+' tile(s). Now hit <b>\u2795 Build takeoff</b>.</div>';
 }
 async function aiReadSizesAtClusters(){
   var out=document.getElementById('aiOut'); if(!out)return;
