@@ -127,7 +127,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t48 · OCR fixes (no whitelist, block output, raw-word diag)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t49 · OCR line-match + DPI + word sample log</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3130,20 +3130,26 @@ async function ocrSheetForSizes(){
   out.innerHTML='<div class="hint"><span class="spin"></span> OCR scanning sheet \u2014 '+nTiles+' tile(s)\u2026 (first tile loads the OCR engine)</div>';
   var w=null; try{ w=await getOCR(); }catch(e){}
   if(!w){ out.innerHTML='<div class="hint">Could not start the OCR engine.</div>'; return; }
-  try{ await w.setParameters({ tessedit_pageseg_mode:'11', tessedit_char_whitelist:'' }); }catch(e){}   // sparse text, NO whitelist (regex filters after)
+  try{ await w.setParameters({ tessedit_pageseg_mode:'11', tessedit_char_whitelist:'', user_defined_dpi:'150' }); }catch(e){}   // sparse text, no whitelist, sane DPI
   function collectWords(data){ if(!data) return []; if(data.words&&data.words.length) return data.words; var o=[]; (data.blocks||[]).forEach(function(b){ (b.paragraphs||[]).forEach(function(p){ (p.lines||[]).forEach(function(l){ (l.words||[]).forEach(function(wd){ o.push(wd); }); }); }); }); return o; }
+  function collectLines(data){ var o=[]; if(!data) return o; (data.blocks||[]).forEach(function(b){ (b.paragraphs||[]).forEach(function(p){ (p.lines||[]).forEach(function(l){ o.push(l); }); }); }); if(!o.length && data.lines) return data.lines; return o; }
   var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
-  var placed=0, rawWords=0, done=0;
+  var placed=0, rawWords=0, done=0, sampleWords=[];
   for(var ci=0; ci<cols.length; ci++){ for(var ri=0; ri<rows.length; ri++){ done++;
     var tx0=cols[ci], ty0=rows[ri], tx1=Math.min(rx1,tx0+STEP), ty1=Math.min(ry1,ty0+STEP);
     try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> OCR tile '+done+' / '+nTiles+'\u2026 ('+placed+' sizes, '+rawWords+' words read)'; }catch(e){}
     var url; try{ url=await renderTileForOCR(tx0,ty0,tx1,ty1,f); }catch(e){ continue; }
     var data; try{ var r=await w.recognize(url,{},{blocks:true,text:true}); data=r&&r.data; }catch(e){ continue; }
     var wl=collectWords(data); rawWords+=wl.length;
-    for(var wi=0; wi<wl.length; wi++){ var wd=wl[wi];
-      var sz=sizeFromWord(wd.text); if(!sz) continue;
-      var bb=wd.bbox||{}; var icx=((bb.x0||0)+(bb.x1||0))/2, icy=((bb.y0||0)+(bb.y1||0))/2;
-      var px=tx0+icx/f, py=ty0+icy/f;                       // image px -> pdfCanvas px
+    if(sampleWords.length<60){ wl.forEach(function(wd){ if(sampleWords.length<60) sampleWords.push(wd.text); }); }
+    // match on rejoined LINES so a split "20 x 16" still matches
+    var lines=collectLines(data);
+    var src = lines.length ? lines : wl.map(function(wd){ return {text:wd.text, bbox:wd.bbox}; });
+    for(var li=0; li<src.length; li++){ var ln=src[li];
+      var txt = ln.words&&ln.words.length ? ln.words.map(function(x){return x.text;}).join('') : (ln.text||'');
+      var sz=sizeFromWord(txt); if(!sz) continue;
+      var bb=ln.bbox||{}; var icx=((bb.x0||0)+(bb.x1||0))/2, icy=((bb.y0||0)+(bb.y1||0))/2;
+      var px=tx0+icx/f, py=ty0+icy/f;
       var near=false; for(var t=0;t<tags.length;t++){ var tg=tags[t]; if(!_sweepDims(tg.text)) continue; var tpx=(tg.x!=null?tg.x:0), tpy=(tg.y!=null?tg.y:0); if(Math.hypot(tpx-px,tpy-py)<34){ near=true; break; } }
       if(near) continue;
       var _u=(typeof invVP==='function')?invVP(px,py):null;
@@ -3152,8 +3158,9 @@ async function ocrSheetForSizes(){
     }
     try{ drawOverlay(); }catch(e){}
   } }
-  console.log('[sheet OCR] '+rawWords+' raw words read, '+placed+' matched a duct size, across '+nTiles+' tiles');
-  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Sheet OCR done.</b> '+placed+' size label(s) found ('+rawWords+' words read) across '+nTiles+' tile(s). Now hit <b>\u2795 Build takeoff</b>.</div>';
+  console.log('[sheet OCR] '+rawWords+' raw words, '+placed+' sizes, '+nTiles+' tiles');
+  console.log('[sheet OCR] sample words read: '+sampleWords.join(' | '));
+  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Sheet OCR done.</b> '+placed+' size label(s) found ('+rawWords+' words read) across '+nTiles+' tile(s).<br><span style="color:#9fb4c8">sample of words read: '+ (sampleWords.slice(0,30).join(' \u00b7 ').replace(/</g,'&lt;')||'(none)') +'</span></div>';
 }
 async function aiReadSizesAtClusters(){
   var out=document.getElementById('aiOut'); if(!out)return;
