@@ -127,7 +127,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t49 · OCR line-match + DPI + word sample log</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t50 · AI-vision tiled sheet sweep (reads busy CAD)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -301,6 +301,7 @@
         <button class="btn go" id="aiSizeGeo" style="background:#2a1a3a;border-color:#8a5fd0;color:#e6d8ff;margin-top:4px">🔢 Read sizes at detected text (geometry-located)</button>
         <button class="btn go" id="aiSizeYolo" style="background:#3a2a1a;border-color:#b8853f;color:#ffe6cc;margin-top:4px">🎯 Read sizes at YOLO sizetag boxes</button>
         <button class="btn go" id="ocrSheet" style="background:#1a3a3a;border-color:#3fb8b8;color:#ccffff;margin-top:4px">🔤 OCR sheet for sizes (no API, finds + reads)</button>
+        <button class="btn go" id="aiSweepTiled" style="background:#2a1a2a;border-color:#c86fd0;color:#ffd8ff;margin-top:4px">🤖 AI sweep sheet (tiled — reads + locates)</button>
         <label style="display:block;font-size:11px;color:#9fb4c8;margin-top:4px"><input type="checkbox" id="ocrOff"> AI-only (skip in-browser OCR)</label>
         <button class="btn go" id="dimFind" style="background:#13351f;border-color:#2a6b40;color:#bdf5cf;margin-top:6px">📐 Find duct by dimension (tag-match)</button>
         <button class="btn go" id="buildRuns" style="background:#1f1430;border-color:#7a4fd0;color:#e6d8ff;margin-top:6px">📊 Preview runs (optional — Build takeoff does this for you)</button>
@@ -2870,7 +2871,7 @@ function renderVisionSummary(p, meta){
   h+='<div class="hint" style="margin-top:6px">This is the AI\u2019s read of the whole sheet \u2014 eyeball it against the print. If the runs and sizes look right, the next step is turning these into placed, editable 3D pieces.</div>';
   return h;
 }
-(function(){ try{ var b=document.getElementById('aiFullTakeoff'); if(b) b.addEventListener('click', runFullAITakeoff); var s=document.getElementById('aiSizeRuns'); if(s) s.addEventListener('click', aiReadSizesPerRun); var z=document.getElementById('aiSizeSweep'); if(z) z.addEventListener('click', aiSizeSweep); var zg=document.getElementById('aiSizeGeo'); if(zg) zg.addEventListener('click', aiReadSizesAtClusters); var zy=document.getElementById('aiSizeYolo'); if(zy) zy.addEventListener('click', aiReadSizesFromYolo); var zo=document.getElementById('ocrSheet'); if(zo) zo.addEventListener('click', ocrSheetForSizes); }catch(e){} })();
+(function(){ try{ var b=document.getElementById('aiFullTakeoff'); if(b) b.addEventListener('click', runFullAITakeoff); var s=document.getElementById('aiSizeRuns'); if(s) s.addEventListener('click', aiReadSizesPerRun); var z=document.getElementById('aiSizeSweep'); if(z) z.addEventListener('click', aiSizeSweep); var zg=document.getElementById('aiSizeGeo'); if(zg) zg.addEventListener('click', aiReadSizesAtClusters); var zy=document.getElementById('aiSizeYolo'); if(zy) zy.addEventListener('click', aiReadSizesFromYolo); var zo=document.getElementById('ocrSheet'); if(zo) zo.addEventListener('click', ocrSheetForSizes); var zt=document.getElementById('aiSweepTiled'); if(zt) zt.addEventListener('click', aiSweepTiled); }catch(e){} })();
 // ---- Per-run size reader: crop each detected run, read ordered W×D + fittings, write back as size tags ----
 function groupDuctRuns(){
   var segs=(typeof segments!=='undefined'?segments:[]).filter(function(s){return s.cls==='duct';}); if(!segs.length) return [];
@@ -3162,6 +3163,54 @@ async function ocrSheetForSizes(){
   console.log('[sheet OCR] sample words read: '+sampleWords.join(' | '));
   out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Sheet OCR done.</b> '+placed+' size label(s) found ('+rawWords+' words read) across '+nTiles+' tile(s).<br><span style="color:#9fb4c8">sample of words read: '+ (sampleWords.slice(0,30).join(' \u00b7 ').replace(/</g,'&lt;')||'(none)') +'</span></div>';
 }
+
+// AI-vision tiled sweep: OCR reads garbage on busy CAD tiles, but the vision model reads them fine.
+// Same hi-DPI tiling, but each tile is read by the AI worker, which lists every size and its position.
+async function aiSweepTiled(){
+  var out=document.getElementById('aiOut'); if(!out)return;
+  var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,''); if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
+  var cv=document.getElementById('pdfCanvas'); if(!cv||!cv.width){ out.innerHTML='<div class="hint">Load a PDF page first.</div>'; return; }
+  if(!window.__nvt||typeof viewport==='undefined'||!viewport){ out.innerHTML='<div class="hint">Render the page first.</div>'; return; }
+  var rx0=0,ry0=0,rx1=cv.width,ry1=cv.height;
+  if(typeof workArea!=='undefined'&&workArea){ try{ var P0=applyM(viewport.transform,workArea.ux0,workArea.uy0),P1=applyM(viewport.transform,workArea.ux1,workArea.uy1); rx0=Math.max(0,Math.min(P0[0],P1[0])); ry0=Math.max(0,Math.min(P0[1],P1[1])); rx1=Math.min(cv.width,Math.max(P0[0],P1[0])); ry1=Math.min(cv.height,Math.max(P0[1],P1[1])); }catch(e){} }
+  if(!(rx1>rx0)||!(ry1>ry0)){ rx0=0;ry0=0;rx1=cv.width;ry1=cv.height; }
+  var f=2, STEP=620, OV=90;                  // bigger tiles than OCR (AI handles more context per call)
+  var cols=[], rows=[];
+  for(var x=rx0; x<rx1; x+=STEP-OV) cols.push(x);
+  for(var y=ry0; y<ry1; y+=STEP-OV) rows.push(y);
+  if(!cols.length) cols=[rx0]; if(!rows.length) rows=[ry0];
+  var nTiles=cols.length*rows.length;
+  var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
+  var prompt='This is a HIGH-RES tile from an HVAC plan. List EVERY duct SIZE label printed in this image. Rectangular duct = WIDTHxHEIGHT in inches like "20x16"; round duct = a single diameter like "12\\"\u00f8" (report as "\u00f812"). For EACH, give its CENTER position in THIS image as fractions cx (0=left..1=right), cy (0=top..1=bottom). Ignore diffuser/grille/equipment tags (CD-500, EF1), CFM values, and notes. Do NOT guess. Answer ONLY JSON: {"sizes":[{"size":"20x16","cx":0.3,"cy":0.5}]} or {"sizes":[]}.';
+  out.innerHTML='<div class="hint"><span class="spin"></span> AI sweeping '+nTiles+' tile(s)\u2026</div>';
+  var placed=0, done=0, errs=0;
+  for(var ci=0; ci<cols.length; ci++){ for(var ri=0; ri<rows.length; ri++){ done++;
+    var tx0=cols[ci], ty0=rows[ri], tx1=Math.min(rx1,tx0+STEP), ty1=Math.min(ry1,ty0+STEP);
+    try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> AI tile '+done+' / '+nTiles+'\u2026 ('+placed+' sizes)'; }catch(e){}
+    var url; try{ url=await renderTileForOCR(tx0,ty0,tx1,ty1,f); }catch(e){ errs++; continue; }
+    var b64=url.split(',')[1];
+    var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},30000);
+    try{ var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:900,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:prompt}]}]})}); clearTimeout(to);
+      if(!resp.ok){ errs++; continue; } var data=await resp.json(); if(data.error){ errs++; continue; }
+      var raw=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
+      var res; try{ res=JSON.parse(raw); }catch(e){ continue; }
+      ((res&&res.sizes)||[]).forEach(function(it){
+        var sraw=(it&&it.size!=null)?it.size:it; var sz=sizeFromWord(String(sraw)); if(!sz) return;
+        var cx=(it&&typeof it.cx==='number')?Math.max(0,Math.min(1,it.cx)):0.5;
+        var cy=(it&&typeof it.cy==='number')?Math.max(0,Math.min(1,it.cy)):0.5;
+        var px=tx0+cx*(tx1-tx0), py=ty0+cy*(ty1-ty0);
+        var near=false; for(var t=0;t<tags.length;t++){ var tg=tags[t]; if(!_sweepDims(tg.text)) continue; var tpx=(tg.x!=null?tg.x:0), tpy=(tg.y!=null?tg.y:0); if(Math.hypot(tpx-px,tpy-py)<34){ near=true; break; } }
+        if(near) return;
+        var _u=(typeof invVP==='function')?invVP(px,py):null;
+        var nn=(_u&&typeof applyM==='function')?applyM(window.__nvt,_u[0],_u[1]):[px/K,py/K];
+        var _t={x:px,y:py,nx:nn[0],ny:nn[1],text:sz,_ai:true,_by:'aitile'}; if(_u){_t.ux=_u[0];_t.uy=_u[1];} tags.push(_t); placed++;
+      });
+      try{ drawOverlay(); }catch(e){}
+    }catch(e){ clearTimeout(to); errs++; }
+  } }
+  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>AI sweep done.</b> '+placed+' size label(s) placed across '+nTiles+' tile(s) ('+errs+' tile errors). Now hit <b>\u2795 Build takeoff</b>.</div>';
+}
+window.aiSweepTiled=aiSweepTiled;
 async function aiReadSizesAtClusters(){
   var out=document.getElementById('aiOut'); if(!out)return;
   var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,''); if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
