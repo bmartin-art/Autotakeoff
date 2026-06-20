@@ -127,7 +127,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t53 · clean size UI to one entry + pipeline spec</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t54 · Stage 3+4 associate + scale cross-check + flags</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -297,6 +297,7 @@
         <button class="btn go" id="verifyTags" style="background:#10243a;border-color:#2b6aa0;color:#cfe7ff;margin-top:4px">✓ Verify duct against size tags</button>
         <button class="btn go" id="aiFullTakeoff" style="background:#2a1a3a;border-color:#6a3fb8;color:#dcccff;margin-top:6px">🤖 Run full AI takeoff (whole sheet)</button>
         <button class="btn go" id="aiSizeRuns" style="background:#1a2a3a;border-color:#3f8ab8;color:#cce6ff;margin-top:4px">🔎 Read sizes (per-run, tight crop)</button>
+        <button class="btn go" id="assocSizes" style="background:#1a3320;border-color:#3f9a5a;color:#cfeedd;margin-top:4px">🔗 Associate + flag (snap to runs · green/amber/red)</button>
         <button class="btn go" id="dimFind" style="background:#13351f;border-color:#2a6b40;color:#bdf5cf;margin-top:6px">📐 Find duct by dimension (tag-match)</button>
         <button class="btn go" id="buildRuns" style="background:#1f1430;border-color:#7a4fd0;color:#e6d8ff;margin-top:6px">📊 Preview runs (optional — Build takeoff does this for you)</button>
         <div class="row" style="margin-top:6px;display:flex;gap:6px">
@@ -1452,6 +1453,46 @@ function buildSegmentRuns(){
 }
 (function(){ try{ var b=document.getElementById('buildRuns'); if(b) b.addEventListener('click', buildSegmentRuns); }catch(e){} })();
 
+/* STAGE 3+4 — ASSOCIATE + SCALE CROSS-CHECK.
+   Each size tag is snapped to the run it belongs to and flagged by confidence:
+     green = associated AND its screen-facing width matches the run's geometric width (two signals agree)
+     amber = associated but width disagrees (eyeball it)
+     red   = no run wanted it (orphan) — kept visible, not deleted, so we can judge the scoring. */
+function associateSizes(){
+  var out=document.getElementById('aiOut');
+  var runs=window.__sgRuns||[];
+  if(!runs.length){ if(out) out.innerHTML='<div class="hint">Build runs first \u2014 association links each size to a built run.</div>'; return; }
+  if(!window.__nvt||typeof viewport==='undefined'||!viewport){ if(out) out.innerHTML='<div class="hint">Render the page first.</div>'; return; }
+  var m=window.__nvt,ma=m[0],mb=m[1],mc=m[2],md=m[3],me=m[4],mf=m[5],mdet=(ma*md-mb*mc)||1;
+  function nvt2user(nx,ny){ return [(md*(nx-me)-mc*(ny-mf))/mdet, (-mb*(nx-me)+ma*(ny-mf))/mdet]; }
+  // precompute each run's centerline + width (nvt frame, from its corners)
+  var R=runs.map(function(r){ var c0=r.corners[0],c1=r.corners[1],c2=r.corners[2],c3=r.corners[3];
+    var A=[(c0[0]+c3[0])/2,(c0[1]+c3[1])/2], B=[(c1[0]+c2[0])/2,(c1[1]+c2[1])/2];
+    var dx=B[0]-A[0],dy=B[1]-A[1],L=Math.hypot(dx,dy)||1;
+    return {A:A,ux:dx/L,uy:dy/L,L:L,widthPx:Math.hypot(c0[0]-c3[0],c0[1]-c3[1]),widthIn:r.widthIn}; });
+  var CAP=110, green=0, amber=0, red=0, assoc=0;
+  for(var i=0;i<tags.length;i++){ var t=tags[i]; if(t.nx==null) continue; var pd=parseTagDims(t.text); if(!pd) continue;
+    var best=-1, bp=1e9, balong=0;
+    for(var j=0;j<R.length;j++){ var r=R[j]; var vx=t.nx-r.A[0], vy=t.ny-r.A[1]; var along=vx*r.ux+vy*r.uy;
+      if(along < -r.widthPx || along > r.L+r.widthPx) continue;            // tag must fall along the run's length
+      var perp=Math.abs(vx*(-r.uy)+vy*(r.ux));
+      if(perp > Math.max(r.widthPx, CAP)) continue;                        // and within reach perpendicular
+      if(perp < bp){ bp=perp; best=j; balong=Math.max(0,Math.min(r.L,along)); }
+    }
+    if(best<0){ t._flag='red'; red++; continue; }                          // orphan — kept, flagged
+    var rb=R[best];
+    var snx=rb.A[0]+balong*rb.ux, sny=rb.A[1]+balong*rb.uy;                 // snap onto the run centerline
+    t.nx=snx; t.ny=sny; var u=nvt2user(snx,sny); t.ux=u[0]; t.uy=u[1]; var p=applyM(viewport.transform,u[0],u[1]); t.x=p[0]; t.y=p[1];
+    var diff=Math.abs(pd.w - rb.widthIn);                                  // scale cross-check: tag width vs run width
+    if(diff<=4){ t._flag='green'; green++; } else { t._flag='amber'; amber++; }
+    assoc++;
+  }
+  try{ drawOverlay(); }catch(e){}
+  if(out) out.innerHTML='<div class="hint" style="color:#cce6ff"><b>Associated.</b> '+assoc+' snapped to runs \u2014 <span style="color:#15e06a">'+green+' locked</span> \u00b7 <span style="color:#e0a92a">'+amber+' width mismatch</span> \u00b7 <span style="color:#ff4d4d">'+red+' orphan</span>. Then Build takeoff.</div>';
+}
+window.associateSizes=associateSizes;
+(function(){ try{ var b=document.getElementById('assocSizes'); if(b) b.addEventListener('click', associateSizes); }catch(e){} })();
+
 // ---- guided setup wizard: a few plain questions, then it configures + runs detection ----
 var WIZ={step:0,sub:null};
 function pulseEl(el){ if(!el)return; var o=el.style.boxShadow||''; el.style.transition='box-shadow .3s'; el.style.boxShadow='0 0 0 3px #15e06a'; setTimeout(function(){ try{el.style.boxShadow=o;}catch(e){} },1500); }
@@ -1742,7 +1783,7 @@ function drawOverlay(){
   // size-tag markers — draw where each size label actually sits (AI sweep = magenta, other = cyan).
   // Lets us see whether tags land ON the runs (snap-tolerance issue) or off them (AI-coordinate issue).
   try{ for(var _ti=0; _ti<tags.length; _ti++){ var _t=tags[_ti]; if(_t.x==null||_t.y==null) continue; if(!/\d/.test(String(_t.text||''))) continue;
-    var _c=_t._ai?'#ff39c0':'#7be0ff';
+    var _c = _t._flag==='green'?'#15e06a' : _t._flag==='amber'?'#e0a92a' : _t._flag==='red'?'#ff4d4d' : (_t._ai?'#ff39c0':'#7be0ff');
     html+='<circle cx="'+_t.x.toFixed(1)+'" cy="'+_t.y.toFixed(1)+'" r="4" fill="'+_c+'" stroke="#000" stroke-width="0.7" pointer-events="none"/>'
         +'<text x="'+(_t.x+6).toFixed(1)+'" y="'+(_t.y-6).toFixed(1)+'" font-size="13" font-weight="700" fill="'+_c+'" stroke="#000" stroke-width="0.5" pointer-events="none">'+String(_t.text)+'</text>';
   } }catch(e){}
