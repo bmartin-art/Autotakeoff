@@ -127,7 +127,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t54 · Stage 3+4 associate + scale cross-check + flags</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t59 · Stage 5 carry-forward (inherit size across connected runs)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -155,6 +155,7 @@
       <div class="hint adv">Draw a box around the duct so the title block, notes, and legend are ignored.</div>
       <div class="row" style="margin-top:6px;align-items:center"><span style="font-size:12px">Scale</span><select id="scaleSel" style="flex:1;margin-left:6px"><option data-l='1/16"' value="0.0625">1/16" = 1′-0″</option><option data-l='3/32"' value="0.09375">3/32" = 1′-0″</option><option data-l='1/8"' value="0.125">1/8" = 1′-0″</option><option data-l='3/16"' value="0.1875">3/16" = 1′-0″</option><option data-l='1/4"' value="0.25">1/4" = 1′-0″</option><option data-l='3/8"' value="0.375">3/8" = 1′-0″</option><option data-l='1/2"' value="0.5">1/2" = 1′-0″</option><option data-l='3/4"' value="0.75">3/4" = 1′-0″</option><option data-l='1"' value="1">1" = 1′-0″</option><option data-l='1-1/2"' value="1.5">1-1/2" = 1′-0″</option><option data-l='3"' value="3">3" = 1′-0″</option></select></div>
       <div class="hint" id="scaleDet">Scale: auto-detecting…</div>
+      <button class="btn" id="scaleAI" style="font-size:11px;padding:3px 8px;margin-top:3px">🔍 Read scale (AI)</button>
       <label class="adv" style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="aiFirst"> <b>AI-first</b> (single-layer) — don’t pre-green; let the AI promote the duct</label>
       <div class="row" style="margin-top:7px"><button class="btn go" id="tbPick" style="width:100%;background:#3a2a0a;border-color:#a07a2b;color:#ffe6b0;font-weight:600">🎯 Pick a duct line (color + thickness)</button></div>
       <div class="row" style="margin-top:7px"><button class="btn go" id="setupWiz" style="width:100%;background:#102a44;border-color:#2f6fb0;color:#cfe6ff;font-weight:700">⚙ Guided setup (recommended)</button></div>
@@ -916,6 +917,35 @@ var SCALE_OPTS=[[0.0625,'1/16"'],[0.09375,'3/32"'],[0.125,'1/8"'],[0.1875,'3/16"
 function scaleLabel(v){ var best=SCALE_OPTS[0],bd=1e9; SCALE_OPTS.forEach(function(o){ var d=Math.abs(o[0]-v); if(d<bd){bd=d;best=o;} }); return best[1]; }
 function scaleText(){ return scaleLabel(scaleIPF)+' = 1\u2032-0\u2033'+(scaleAuto?' (auto)':' (set)')+' \u00b7 ~'+Math.round(approxLF())+' LF traced'; }
 function updateScaleUI(){ var sel=document.getElementById('scaleSel'); if(sel){ var lbl=scaleLabel(scaleIPF); for(var i=0;i<sel.options.length;i++){ if(sel.options[i].getAttribute('data-l')===lbl){ sel.selectedIndex=i; break; } } } var d=document.getElementById('scaleDet'); if(d) d.textContent=scaleText(); }
+// Auto-read the drawing scale note visually (prints with no text layer). Manual dropdown stays the override.
+async function readScaleAI(){
+  var d=document.getElementById('scaleDet');
+  var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,''); if(!wurl){ if(d) d.textContent='Set the AI worker URL first.'; return; }
+  var cv=document.getElementById('pdfCanvas'); if(!cv||!cv.width){ return; }
+  if(d) d.textContent='Reading scale\u2026';
+  var S=Math.min(1, 1900/Math.max(cv.width,cv.height,1));
+  var o=document.createElement('canvas'); o.width=Math.max(1,Math.round(cv.width*S)); o.height=Math.max(1,Math.round(cv.height*S));
+  var x=o.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,o.width,o.height); x.drawImage(cv,0,0,o.width,o.height);
+  var b64=o.toDataURL('image/png').split(',')[1];
+  var prompt='This is an HVAC plan sheet. Find the DRAWING SCALE note (architectural, like 3/32"=1\'-0" or 1/8"=1\'-0"), usually near the plan title or in the title block. Report the inch-fraction that equals one foot. Answer ONLY JSON: {"scale":"3/32"} or {"scale":null}.';
+  try{
+    var resp=await fetch(wurl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:120,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:prompt}]}]})});
+    var data=await resp.json(); var raw=(data.content||[]).filter(function(z){return z.type==='text';}).map(function(z){return z.text;}).join('').replace(/```json|```/g,'').trim();
+    var jm=raw.indexOf('{'); if(jm>0) raw=raw.slice(jm); var res=JSON.parse(raw);
+    if(!res||!res.scale){ if(d) d.textContent=scaleText()+' \u00b7 AI: no scale note found'; return; }
+    var frac=String(res.scale).trim().replace(/["\u2033=].*/,'').trim(), val=null;
+    var mm=/^(\d+(?:\.\d+)?)\s*-\s*(\d+)\/(\d+)$/.exec(frac);
+    if(mm){ val=parseFloat(mm[1])+(+mm[2])/(+mm[3]); }
+    else { var fm=/^(\d+(?:\.\d+)?)\s*\/\s*(\d+)$/.exec(frac); if(fm) val=(+fm[1])/(+fm[2]); else { var nm=parseFloat(frac); if(!isNaN(nm)) val=nm; } }
+    if(val==null||!(val>0)){ if(d) d.textContent=scaleText()+' \u00b7 AI scale unclear: "'+frac+'"'; return; }
+    var opts=[0.0625,0.09375,0.125,0.1875,0.25,0.375,0.5,0.75,1,1.5,3], nearest=opts[0], nd=1e9;
+    opts.forEach(function(o2){ var dd=Math.abs(o2-val); if(dd<nd){nd=dd;nearest=o2;} });
+    scaleIPF=nearest; scaleAuto=false; try{ updateScaleUI(); }catch(e){}
+    if(d) d.textContent=scaleText()+' \u00b7 AI read '+frac+'"';
+    try{ drawOverlay(); }catch(e){}
+  }catch(e){ if(d) d.textContent=scaleText()+' \u00b7 AI scale read failed'; }
+}
+window.readScaleAI=readScaleAI;
 function detectScaleFromText(txt){ if(!scaleAuto){ updateScaleUI(); return; }
   var re=/(\d+(?:\s*\/\s*\d+)?)\s*["\u201d]?\s*=\s*1'?\s*-?\s*0?\s*["\u201d]?/g, m, cands=[];
   while((m=re.exec(txt||''))){ var f=m[1].replace(/\s+/g,''); var v; if(f.indexOf('/')>=0){ var p=f.split('/'); v=parseFloat(p[0])/parseFloat(p[1]); } else v=parseFloat(f); if(v>0&&v<=12) cands.push(v); }
@@ -1469,8 +1499,8 @@ function associateSizes(){
   var R=runs.map(function(r){ var c0=r.corners[0],c1=r.corners[1],c2=r.corners[2],c3=r.corners[3];
     var A=[(c0[0]+c3[0])/2,(c0[1]+c3[1])/2], B=[(c1[0]+c2[0])/2,(c1[1]+c2[1])/2];
     var dx=B[0]-A[0],dy=B[1]-A[1],L=Math.hypot(dx,dy)||1;
-    return {A:A,ux:dx/L,uy:dy/L,L:L,widthPx:Math.hypot(c0[0]-c3[0],c0[1]-c3[1]),widthIn:r.widthIn}; });
-  var CAP=110, green=0, amber=0, red=0, assoc=0;
+    return {A:A,ux:dx/L,uy:dy/L,L:L,widthPx:Math.hypot(c0[0]-c3[0],c0[1]-c3[1]),widthIn:r.widthIn,run:r}; });
+  var CAP=110, green=0, amber=0, red=0, assoc=0, rnd=0;
   for(var i=0;i<tags.length;i++){ var t=tags[i]; if(t.nx==null) continue; var pd=parseTagDims(t.text); if(!pd) continue;
     var best=-1, bp=1e9, balong=0;
     for(var j=0;j<R.length;j++){ var r=R[j]; var vx=t.nx-r.A[0], vy=t.ny-r.A[1]; var along=vx*r.ux+vy*r.uy;
@@ -1483,12 +1513,13 @@ function associateSizes(){
     var rb=R[best];
     var snx=rb.A[0]+balong*rb.ux, sny=rb.A[1]+balong*rb.uy;                 // snap onto the run centerline
     t.nx=snx; t.ny=sny; var u=nvt2user(snx,sny); t.ux=u[0]; t.uy=u[1]; var p=applyM(viewport.transform,u[0],u[1]); t.x=p[0]; t.y=p[1];
+    if(pd.round){ rb.run.round=true; rb.run.widthIn=pd.w; rb.run.sizes=['\u00f8'+pd.w]; t._round=true; rnd++; }   // round tag -> round run -> round takeoff
     var diff=Math.abs(pd.w - rb.widthIn);                                  // scale cross-check: tag width vs run width
     if(diff<=4){ t._flag='green'; green++; } else { t._flag='amber'; amber++; }
     assoc++;
   }
   try{ drawOverlay(); }catch(e){}
-  if(out) out.innerHTML='<div class="hint" style="color:#cce6ff"><b>Associated.</b> '+assoc+' snapped to runs \u2014 <span style="color:#15e06a">'+green+' locked</span> \u00b7 <span style="color:#e0a92a">'+amber+' width mismatch</span> \u00b7 <span style="color:#ff4d4d">'+red+' orphan</span>. Then Build takeoff.</div>';
+  if(out) out.innerHTML='<div class="hint" style="color:#cce6ff"><b>Associated.</b> '+assoc+' snapped to runs \u2014 <span style="color:#15e06a">'+green+' locked</span> \u00b7 <span style="color:#e0a92a">'+amber+' width mismatch</span> \u00b7 <span style="color:#ff4d4d">'+red+' orphan</span>'+(rnd?' \u00b7 '+rnd+' round':'')+'. Then Build takeoff.</div>';
 }
 window.associateSizes=associateSizes;
 (function(){ try{ var b=document.getElementById('assocSizes'); if(b) b.addEventListener('click', associateSizes); }catch(e){} })();
@@ -2030,17 +2061,20 @@ function refreshSel(){
     var sg=window.__sgRuns||[];
     var geom=sg.map(function(r){ var c=r.corners; if(!c||c.length<4) return null;
       var dx=c[1][0]-c[0][0], dy=c[1][1]-c[0][1], Lpt=Math.hypot(dx,dy)||1, ux=dx/Lpt, uy=dy/Lpt;
-      return {sx:(c[0][0]+c[3][0])/2, sy:(c[0][1]+c[3][1])/2, ux:ux, uy:uy, pnx:-uy, pny:ux, Lpt:Lpt, widthIn:r.widthIn}; });
+      var wpx=Math.hypot(c[0][0]-c[3][0], c[0][1]-c[3][1]);                     // run's own drawn width in px (scale-free)
+      return {sx:(c[0][0]+c[3][0])/2, sy:(c[0][1]+c[3][1])/2, ux:ux, uy:uy, pnx:-uy, pny:ux, Lpt:Lpt, wpx:wpx}; });
     var assign=new Array(tags.length).fill(-1);
     for(var ti=0; ti<tags.length; ti++){ var tg=tags[ti]; if(!tg||tg.nx==null) continue; var pd=parseTagDims(tg.text); if(!pd) continue;
       var best=-1, bestScore=1e9;
       for(var gi=0; gi<geom.length; gi++){ var g=geom[gi]; if(!g) continue;
         var along=(tg.nx-g.sx)*g.ux+(tg.ny-g.sy)*g.uy;
         var perp=Math.abs((tg.nx-g.sx)*g.pnx+(tg.ny-g.sy)*g.pny);
-        if(along < -inToPt(12) || along > g.Lpt+inToPt(12)) continue;          // must project near the run's span (footprint)
-        if(perp > inToPt(Math.max(g.widthIn, pd.w)/2 + 24)) continue;          // must sit within the duct body (+margin)
-        var over=Math.max(0,-along)+Math.max(0, along-g.Lpt);                  // distance projected past the run ends
-        var score=ptToIn(perp) + ptToIn(over)*0.5;                            // proximity + footprint-overlap penalty
+        var amarg=Math.max(g.wpx, 24);                                         // project within ~one width of the ends
+        if(along < -amarg || along > g.Lpt+amarg) continue;
+        var pmarg=Math.max(g.wpx, 90);                                         // sit within ~one width (or 90px) perpendicular
+        if(perp > pmarg) continue;
+        var over=Math.max(0,-along)+Math.max(0, along-g.Lpt);
+        var score=perp + over*0.5;                                            // px-based proximity + footprint penalty (no scale dependence)
         if(score<bestScore){ bestScore=score; best=gi; }
       }
       assign[ti]=best;
@@ -2061,9 +2095,10 @@ function refreshSel(){
       var sx=(c[0][0]+c[3][0])/2, sy=(c[0][1]+c[3][1])/2;
       var lenIn=ptToIn(Lpt);
       // ── SIZE EVENTS along the run (rule 1: read tags; first number = width on the print) ──
-      var ev=[];
+      var ev=[]; var _linkedTi=[];
       // one-to-one footprint association: use only the size tags ASSIGNED to this run (assignTagsToRuns)
       for(var _ti=0; _ti<tags.length; _ti++){ if(_tagAssign[_ti]!==_sgi) continue; var tg=tags[_ti]; if(!tg||tg.nx==null) continue; var pd=parseTagDims(tg.text); if(!pd) continue;
+        _linkedTi.push(_ti);
         var str=pd.round?('\u00d8'+pd.w):(pd.w+'\u00d7'+pd.h); var ai=ptToIn((tg.nx-sx)*ux+(tg.ny-sy)*uy);
         if(ev.some(function(e){ return Math.abs(e.alongIn-ai)<6 && e.str===str; })) continue;
         ev.push({alongIn:ai, tagNx:tg.nx, tagNy:tg.ny, w:pd.w, h:pd.h, round:pd.round, str:str});
@@ -2113,7 +2148,7 @@ function refreshSel(){
         });
         if(!pieces.length){ var s0=ev[0]; pieces.push({kind:'straight',lenIn:rnd(lenIn),widthIn:s0.w,depthIn:s0.round?s0.w:s0.h,size:s0.str,cid:s0.round?'spiral':'st',camduct:s0.round?'Spiral':'Straight Duct',round:s0.round}); }
       }
-      window.__runs2d.push({id:uid(),axis:r.axis,start:[sx,sy],dir:[ux,uy],normal:[pnx,pny],widthIn:(pieces[0]&&pieces[0].widthIn)||r.widthIn,color:palette[ci%palette.length],label:'',confirmed:!!r.confirmed,scaled:scaled,pieces:pieces,
+      window.__runs2d.push({id:uid(),axis:r.axis,start:[sx,sy],dir:[ux,uy],normal:[pnx,pny],widthIn:(pieces[0]&&pieces[0].widthIn)||r.widthIn,color:palette[ci%palette.length],label:'',confirmed:!!r.confirmed,scaled:scaled,tagIdx:_linkedTi,pieces:pieces,
         _startN:[c[0],c[3]], _Lpt:Lpt});
       ci++;
     });
@@ -2124,8 +2159,9 @@ function refreshSel(){
     var nOut = containYoloToGreen();
     var nJoin = joinRunsAtElbows();
     var nFit = integrateYoloFittings();
+    var nCarry = carryForwardSizes();
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Created '+window.__runs2d.length+' runs'+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 joined '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+'. Click a joint to edit.');
+    setStatus('Created '+window.__runs2d.length+' runs'+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 joined '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nCarry?(' \u00b7 '+nCarry+' run(s) inherited size'):'')+'. Click a joint to edit.');
   }
   window.__runsFromPreview=runsFromPreview;
 
@@ -2261,6 +2297,34 @@ function refreshSel(){
     return joined;
   }
   window.__joinRunsAtElbows=joinRunsAtElbows;
+
+  // ---- STAGE 5 CARRY-FORWARD: a run with no tag of its own inherits the size of the run it
+  // connects to at a shared endpoint (a branch holds the trunk size until a real sizechange).
+  // Only FILLS scaled (untagged) runs — never overrides a run that carries its own tag.
+  function carryForwardSizes(){
+    var runs=window.__runs2d||[]; if(runs.length<2) return 0;
+    var reach=Math.max(inToPt(36), 40);                                  // endpoints within ~3' (or 40px floor) = connected
+    function ends(r){ var e=runEnd(r); return [{x:r.start[0],y:r.start[1],atStart:true},{x:e.x,y:e.y,atStart:false}]; }
+    function endSize(r, atStart){ var ps=r.pieces.filter(function(p){return p.kind==='straight';}); if(!ps.length) return null;
+      var p=atStart?ps[0]:ps[ps.length-1]; return {widthIn:p.widthIn, depthIn:p.depthIn, size:p.size, round:!!p.round}; }
+    var changed=0, passes=0;
+    do{ var did=0; passes++;
+      runs.forEach(function(r){ if(!r.scaled) return;                    // only fill unsized runs
+        var re=ends(r), donor=null, dStart=true, bestd=reach;
+        runs.forEach(function(o){ if(o===r||o.scaled) return;            // donor must already be sized
+          var oe=ends(o);
+          re.forEach(function(a){ oe.forEach(function(b){ var dd=Math.hypot(a.x-b.x,a.y-b.y);
+            if(dd<=bestd){ bestd=dd; donor=o; dStart=b.atStart; } }); });
+        });
+        if(donor){ var s=endSize(donor,dStart); if(s){
+          r.pieces.forEach(function(p){ if(p.kind==='straight'){ p.widthIn=s.widthIn; p.depthIn=s.depthIn; p.size=s.size; p.round=s.round; p.cid=s.round?'spiral':'st'; p.camduct=s.round?'Spiral':'Straight Duct'; p._inherited=true; } });
+          r.widthIn=s.widthIn; r.scaled=false; r._inherited=true; did++; changed++;
+        } }
+      });
+    }while(did>0 && passes<8);
+    return changed;
+  }
+  window.__carryForwardSizes=carryForwardSizes;
 
   // ---- CONTAINMENT: green geometry is the boundary. A YOLO detection must sit inside a run's
   // resolved footprint (centerline ± width, from tag or scale). Detections outside ALL green are
@@ -3581,7 +3645,7 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ selected.clear();
   if(tc) tc.onclick=function(){ confirmTakeoff(); };
   var tl=document.getElementById('tbLock'); if(tl) tl.onclick=lockInTakeoff; var rs=document.getElementById('tbRunSel'); if(rs) rs.onclick=function(){ selectionDone=true; classify(); drawOverlay(); try{ setStatus('Line selection run \u2014 adjust filters to re-run live, or use AI review to refine.'); }catch(e){} }; var pk=document.getElementById('tbPick'); if(pk) pk.onclick=function(){ pickMode=true; try{document.getElementById('overlay').style.cursor='crosshair';}catch(e){} setStatus('🎯 Click a piece of duct on the print to set color + thickness.'); }; var mtd=document.getElementById('mTolD'), mtw=document.getElementById('mTolW'); function updTol(){ var a=document.getElementById('mTolDV'); if(a&&mtd)a.textContent=parseFloat(mtd.value).toFixed(2); var b2=document.getElementById('mTolWV'); if(b2&&mtw)b2.textContent=(parseFloat(mtw.value)>=3?'off':parseFloat(mtw.value).toFixed(1)); if(matchSample){ classify(); drawOverlay(); var bk=segments.filter(function(s){return s.cls==='duct';}).length; setStatus('Matched '+bk+' lines.'); } } if(mtd)mtd.addEventListener('input',updTol); if(mtw)mtw.addEventListener('input',updTol); var eb=document.getElementById('exportLearn'); if(eb) eb.onclick=exportLearning; var ib=document.getElementById('importLearn'), ifl=document.getElementById('importLearnFile'); if(ib&&ifl){ ib.onclick=function(){ ifl.click(); }; ifl.onchange=function(){ if(ifl.files&&ifl.files[0]) importLearning(ifl.files[0]); ifl.value=''; }; }
   var stb=document.getElementById('saveTakeoff'); if(stb) stb.onclick=saveTakeoff; var ltb=document.getElementById('loadTakeoff'), ltf=document.getElementById('loadTakeoffFile'); if(ltb&&ltf){ ltb.onclick=function(){ ltf.click(); }; ltf.onchange=function(){ if(ltf.files&&ltf.files[0]) loadTakeoff(ltf.files[0]); ltf.value=''; }; }
-  var ss=document.getElementById('scaleSel'); if(ss) ss.onchange=function(){ scaleIPF=parseFloat(this.value)||0.125; scaleAuto=false; updateScaleUI(); }; try{ updateScaleUI(); }catch(e){} })();
+  var ss=document.getElementById('scaleSel'); if(ss) ss.onchange=function(){ scaleIPF=parseFloat(this.value)||0.125; scaleAuto=false; updateScaleUI(); }; var sa=document.getElementById('scaleAI'); if(sa) sa.addEventListener('click', readScaleAI); try{ updateScaleUI(); }catch(e){} })();
 function gapUpd(){ $('minGapV').textContent=$('minGap').value+' pt'; $('maxGapV').textContent=$('maxGap').value+' pt';
   if(+$('minGap').value> +$('maxGap').value) $('maxGap').value=$('minGap').value;
   classify(); drawOverlay(); }
