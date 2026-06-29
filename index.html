@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t72 · elbow rect/round from connected duct (fix round-on-rect)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t73 · tighten support connection (drop fragments riding in near real duct)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2295,7 +2295,7 @@ function refreshSel(){
   // reflects everything we know. Safety: if nothing is supported, keep all (don't nuke the sheet).
   function dropUnsupportedRuns(){
     var runs=window.__runs2d||[]; if(runs.length<2) return 0;
-    var reach=Math.max(inToPt(36),40);
+    var reach=28;   // endpoints must nearly MEET at a joint (scale-free px) — a fragment merely passing near a run no longer rides in
     var joinIds={}; (window.__elbowJoins||[]).forEach(function(j){ joinIds[j.trunkId]=1; joinIds[j.branchId]=1; });
     function ends(r){ var e=runEnd(r); return [[r.start[0],r.start[1]],[e.x,e.y]]; }
     var sup={};
