@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t73 · tighten support connection (drop fragments riding in near real duct)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t77 · track-walker beta button (ordered straight+transition, single-wall via __sgRuns)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -308,6 +308,7 @@
           <button class="btn go" id="itemsFromRunsBtn" style="flex:2;background:#0c2a1a;border-color:#2b9e5c;color:#bfffd2;font-weight:700">➕ Build takeoff (joints)</button>
           <button class="btn adv" id="itemsClearBtn" style="flex:1;background:#3a2030;border-color:#7a3b4b;color:#fbb">Clear</button>
         </div>
+        <button class="btn go" id="trackWalkBtn" style="background:#10202e;border-color:#3a86b8;color:#cfe9ff;margin-top:6px;font-weight:700">🚂 Build (track-walk · beta)</button>
         <div class="hint" style="margin-top:4px"><b>One click:</b> Build takeoff (re)builds the runs from your current duct selection and breaks each into 5′ joint pieces (round = 10′) — no need to hit Preview first. Click a joint to change its length (chain reflows), insert a reducer/tee/elbow (reducer resizes downstream), shift-click to multi-select, color/label runs. <b>Scan with YOLO first</b> and it will auto-split runs at detected fittings and drop in shape-correct fittings. Wheel = zoom to cursor.</div>
         <div class="row" style="margin-top:6px;display:flex;gap:6px;align-items:center">
           <button class="btn" id="yoloCleanBtn" style="flex:2;background:#1a2a0c;border-color:#7a9e2b;color:#e6ffbf">🧹 Clean with YOLO</button>
@@ -2119,13 +2120,14 @@ function refreshSel(){
       console.log('[takeoff sizing] '+window.__runs2d.length+' runs | '+_st+' YOLO sizetags | '+((typeof tags!=='undefined'&&tags)?tags.length:0)+' PDF text tags extracted');
       window.__runs2d.forEach(function(r,i){ var p=r.pieces[0]||{}; console.log('  run#'+i+' '+r.axis+' gapW='+r.widthIn+'" scaled='+!!r.scaled+' size='+(p.size||'?')+' linkedTags='+((r.tagIdx&&r.tagIdx.length)||0)); });
     }catch(e){ console.log('[takeoff sizing] diag error', e); }
+    var nMerge = mergeTagLineRuns();
     var nOut = containYoloToGreen();
     var nJoin = joinRunsAtElbows();
     var nFit = integrateYoloFittings();
     var nCarry = carryForwardSizes();
     var nDrop = dropUnsupportedRuns();
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Created '+window.__runs2d.length+' runs'+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nCarry?(' \u00b7 '+nCarry+' inherited size'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.');
+    setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nCarry?(' \u00b7 '+nCarry+' inherited size'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.');
   }
   window.__runsFromPreview=runsFromPreview;
 
@@ -2293,6 +2295,53 @@ function refreshSel(){
   // or it CONNECTS (endpoint-adjacent) to a supported run. Stray fragments from odd green lines that
   // nothing vouches for get dropped. Runs LAST, after association + carry-forward, so "supported"
   // reflects everything we know. Safety: if nothing is supported, keep all (don't nuke the sheet).
+  // ---- TAG-LINE MERGE: geometry over-fragments a straight trunk; a column/row of colinear size tags
+  // (16x8 -> 20x8 -> 20x10) says it's ONE run. Merge colinear tag-chained fragments into a single run,
+  // then the existing span logic drops transitions exactly where the tag VALUE changes. Rebuild-from-span
+  // (not stitch) so nothing drifts. Conservative: needs 2+ tags AND contiguity, else leaves the seam.
+  function mergeTagLineRuns(){
+    var runs=window.__runs2d||[]; if(runs.length<2) return 0;
+    function endOf(r){ return runEnd(r); }
+    var groups={};
+    runs.forEach(function(r){ if(r.axis!=='vertical'&&r.axis!=='horizontal') return;
+      var e=endOf(r); var k = r.axis==='vertical' ? ('V'+Math.round(((r.start[0]+e.x)/2)/16)) : ('H'+Math.round(((r.start[1]+e.y)/2)/16));
+      (groups[k]=groups[k]||[]).push(r); });
+    var removeIds={}, mergedCount=0, newRuns=[];
+    Object.keys(groups).forEach(function(k){
+      var g=groups[k]; if(g.length<2) return; var vert=k[0]==='V';
+      var allTags=[]; g.forEach(function(r){ (r.tagIdx||[]).forEach(function(ti){ var tg=tags[ti]; if(tg&&tg.nx!=null){ var pd=parseTagDims(tg.text); if(pd) allTags.push({nx:tg.nx,ny:tg.ny,pd:pd}); } }); });
+      if(allTags.length<2) return;                                  // need a tag-line (chain) to justify merging
+      var xs=[],ys=[],sumLen=0; g.forEach(function(r){ var e=endOf(r); xs.push(r.start[0],e.x); ys.push(r.start[1],e.y); sumLen+=Math.hypot(e.x-r.start[0],e.y-r.start[1]); });
+      var x0=Math.min.apply(null,xs),x1=Math.max.apply(null,xs),y0=Math.min.apply(null,ys),y1=Math.max.apply(null,ys);
+      var start,dir,normal,lenP;
+      if(vert){ start=[(x0+x1)/2,y0]; dir=[0,1]; normal=[1,0]; lenP=y1-y0; }
+      else { start=[x0,(y0+y1)/2]; dir=[1,0]; normal=[0,1]; lenP=x1-x0; }
+      if(lenP > sumLen*2.2) return;                                 // fragments too scattered = probably separate trunks, don't bridge
+      var lenIn=ptToIn(lenP);
+      var ev=allTags.map(function(t){ var alongP=vert?(t.ny-start[1]):(t.nx-start[0]); return {alongIn:Math.max(0,ptToIn(alongP)), w:t.pd.w, h:t.pd.h, round:!!t.pd.round, str:(t.pd.round?('\u00f8'+t.pd.w):(t.pd.w+'\u00d7'+t.pd.h))}; });
+      ev.sort(function(a,b){return a.alongIn-b.alongIn;});
+      var ev2=[]; ev.forEach(function(e){ if(!ev2.some(function(p){return p.str===e.str && Math.abs(p.alongIn-e.alongIn)<6;})) ev2.push(e); }); ev=ev2;
+      if(!ev.length) return;
+      var pieces=[], spans=[], prev={start:0,size:ev[0]};
+      for(var i=1;i<ev.length;i++){ if(ev[i].str!==prev.size.str){ spans.push({a:prev.start,b:ev[i].alongIn,size:prev.size}); prev={start:ev[i].alongIn,size:ev[i]}; } }
+      spans.push({a:prev.start,b:lenIn,size:prev.size});
+      var prevRound=null;
+      spans.forEach(function(sp,si){ var s=sp.size, depth=s.round?s.w:s.h;
+        if(si>0){ var rc='tr',rn='Transition'; if(prevRound!==null&&prevRound!==s.round){rc='s2r';rn='Sq to Round';} else if(s.round){rc='reducer';rn='Reducer';}
+          pieces.push({kind:'fitting',cid:rc,camduct:rn,round:s.round,lenIn:0,widthIn:s.w,depthIn:depth,size:s.str,_sizeStep:true}); }
+        var rem=Math.max(0,sp.b-sp.a), jl=s.round?120:JOINT_DEFAULT;
+        while(rem>0.5){ var L=Math.min(jl,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:s.w,depthIn:depth,size:s.str,cid:s.round?'spiral':'st',camduct:s.round?'Spiral':'Straight Duct',round:s.round}); rem-=L; }
+        prevRound=s.round; });
+      if(!pieces.length) return;
+      var mergedTagIdx=[]; g.forEach(function(r){ (r.tagIdx||[]).forEach(function(ti){ mergedTagIdx.push(ti); }); });
+      newRuns.push({id:uid(),axis:vert?'vertical':'horizontal',start:start,dir:dir,normal:normal,widthIn:(pieces[0]&&pieces[0].widthIn)||g[0].widthIn,color:g[0].color,label:'',confirmed:true,scaled:false,tagIdx:mergedTagIdx,pieces:pieces});
+      g.forEach(function(r){ removeIds[r.id]=1; }); mergedCount++;
+    });
+    if(mergedCount){ window.__runs2d=runs.filter(function(r){return !removeIds[r.id];}).concat(newRuns); }
+    return mergedCount;
+  }
+  window.__mergeTagLineRuns=mergeTagLineRuns;
+
   function dropUnsupportedRuns(){
     var runs=window.__runs2d||[]; if(runs.length<2) return 0;
     var reach=28;   // endpoints must nearly MEET at a joint (scale-free px) — a fragment merely passing near a run no longer rides in
@@ -2301,13 +2350,14 @@ function refreshSel(){
     var sup={};
     runs.forEach(function(r){
       var hasTag = r.tagIdx && r.tagIdx.length>0;
-      var hasFit = r.pieces && r.pieces.some(function(p){ return p.kind==='fitting'; });
-      if(hasTag || hasFit || joinIds[r.id] || r._inherited) sup[r.id]=true;       // seed: directly supported
+      if(hasTag || r._inherited) sup[r.id]=true;       // ANCHORED BY A SIZE TAG (or carry-forward from a tagged run).
+                                                        // fittings / bare connection are NOT enough — background floor/
+                                                        // diffuser lines can fake those. No duct size => not duct.
     });
     var seeded=0; for(var k in sup) seeded++;
-    if(!seeded) return 0;                                                          // nothing vouches for anything -> keep all
+    if(!seeded) return 0;                                                          // nothing tagged at all -> keep all (don't nuke)
     var changed=true, guard=0;
-    while(changed && guard++<12){ changed=false;                                  // propagate: connected to supported = supported
+    while(changed && guard++<12){ changed=false;                                  // a run truly joined to a tagged/inherited run survives (real branch)
       runs.forEach(function(r){ if(sup[r.id]) return; var re=ends(r);
         for(var i=0;i<runs.length;i++){ var o=runs[i]; if(o===r||!sup[o.id]) continue; var oe=ends(o);
           if(re.some(function(a){ return oe.some(function(b){ return Math.hypot(a[0]-b[0],a[1]-b[1])<=reach; }); })){ sup[r.id]=true; changed=true; break; }
@@ -2540,7 +2590,50 @@ function refreshSel(){
   window.__selColor=function(c){ var ids=new Set(); sel.forEach(function(k){ ids.add(k.split(':')[0]); }); ids.forEach(function(id){ var r=findRun(id); if(r)r.color=c; }); renderItems(); renderPanel(); };
   window.__selName=function(){ var el=document.getElementById('selLabel'); if(!el)return; var nm=el.value; var ids=new Set(); sel.forEach(function(k){ ids.add(k.split(':')[0]); }); ids.forEach(function(id){ var r=findRun(id); if(r)r.label=nm; }); renderItems(); renderPanel(); setStatus('Labeled '+ids.size+' run(s).'); };
 
+  // ===== TRACK-WALKER (beta) — separate builder. Walks each __sgRuns centerline (single-wall rescue
+  // already baked into __sgRuns by buildSegmentRuns), collects its size tags in order, and emits an
+  // ordered straight->transition->straight chain with transitions exactly at tag-value changes. Needs scale. =====
+  function buildRunsTrackWalk(){
+    if(typeof scaleIPF==='undefined' || !(scaleIPF>0)){ setStatus('Set the drawing scale first — track-walk needs it for widths and single-wall rescue.'); return; }
+    try{ buildSegmentRuns(); }catch(e){}                                  // build centerlines (includes single-wall rescue)
+    var sg=window.__sgRuns||[]; if(!sg.length){ setStatus('No duct centerlines — mark/scan duct first.'); return; }
+    window.__runs2d=[]; var ci=0, single=0, scaled=0;
+    sg.forEach(function(r){
+      var c=r.corners; if(!c||c.length<4) return;
+      var A=[(c[0][0]+c[3][0])/2,(c[0][1]+c[3][1])/2], B=[(c[1][0]+c[2][0])/2,(c[1][1]+c[2][1])/2];
+      var dx=B[0]-A[0],dy=B[1]-A[1],Lpt=Math.hypot(dx,dy)||1,ux=dx/Lpt,uy=dy/Lpt,pnx=-uy,pny=ux, lenIn=ptToIn(Lpt);
+      var ev=[]; (r.tagIdx||[]).forEach(function(ti){ var tg=tags[ti]; if(!tg||tg.nx==null) return; var pd=parseTagDims(tg.text); if(!pd) return;
+        var along=ptToIn((tg.nx-A[0])*ux+(tg.ny-A[1])*uy);
+        ev.push({alongIn:Math.max(0,along), w:pd.w, h:pd.h, round:!!pd.round, str:(pd.round?('\u00f8'+pd.w):(pd.w+'\u00d7'+pd.h))}); });
+      ev.sort(function(a,b){return a.alongIn-b.alongIn;});
+      var ev2=[]; ev.forEach(function(e){ if(!ev2.some(function(p){return p.str===e.str && Math.abs(p.alongIn-e.alongIn)<6;})) ev2.push(e); }); ev=ev2;
+      var pieces=[];
+      if(ev.length){                                                       // (A) sized by tags — lay straights, transition at each size step
+        var spans=[], prev={start:0,size:ev[0]};
+        for(var i=1;i<ev.length;i++){ if(ev[i].str!==prev.size.str){ spans.push({a:prev.start,b:ev[i].alongIn,size:prev.size}); prev={start:ev[i].alongIn,size:ev[i]}; } }
+        spans.push({a:prev.start,b:lenIn,size:prev.size});
+        var prevRound=null;
+        spans.forEach(function(sp,si){ var s=sp.size, depth=s.round?s.w:s.h;
+          if(si>0){ var rc='tr',rn='Transition'; if(prevRound!==null&&prevRound!==s.round){rc='s2r';rn='Sq to Round';} else if(s.round){rc='reducer';rn='Reducer';}
+            pieces.push({kind:'fitting',cid:rc,camduct:rn,round:s.round,lenIn:0,widthIn:s.w,depthIn:depth,size:s.str,_sizeStep:true}); }
+          var rem=Math.max(0,sp.b-sp.a), jl=s.round?120:JOINT_DEFAULT;
+          while(rem>0.5){ var L=Math.min(jl,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:s.w,depthIn:depth,size:s.str,cid:s.round?'spiral':'st',camduct:s.round?'Spiral':'Straight Duct',round:s.round}); rem-=L; }
+          prevRound=s.round; });
+      } else {                                                             // (B) no tag — scale from geometry width, flagged
+        var rem=lenIn; while(rem>0.5){ var L=Math.min(JOINT_DEFAULT,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:r.widthIn,depthIn:r.widthIn,size:r.widthIn+'\u2033',cid:'st',camduct:'Straight Duct',round:false,_scaled:true}); rem-=L; }
+        scaled++;
+      }
+      if(!pieces.length) return;
+      if(r.singleWall) single++;
+      window.__runs2d.push({id:uid(),axis:r.axis,start:A,dir:[ux,uy],normal:[pnx,pny],widthIn:(pieces[0]&&pieces[0].widthIn)||r.widthIn,color:palette[ci%palette.length],label:'',confirmed:!!r.confirmed,scaled:!ev.length,tagIdx:(r.tagIdx||[]).slice(),pieces:pieces,singleWall:!!r.singleWall,synthetic:!!r.synthetic}); ci++;
+    });
+    sel.clear(); selRun=null; renderItems(); renderPanel();
+    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled-no-tag. Straights + transitions, ordered.');
+  }
+  window.__buildRunsTrackWalk=buildRunsTrackWalk;
+
   (function(){ var b=document.getElementById('itemsFromRunsBtn'); if(b) b.onclick=runsFromPreview;
+    var tw=document.getElementById('trackWalkBtn'); if(tw) tw.onclick=buildRunsTrackWalk;
     var c=document.getElementById('itemsClearBtn'); if(c) c.onclick=function(){ if(!confirm('Clear the takeoff?'))return; window.__runs2d=[]; sel.clear(); selRun=null; renderItems(); renderPanel(); }; })();
   renderPanel();
 })();
@@ -3049,7 +3142,7 @@ async function cropRunTileB64(r, a0, a1){
   return {b64:o2.toDataURL('image/png').split(',')[1], x:x, y:y, w:w, h:h};
 }
 // hi-DPI crop of an ARBITRARY screen-px rectangle (for the tile sweep) — same re-render-from-PDF trick
-async function cropRegionB64(x,y,w,h){
+async function cropRegionB64(x,y,w,h,frozenK){
   var cv=document.getElementById('pdfCanvas');
   x=Math.max(0,x); y=Math.max(0,y); w=Math.min(cv.width-x,w); h=Math.min(cv.height-y,h);
   if(w<4||h<4) return null;
@@ -3057,7 +3150,8 @@ async function cropRegionB64(x,y,w,h){
   try{
     if(typeof pdfDoc!=='undefined' && pdfDoc && typeof pageNum!=='undefined'){
       var page=await pdfDoc.getPage(pageNum);
-      var HS=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))*f;
+      var K=(frozenK!=null)?frozenK:((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1));
+      var HS=K*f;
       var vp=page.getViewport({scale:HS});
       var o=document.createElement('canvas'); o.width=Math.max(8,Math.round(w*f)); o.height=Math.max(8,Math.round(h*f));
       var ctx=o.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,o.width,o.height);
@@ -3080,6 +3174,11 @@ async function aiTileSweep(){
   if(typeof viewport==='undefined' || !viewport){ out.innerHTML='<div class="hint">Render the page first.</div>'; return; }
   tags=tags.filter(function(t){ return !(t._tile||t._ai); });   // fresh every run — clear previously-placed AI/tile size tags
   try{ drawOverlay(); }catch(e){}
+  // FREEZE the view frame at start so zooming/panning while it runs can't shift placement
+  var VP=viewport.transform.slice(), K0=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1));
+  var Va=VP[0],Vb=VP[1],Vc=VP[2],Vd=VP[3],Ve=VP[4],Vf=VP[5], Vdet=(Va*Vd-Vb*Vc)||1;
+  function snapToUser(px,py){ return [(Vd*(px-Ve)-Vc*(py-Vf))/Vdet, (-Vb*(px-Ve)+Va*(py-Vf))/Vdet]; }   // screen(frozen)->user
+  function snapToScreen(ux,uy){ return [Va*ux+Vc*uy+Ve, Vb*ux+Vd*uy+Vf]; }
   // GRID IN USER SPACE (zoom-independent) — work area is stored in user coords
   var ux0,uy0,ux1,uy1;
   if(workArea){ ux0=Math.min(workArea.ux0,workArea.ux1); ux1=Math.max(workArea.ux0,workArea.ux1); uy0=Math.min(workArea.uy0,workArea.uy1); uy1=Math.max(workArea.uy0,workArea.uy1); }
@@ -3095,12 +3194,12 @@ async function aiTileSweep(){
     done++;
     var tux0=ux0+gx*STEPU, tuy0=uy0+gy*STEPU, tux1=Math.min(ux1,tux0+TILEU), tuy1=Math.min(uy1,tuy0+TILEU);
     // user-tile corners -> screen px (handles rotation), take the bounding box for the cropper
-    var c0=applyM(viewport.transform,tux0,tuy0), c1=applyM(viewport.transform,tux1,tuy0), c2=applyM(viewport.transform,tux1,tuy1), c3=applyM(viewport.transform,tux0,tuy1);
+    var c0=snapToScreen(tux0,tuy0), c1=snapToScreen(tux1,tuy0), c2=snapToScreen(tux1,tuy1), c3=snapToScreen(tux0,tuy1);
     var x=Math.max(0,Math.min(c0[0],c1[0],c2[0],c3[0])), y=Math.max(0,Math.min(c0[1],c1[1],c2[1],c3[1]));
     var w=Math.min(cv.width-x, Math.max(c0[0],c1[0],c2[0],c3[0])-x), h=Math.min(cv.height-y, Math.max(c0[1],c1[1],c2[1],c3[1])-y);
     if(w<10||h<10) continue;
-    try{ out.innerHTML='<div class="hint"><span class="spin"></span> tile '+done+'/'+total+' \u00b7 '+hits.length+' reads'+(fails?(' \u00b7 '+fails+' failed'):'')+'\u2026'+(workArea?' (work area)':' (whole sheet)')+'</div>'; }catch(e){}
-    var crop=null; try{ crop=await cropRegionB64(x,y,w,h); }catch(e){}
+    try{ out.innerHTML='<div class="hint"><span class="spin"></span> \uD83D\uDD12 view locked \u00b7 tile '+done+'/'+total+' \u00b7 '+hits.length+' reads'+(fails?(' \u00b7 '+fails+' failed'):'')+'\u2026'+(workArea?' (work area)':' (whole sheet)')+'</div>'; }catch(e){}
+    var crop=null; try{ crop=await cropRegionB64(x,y,w,h,K0); }catch(e){}
     if(!crop||!crop.b64){ fails++; continue; }
     var prompt='This is a HIGH-RES crop of part of an HVAC duct plan. Find every duct SIZE label PRINTED in THIS image. RECTANGULAR = WIDTHxHEIGHT inches like "20x16". ROUND = one diameter with \u00f8 or DIA like "12\\"\u00f8" -> report as "\u00f812". Size numbers may be ROTATED (vertical) inside the ducts \u2014 include those. For EACH label give a TIGHT bounding box around just that label, as fractions of THIS image: x0,y0 (top-left) and x1,y1 (bottom-right), each 0..1, plus conf (0..1, your confidence you read it correctly). Do NOT invent sizes and do NOT repeat one to fill space; if you cannot clearly read a printed size, return empty. Ignore diffuser/grille/equipment tags (CD-500, EF1, TS) and CFM values. Answer ONLY JSON, no prose: {"sizes":[{"size":"20x16","x0":0.30,"y0":0.55,"x1":0.46,"y1":0.63,"conf":0.95}]} or {"sizes":[]}.';
     try{
@@ -3139,18 +3238,20 @@ async function aiTileSweep(){
     if(better){ near.px=h.px; near.py=h.py; near.size=h.size; near.cdist=h.cdist; near.conf=h.conf; }   // replace in place
   });
   added=kept.length;
-  // DROP OPEN-SPACE NOISE: a real size tag sits next to duct. Keep only tags with a duct/maybe
-  // segment within ~70px; the broad sweep otherwise picks up stray numbers in schedules/notes/empty areas.
-  function nearDuct(px,py){ var NEAR=140;
+  // DROP OPEN-SPACE NOISE: keep only tags with a duct/maybe segment nearby. Done in USER space (segment
+  // user coords + frozen hit->user) so a mid-sweep zoom can't break the proximity test.
+  var NEARu = 140 / (K0||1);
+  function nearDuct(ux,uy){
     for(var i=0;i<segments.length;i++){ var s=segments[i]; if(s.cls==='not') continue;
-      var dx=s.x2-s.x1, dy=s.y2-s.y1, L2=dx*dx+dy*dy||1, t=Math.max(0,Math.min(1,((px-s.x1)*dx+(py-s.y1)*dy)/L2));
-      var qx=s.x1+t*dx, qy=s.y1+t*dy; if(Math.hypot(px-qx,py-qy)<=NEAR) return true; }
+      var dx=s.ux2-s.ux1, dy=s.uy2-s.uy1, L2=dx*dx+dy*dy||1, t=Math.max(0,Math.min(1,((ux-s.ux1)*dx+(uy-s.uy1)*dy)/L2));
+      var qx=s.ux1+t*dx, qy=s.uy1+t*dy; if(Math.hypot(ux-qx,uy-qy)<=NEARu) return true; }
     return false; }
-  var keptNear=kept.filter(function(h){ return nearDuct(h.px,h.py); });
+  var keptNear=kept.filter(function(h){ var u=snapToUser(h.px,h.py); h._u=u; return nearDuct(u[0],u[1]); });
   var noiseDropped=kept.length-keptNear.length; kept=keptNear; added=kept.length;
-  kept.forEach(function(hh){ var u=(typeof invVP==='function')?invVP(hh.px,hh.py):[hh.px,hh.py];
-    var nn=(window.__nvt&&typeof applyM==='function')?applyM(window.__nvt,u[0],u[1]):[hh.px,hh.py];
-    tags.push({x:hh.px,y:hh.py,ux:u[0],uy:u[1],nx:nn[0],ny:nn[1],text:hh.size,_ai:true,_tile:true}); });
+  kept.forEach(function(hh){ var u=hh._u||snapToUser(hh.px,hh.py);                 // frozen screen -> user (zoom-safe)
+    var nn=(window.__nvt&&typeof applyM==='function')?applyM(window.__nvt,u[0],u[1]):[u[0],u[1]];
+    var sc=(typeof viewport!=='undefined'&&viewport)?applyM(viewport.transform,u[0],u[1]):[hh.px,hh.py];   // screen at CURRENT view for the dot
+    tags.push({x:sc[0],y:sc[1],ux:u[0],uy:u[1],nx:nn[0],ny:nn[1],text:hh.size,_ai:true,_tile:true}); });
   try{ drawOverlay(); }catch(e){}
   out.innerHTML='<div class="hint" style="color:#cce6ff"><b>Tile sweep done.</b> '+added+' tag(s) placed across '+total+' tile'+(total!==1?'s':'')+(noiseDropped?(' \u00b7 '+noiseDropped+' off-duct noise dropped'):'')+(fails?(' \u00b7 <span style="color:#ff8a8a">'+fails+' tile(s) failed</span>'):'')+(workArea?' (work area)':' (whole sheet \u2014 set a work area to limit calls)')+'. Markers only \u2014 not wired to runs yet.</div>';
 }
