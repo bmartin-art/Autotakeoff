@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t65 · tile sweep: box-center placement + feeds association</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t66 · elbow-join non-destructive (kills doubled/offset duct)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2217,6 +2217,7 @@ function refreshSel(){
   function joinRunsAtElbows(){
     var dets=window.__yoloDets||[]; if(!dets.length || !(window.__runs2d||[]).length) return 0;
     dets.forEach(function(x){ x._used=false; });   // fresh each build
+    window.__elbowJoins=[];                          // recorded connections, rebuilt each pass
     function base(c){ return (c||'').replace(/^(rect|round)-/,''); }
     var reach=inToPt(36);   // an endpoint must be within ~3' of the elbow detection to count as its corner
     var joined=0;
@@ -2240,21 +2241,16 @@ function refreshSel(){
         P=hits[i]; Q=hits[j]; break;
       }
       if(!P||!Q) return;
-      if(P.atStart) reverseRun(P.run);     // trunk must END at the corner
-      if(!Q.atStart) reverseRun(Q.run);    // branch must START at the corner
       var trunk=P.run, branch=Q.run;
+      // NON-DESTRUCTIVE: record the elbow connection for real insertion later, but do NOT merge/
+      // re-walk the branch into the trunk — that chain re-walk drifted the branch off its true
+      // position and rendered a doubled, offset run. Leave both runs exactly where geometry put them.
       var te=runEnd(trunk); var tinto=[te.ux,te.uy], bout=[branch.dir[0],branch.dir[1]];
       var turn=Math.atan2(tinto[0]*bout[1]-tinto[1]*bout[0], tinto[0]*bout[0]+tinto[1]*bout[1]);
-      var lastP=trunk.pieces[trunk.pieces.length-1]||{}, isR=!!lastP.round;
-      trunk.pieces.push({kind:'fitting', cid:isR?'e90r':'e90', camduct:isR?'Round 90 Elbow':'Square 90 Elbow', round:isR, turn:turn, lenIn:0, widthIn:lastP.widthIn||trunk.widthIn, fromYolo:true, score:d.score});
-      // rule 3 across the join: if the branch starts at a different size, the corner is also a size change -> drop a transition
-      var bFirst=null; for(var bi=0;bi<branch.pieces.length;bi++){ if(branch.pieces[bi].kind==='straight'){ bFirst=branch.pieces[bi]; break; } }
-      if(bFirst && lastP.size && bFirst.size && lastP.size!==bFirst.size){
-        var dr=(!!lastP.round)!==(!!bFirst.round), rc=dr?'s2r':(bFirst.round?'reducer':'tr'), rn=dr?'Sq to Round':(bFirst.round?'Reducer':'Transition');
-        trunk.pieces.push({kind:'fitting', cid:rc, camduct:rn, round:!!bFirst.round, lenIn:0, widthIn:bFirst.widthIn, depthIn:bFirst.depthIn, size:bFirst.size, _sizeStep:true});
-      }
-      branch.pieces.forEach(function(p){ trunk.pieces.push(Object.assign({},p)); });
-      window.__runs2d=window.__runs2d.filter(function(r){ return r!==branch; });
+      var lastP=trunk.pieces[trunk.pieces.length-1]||{};
+      (window.__elbowJoins=window.__elbowJoins||[]).push({
+        trunkId:trunk.id, branchId:branch.id, atX:d.nx, atY:d.ny, turn:turn,
+        round:!!lastP.round, widthIn:lastP.widthIn||trunk.widthIn, score:d.score });
       d._used=true; joined++;
     });
     return joined;
