@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t69 · render elbow bridges connecting runs (plan + list)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t70 · tile sweep: clear stale + drop off-duct noise</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3075,6 +3075,8 @@ async function aiTileSweep(){
   var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,''); if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
   var cv=document.getElementById('pdfCanvas'); if(!cv||!cv.width){ out.innerHTML='<div class="hint">Load a sheet first.</div>'; return; }
   if(typeof viewport==='undefined' || !viewport){ out.innerHTML='<div class="hint">Render the page first.</div>'; return; }
+  tags=tags.filter(function(t){ return !(t._tile||t._ai); });   // fresh every run — clear previously-placed AI/tile size tags
+  try{ drawOverlay(); }catch(e){}
   // GRID IN USER SPACE (zoom-independent) — work area is stored in user coords
   var ux0,uy0,ux1,uy1;
   if(workArea){ ux0=Math.min(workArea.ux0,workArea.ux1); ux1=Math.max(workArea.ux0,workArea.ux1); uy0=Math.min(workArea.uy0,workArea.uy1); uy1=Math.max(workArea.uy0,workArea.uy1); }
@@ -3134,11 +3136,20 @@ async function aiTileSweep(){
     if(better){ near.px=h.px; near.py=h.py; near.size=h.size; near.cdist=h.cdist; near.conf=h.conf; }   // replace in place
   });
   added=kept.length;
+  // DROP OPEN-SPACE NOISE: a real size tag sits next to duct. Keep only tags with a duct/maybe
+  // segment within ~70px; the broad sweep otherwise picks up stray numbers in schedules/notes/empty areas.
+  function nearDuct(px,py){ var NEAR=70;
+    for(var i=0;i<segments.length;i++){ var s=segments[i]; if(s.cls==='not') continue;
+      var dx=s.x2-s.x1, dy=s.y2-s.y1, L2=dx*dx+dy*dy||1, t=Math.max(0,Math.min(1,((px-s.x1)*dx+(py-s.y1)*dy)/L2));
+      var qx=s.x1+t*dx, qy=s.y1+t*dy; if(Math.hypot(px-qx,py-qy)<=NEAR) return true; }
+    return false; }
+  var keptNear=kept.filter(function(h){ return nearDuct(h.px,h.py); });
+  var noiseDropped=kept.length-keptNear.length; kept=keptNear; added=kept.length;
   kept.forEach(function(hh){ var u=(typeof invVP==='function')?invVP(hh.px,hh.py):[hh.px,hh.py];
     var nn=(window.__nvt&&typeof applyM==='function')?applyM(window.__nvt,u[0],u[1]):[hh.px,hh.py];
     tags.push({x:hh.px,y:hh.py,ux:u[0],uy:u[1],nx:nn[0],ny:nn[1],text:hh.size,_ai:true,_tile:true}); });
   try{ drawOverlay(); }catch(e){}
-  out.innerHTML='<div class="hint" style="color:#cce6ff"><b>Tile sweep done.</b> '+added+' tag(s) placed across '+total+' tile'+(total!==1?'s':'')+(fails?(' \u00b7 <span style="color:#ff8a8a">'+fails+' tile(s) failed (worker/JSON error)</span>'):'')+(workArea?' (work area)':' (whole sheet \u2014 set a work area to limit calls)')+'. Markers only \u2014 not wired to runs yet.</div>';
+  out.innerHTML='<div class="hint" style="color:#cce6ff"><b>Tile sweep done.</b> '+added+' tag(s) placed across '+total+' tile'+(total!==1?'s':'')+(noiseDropped?(' \u00b7 '+noiseDropped+' off-duct noise dropped'):'')+(fails?(' \u00b7 <span style="color:#ff8a8a">'+fails+' tile(s) failed</span>'):'')+(workArea?' (work area)':' (whole sheet \u2014 set a work area to limit calls)')+'. Markers only \u2014 not wired to runs yet.</div>';
 }
 window.aiTileSweep=aiTileSweep;
 
