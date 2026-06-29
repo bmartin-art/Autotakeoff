@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t66 · elbow-join non-destructive (kills doubled/offset duct)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t69 · render elbow bridges connecting runs (plan + list)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2123,8 +2123,9 @@ function refreshSel(){
     var nJoin = joinRunsAtElbows();
     var nFit = integrateYoloFittings();
     var nCarry = carryForwardSizes();
+    var nDrop = dropUnsupportedRuns();
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Created '+window.__runs2d.length+' runs'+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 joined '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nCarry?(' \u00b7 '+nCarry+' run(s) inherited size'):'')+'. Click a joint to edit.');
+    setStatus('Created '+window.__runs2d.length+' runs'+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nCarry?(' \u00b7 '+nCarry+' inherited size'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.');
   }
   window.__runsFromPreview=runsFromPreview;
 
@@ -2285,6 +2286,37 @@ function refreshSel(){
   }
   window.__carryForwardSizes=carryForwardSizes;
 
+  // ---- SUPPORT SWEEP: a run must justify itself. Keep it only if it has a size TAG, a FITTING on it,
+  // or it CONNECTS (endpoint-adjacent) to a supported run. Stray fragments from odd green lines that
+  // nothing vouches for get dropped. Runs LAST, after association + carry-forward, so "supported"
+  // reflects everything we know. Safety: if nothing is supported, keep all (don't nuke the sheet).
+  function dropUnsupportedRuns(){
+    var runs=window.__runs2d||[]; if(runs.length<2) return 0;
+    var reach=Math.max(inToPt(36),40);
+    var joinIds={}; (window.__elbowJoins||[]).forEach(function(j){ joinIds[j.trunkId]=1; joinIds[j.branchId]=1; });
+    function ends(r){ var e=runEnd(r); return [[r.start[0],r.start[1]],[e.x,e.y]]; }
+    var sup={};
+    runs.forEach(function(r){
+      var hasTag = r.tagIdx && r.tagIdx.length>0;
+      var hasFit = r.pieces && r.pieces.some(function(p){ return p.kind==='fitting'; });
+      if(hasTag || hasFit || joinIds[r.id] || r._inherited) sup[r.id]=true;       // seed: directly supported
+    });
+    var seeded=0; for(var k in sup) seeded++;
+    if(!seeded) return 0;                                                          // nothing vouches for anything -> keep all
+    var changed=true, guard=0;
+    while(changed && guard++<12){ changed=false;                                  // propagate: connected to supported = supported
+      runs.forEach(function(r){ if(sup[r.id]) return; var re=ends(r);
+        for(var i=0;i<runs.length;i++){ var o=runs[i]; if(o===r||!sup[o.id]) continue; var oe=ends(o);
+          if(re.some(function(a){ return oe.some(function(b){ return Math.hypot(a[0]-b[0],a[1]-b[1])<=reach; }); })){ sup[r.id]=true; changed=true; break; }
+        }
+      });
+    }
+    var before=runs.length;
+    window.__runs2d=runs.filter(function(r){ return sup[r.id]; });
+    return before-window.__runs2d.length;
+  }
+  window.__dropUnsupportedRuns=dropUnsupportedRuns;
+
   // ---- CONTAINMENT: green geometry is the boundary. A YOLO detection must sit inside a run's
   // resolved footprint (centerline ± width, from tag or scale). Detections outside ALL green are
   // dropped — UNLESS the model is very confident, in which case it's allowed through as duct the
@@ -2422,6 +2454,25 @@ function refreshSel(){
       });
       if(run.label){ var s0=n2s(run.start[0],run.start[1]); if(s0){ var lt=document.createElementNS(ns,'text'); lt.setAttribute('x',s0[0]); lt.setAttribute('y',s0[1]-6); lt.setAttribute('font-size','12'); lt.setAttribute('font-weight','800'); lt.setAttribute('fill',run.color); lt.setAttribute('stroke','#0a0f16'); lt.setAttribute('stroke-width','3'); lt.setAttribute('paint-order','stroke'); lt.textContent=run.label; lay.appendChild(lt); } }
     });
+    // ELBOW BRIDGES — render each recorded run-to-run elbow as connecting duct-width bands through the
+    // corner, so the two duct sections visibly join (runs themselves stay put — bridge is new geometry).
+    (window.__elbowJoins||[]).forEach(function(j){
+      var tr=findRun(j.trunkId), br=findRun(j.branchId); if(!tr||!br) return;
+      var C=[j.atX,j.atY];
+      function nearEnd(r){ var e=runEnd(r), s=[r.start[0],r.start[1]], ee=[e.x,e.y];
+        return (Math.hypot(s[0]-C[0],s[1]-C[1]) < Math.hypot(ee[0]-C[0],ee[1]-C[1]))?s:ee; }
+      var A=nearEnd(tr), B=nearEnd(br), hw=inToPt((j.widthIn||tr.widthIn||12)/2);
+      function band(P,Q){ var dx=Q[0]-P[0],dy=Q[1]-P[1],L=Math.hypot(dx,dy)||1,nx=-dy/L,ny=dx/L;
+        var pts=[[P[0]+nx*hw,P[1]+ny*hw],[Q[0]+nx*hw,Q[1]+ny*hw],[Q[0]-nx*hw,Q[1]-ny*hw],[P[0]-nx*hw,P[1]-ny*hw]].map(function(q){return n2s(q[0],q[1]);});
+        if(pts.some(function(q){return !q;})) return;
+        var path=document.createElementNS(ns,'path'); path.setAttribute('d','M'+pts.map(function(q){return q[0].toFixed(1)+' '+q[1].toFixed(1);}).join('L')+'Z');
+        path.setAttribute('fill','rgba(245,158,11,.34)'); path.setAttribute('stroke','#f59e0b'); path.setAttribute('stroke-width','1.5'); path.setAttribute('pointer-events','none'); lay.appendChild(path); }
+      band(A,C); band(C,B);
+      var cs=n2s(C[0],C[1]); if(cs){ var R=8, mk=document.createElementNS(ns,'path');
+        mk.setAttribute('d','M'+cs[0]+' '+(cs[1]-R)+'L'+(cs[0]+R)+' '+cs[1]+'L'+cs[0]+' '+(cs[1]+R)+'L'+(cs[0]-R)+' '+cs[1]+'Z');
+        mk.setAttribute('fill','#f59e0b'); mk.setAttribute('stroke','#7a3d00'); mk.setAttribute('stroke-width','1.5'); mk.setAttribute('pointer-events','none'); lay.appendChild(mk);
+        var t=document.createElementNS(ns,'text'); t.setAttribute('x',cs[0]); t.setAttribute('y',cs[1]-12); t.setAttribute('text-anchor','middle'); t.setAttribute('font-size','9'); t.setAttribute('font-weight','700'); t.setAttribute('fill','#7a3d00'); t.setAttribute('stroke','#eafff1'); t.setAttribute('stroke-width','2'); t.setAttribute('paint-order','stroke'); t.textContent=(j.round?'Rnd ':'')+'90\u00b0 Elbow'; lay.appendChild(t); }
+    });
   }
   window.__renderItems=renderItems;
   if(typeof drawOverlay==='function'){ var _od2=drawOverlay; drawOverlay=function(){ var r=_od2.apply(this,arguments); try{renderItems();}catch(e){} return r; }; }
@@ -2462,6 +2513,10 @@ function refreshSel(){
       }
       h+='</div>';
     });
+    var joins=window.__elbowJoins||[];
+    if(joins.length){ h+='<div class="aicard" style="border-color:#f59e0b55"><div class="h">\u25c8 '+joins.length+' elbow connection(s)</div>';
+      joins.forEach(function(j,k){ var tr=findRun(j.trunkId); var sz=(tr&&tr.widthIn)||j.widthIn||''; h+='<div style="font-size:11px;color:#f5b342;padding:2px 6px">'+(k+1)+'. '+(j.round?'Round ':'')+'90\u00b0 Elbow'+(sz?(' \u00b7 '+sz+'\u2033'):'')+'</div>'; });
+      h+='</div>'; }
     p.innerHTML=h;
     var sl=document.getElementById('selLabel'); if(sl) sl.onkeydown=function(e){ if(e.key==='Enter')window.__selName(); };
   }
@@ -3039,10 +3094,10 @@ async function aiTileSweep(){
     var x=Math.max(0,Math.min(c0[0],c1[0],c2[0],c3[0])), y=Math.max(0,Math.min(c0[1],c1[1],c2[1],c3[1]));
     var w=Math.min(cv.width-x, Math.max(c0[0],c1[0],c2[0],c3[0])-x), h=Math.min(cv.height-y, Math.max(c0[1],c1[1],c2[1],c3[1])-y);
     if(w<10||h<10) continue;
-    try{ out.innerHTML='<div class="hint"><span class="spin"></span> tile '+done+'/'+total+' \u00b7 '+added+' tags'+(fails?(' \u00b7 '+fails+' failed'):'')+'\u2026'+(workArea?' (work area)':' (whole sheet)')+'</div>'; }catch(e){}
+    try{ out.innerHTML='<div class="hint"><span class="spin"></span> tile '+done+'/'+total+' \u00b7 '+hits.length+' reads'+(fails?(' \u00b7 '+fails+' failed'):'')+'\u2026'+(workArea?' (work area)':' (whole sheet)')+'</div>'; }catch(e){}
     var crop=null; try{ crop=await cropRegionB64(x,y,w,h); }catch(e){}
     if(!crop||!crop.b64){ fails++; continue; }
-    var prompt='This is a HIGH-RES crop of part of an HVAC duct plan. Find every duct SIZE label PRINTED in THIS image. RECTANGULAR = WIDTHxHEIGHT inches like "20x16". ROUND = one diameter with \u00f8 or DIA like "12\\"\u00f8" -> report as "\u00f812". Size numbers may be ROTATED (vertical) inside the ducts \u2014 include those. For EACH label give a TIGHT bounding box around just that label, as fractions of THIS image: x0,y0 (top-left) and x1,y1 (bottom-right), each 0..1. Do NOT invent sizes and do NOT repeat one to fill space; if you cannot clearly read a printed size, return empty. Ignore diffuser/grille/equipment tags (CD-500, EF1, TS) and CFM values. Answer ONLY JSON, no prose: {"sizes":[{"size":"20x16","x0":0.30,"y0":0.55,"x1":0.46,"y1":0.63}]} or {"sizes":[]}.';
+    var prompt='This is a HIGH-RES crop of part of an HVAC duct plan. Find every duct SIZE label PRINTED in THIS image. RECTANGULAR = WIDTHxHEIGHT inches like "20x16". ROUND = one diameter with \u00f8 or DIA like "12\\"\u00f8" -> report as "\u00f812". Size numbers may be ROTATED (vertical) inside the ducts \u2014 include those. For EACH label give a TIGHT bounding box around just that label, as fractions of THIS image: x0,y0 (top-left) and x1,y1 (bottom-right), each 0..1, plus conf (0..1, your confidence you read it correctly). Do NOT invent sizes and do NOT repeat one to fill space; if you cannot clearly read a printed size, return empty. Ignore diffuser/grille/equipment tags (CD-500, EF1, TS) and CFM values. Answer ONLY JSON, no prose: {"sizes":[{"size":"20x16","x0":0.30,"y0":0.55,"x1":0.46,"y1":0.63,"conf":0.95}]} or {"sizes":[]}.';
     try{
       var ctrl=new AbortController(), to=setTimeout(function(){ctrl.abort();},25000);
       var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:500,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:crop.b64}},{type:'text',text:prompt}]}]})});
@@ -3060,13 +3115,26 @@ async function aiTileSweep(){
           else { cx=(it&&typeof it.cx==='number')?it.cx:0.5; cy=(it&&typeof it.cy==='number')?it.cy:0.5; }            // fallback to point
           cx=Math.max(0,Math.min(1,cx)); cy=Math.max(0,Math.min(1,cy));
           var px=crop.x+cx*crop.w, py=crop.y+cy*crop.h;                 // tile origin + in-tile fraction -> sheet px
-          if(hits.some(function(e){ return e.size===size && Math.hypot(e.px-px,e.py-py)<40; })) return;   // dedup across overlaps
-          hits.push({px:px,py:py,size:size}); added++;
+          var cdist=Math.hypot(cx-0.5,cy-0.5);                          // how centered in its tile (0=center, edge reads are worse)
+          var conf=(it&&typeof it.conf==='number')?it.conf:0.5;
+          hits.push({px:px,py:py,size:size,cdist:cdist,conf:conf});     // collect raw; dedup happens after all tiles
         });
       }}
     }catch(e){}
   }}
-  hits.forEach(function(hh){ var u=(typeof invVP==='function')?invVP(hh.px,hh.py):[hh.px,hh.py];
+  // LOCATION-BASED DEDUP: the same printed tag seen by two overlapping tiles lands at ~the same sheet
+  // coordinate even if the two reads disagree (24x16 vs 24x10). Cluster by location; per cluster keep the
+  // BEST read — more centered in its tile wins, ties broken by confidence.
+  var kept=[];
+  hits.forEach(function(h){
+    var near=null;
+    for(var i=0;i<kept.length;i++){ if(Math.hypot(kept[i].px-h.px, kept[i].py-h.py) < 30){ near=kept[i]; break; } }
+    if(!near){ kept.push(h); return; }
+    var better = (h.cdist < near.cdist - 0.02) || (Math.abs(h.cdist-near.cdist)<=0.02 && h.conf > near.conf);
+    if(better){ near.px=h.px; near.py=h.py; near.size=h.size; near.cdist=h.cdist; near.conf=h.conf; }   // replace in place
+  });
+  added=kept.length;
+  kept.forEach(function(hh){ var u=(typeof invVP==='function')?invVP(hh.px,hh.py):[hh.px,hh.py];
     var nn=(window.__nvt&&typeof applyM==='function')?applyM(window.__nvt,u[0],u[1]):[hh.px,hh.py];
     tags.push({x:hh.px,y:hh.py,ux:u[0],uy:u[1],nx:nn[0],ny:nn[1],text:hh.size,_ai:true,_tile:true}); });
   try{ drawOverlay(); }catch(e){}
