@@ -119,7 +119,11 @@
   .btn.keep{border-color:var(--duct);color:var(--duct)}
   .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--dim);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;vertical-align:middle}
   @keyframes sp{to{transform:rotate(360deg)}}
-  body:not(.advon) .adv{display:none !important;}
+  /* advanced tools always visible (toggle removed) */
+  .sec > h3{cursor:pointer;position:relative;padding-left:16px;user-select:none}
+  .sec > h3::before{content:"\25BE";position:absolute;left:0;top:1px;font-size:10px;opacity:.6;transition:transform .15s}
+  .sec.collapsed > h3::before{transform:rotate(-90deg)}
+  .sec.collapsed > *:not(h3){display:none !important}
   .advbar{display:flex;align-items:center;gap:7px;margin:0 0 9px;padding:8px 10px;border:1px solid #243140;border-radius:8px;background:#0b1622;font-size:12.5px;color:#9fb3c8;cursor:pointer;user-select:none}
   .advbar input{margin:0}
 </style>
@@ -127,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t59 · Stage 5 carry-forward (inherit size across connected runs)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t62 · canvas tools moved to bottom-right + collapsible</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -148,7 +152,6 @@
   </header>
 
   <aside>
-    <label class="advbar"><input type="checkbox" id="advToggle"> ⚙ Show advanced tools <span style="opacity:.6">(thresholds, layers, manual buttons)</span></label>
     <div class="sec" style="background:#0e1a24;border:1px solid #2a4256;border-radius:8px">
       <h3>🛠 Takeoff Toolbox</h3>
       <div class="row adv"><button class="btn" id="workSet">▢ Set work area</button><button class="btn" id="workClear">Clear area</button></div>
@@ -298,7 +301,6 @@
         <button class="btn go" id="verifyTags" style="background:#10243a;border-color:#2b6aa0;color:#cfe7ff;margin-top:4px">✓ Verify duct against size tags</button>
         <button class="btn go" id="aiFullTakeoff" style="background:#2a1a3a;border-color:#6a3fb8;color:#dcccff;margin-top:6px">🤖 Run full AI takeoff (whole sheet)</button>
         <button class="btn go" id="aiSizeRuns" style="background:#1a2a3a;border-color:#3f8ab8;color:#cce6ff;margin-top:4px">🔎 Read sizes (per-run, tight crop)</button>
-        <button class="btn go" id="assocSizes" style="background:#1a3320;border-color:#3f9a5a;color:#cfeedd;margin-top:4px">🔗 Associate + flag (snap to runs · green/amber/red)</button>
         <button class="btn go" id="dimFind" style="background:#13351f;border-color:#2a6b40;color:#bdf5cf;margin-top:6px">📐 Find duct by dimension (tag-match)</button>
         <button class="btn go" id="buildRuns" style="background:#1f1430;border-color:#7a4fd0;color:#e6d8ff;margin-top:6px">📊 Preview runs (optional — Build takeoff does this for you)</button>
         <div class="row" style="margin-top:6px;display:flex;gap:6px">
@@ -1483,46 +1485,6 @@ function buildSegmentRuns(){
 }
 (function(){ try{ var b=document.getElementById('buildRuns'); if(b) b.addEventListener('click', buildSegmentRuns); }catch(e){} })();
 
-/* STAGE 3+4 — ASSOCIATE + SCALE CROSS-CHECK.
-   Each size tag is snapped to the run it belongs to and flagged by confidence:
-     green = associated AND its screen-facing width matches the run's geometric width (two signals agree)
-     amber = associated but width disagrees (eyeball it)
-     red   = no run wanted it (orphan) — kept visible, not deleted, so we can judge the scoring. */
-function associateSizes(){
-  var out=document.getElementById('aiOut');
-  var runs=window.__sgRuns||[];
-  if(!runs.length){ if(out) out.innerHTML='<div class="hint">Build runs first \u2014 association links each size to a built run.</div>'; return; }
-  if(!window.__nvt||typeof viewport==='undefined'||!viewport){ if(out) out.innerHTML='<div class="hint">Render the page first.</div>'; return; }
-  var m=window.__nvt,ma=m[0],mb=m[1],mc=m[2],md=m[3],me=m[4],mf=m[5],mdet=(ma*md-mb*mc)||1;
-  function nvt2user(nx,ny){ return [(md*(nx-me)-mc*(ny-mf))/mdet, (-mb*(nx-me)+ma*(ny-mf))/mdet]; }
-  // precompute each run's centerline + width (nvt frame, from its corners)
-  var R=runs.map(function(r){ var c0=r.corners[0],c1=r.corners[1],c2=r.corners[2],c3=r.corners[3];
-    var A=[(c0[0]+c3[0])/2,(c0[1]+c3[1])/2], B=[(c1[0]+c2[0])/2,(c1[1]+c2[1])/2];
-    var dx=B[0]-A[0],dy=B[1]-A[1],L=Math.hypot(dx,dy)||1;
-    return {A:A,ux:dx/L,uy:dy/L,L:L,widthPx:Math.hypot(c0[0]-c3[0],c0[1]-c3[1]),widthIn:r.widthIn,run:r}; });
-  var CAP=110, green=0, amber=0, red=0, assoc=0, rnd=0;
-  for(var i=0;i<tags.length;i++){ var t=tags[i]; if(t.nx==null) continue; var pd=parseTagDims(t.text); if(!pd) continue;
-    var best=-1, bp=1e9, balong=0;
-    for(var j=0;j<R.length;j++){ var r=R[j]; var vx=t.nx-r.A[0], vy=t.ny-r.A[1]; var along=vx*r.ux+vy*r.uy;
-      if(along < -r.widthPx || along > r.L+r.widthPx) continue;            // tag must fall along the run's length
-      var perp=Math.abs(vx*(-r.uy)+vy*(r.ux));
-      if(perp > Math.max(r.widthPx, CAP)) continue;                        // and within reach perpendicular
-      if(perp < bp){ bp=perp; best=j; balong=Math.max(0,Math.min(r.L,along)); }
-    }
-    if(best<0){ t._flag='red'; red++; continue; }                          // orphan — kept, flagged
-    var rb=R[best];
-    var snx=rb.A[0]+balong*rb.ux, sny=rb.A[1]+balong*rb.uy;                 // snap onto the run centerline
-    t.nx=snx; t.ny=sny; var u=nvt2user(snx,sny); t.ux=u[0]; t.uy=u[1]; var p=applyM(viewport.transform,u[0],u[1]); t.x=p[0]; t.y=p[1];
-    if(pd.round){ rb.run.round=true; rb.run.widthIn=pd.w; rb.run.sizes=['\u00f8'+pd.w]; t._round=true; rnd++; }   // round tag -> round run -> round takeoff
-    var diff=Math.abs(pd.w - rb.widthIn);                                  // scale cross-check: tag width vs run width
-    if(diff<=4){ t._flag='green'; green++; } else { t._flag='amber'; amber++; }
-    assoc++;
-  }
-  try{ drawOverlay(); }catch(e){}
-  if(out) out.innerHTML='<div class="hint" style="color:#cce6ff"><b>Associated.</b> '+assoc+' snapped to runs \u2014 <span style="color:#15e06a">'+green+' locked</span> \u00b7 <span style="color:#e0a92a">'+amber+' width mismatch</span> \u00b7 <span style="color:#ff4d4d">'+red+' orphan</span>'+(rnd?' \u00b7 '+rnd+' round':'')+'. Then Build takeoff.</div>';
-}
-window.associateSizes=associateSizes;
-(function(){ try{ var b=document.getElementById('assocSizes'); if(b) b.addEventListener('click', associateSizes); }catch(e){} })();
 
 // ---- guided setup wizard: a few plain questions, then it configures + runs detection ----
 var WIZ={step:0,sub:null};
@@ -2833,7 +2795,7 @@ function findDrops(){
   });
   classify(); drawOverlay(); setStatus('Marked '+n+' drop / takeoff marks as duct');
 }
-(function(){ var at=document.getElementById('advToggle'); if(at) at.onchange=function(){ document.body.classList.toggle('advon', at.checked); }; })();
+
 (function(){ var t=document.getElementById('layersToggle'), L=document.getElementById('layerList'), c=document.getElementById('layersCaret'); if(t&&L) t.onclick=function(){ var open=L.style.display!=='none'; L.style.display=open?'none':'block'; if(c)c.textContent=open?'\u25b8':'\u25be'; }; })();
 (function(){ var sw=document.getElementById('setupWiz'); if(sw) sw.onclick=function(){ window.__wizShown=true; openWizard(); };
   var sr=document.getElementById('simRemove'); if(sr) sr.onclick=function(){ startSim('remove'); };
@@ -3115,323 +3077,6 @@ function _sweepDims(t){ t=String(t||'').toUpperCase();
   var mr=/(\d{1,3})\s*["\u201d]?\s*(?:\u00d8|DIA)|\u00d8\s*(\d{1,3})/.exec(t); if(mr){ var d=+(mr[1]||mr[2]); if(d>=3&&d<=120) return {round:true,w:d,h:d}; }
   var m=/(\d{1,3})\s*[xX\u00d7]\s*(\d{1,3})/.exec(t); if(m){ var w=+m[1],h=+m[2]; if(w>=2&&w<=200&&h>=2&&h<=200) return {round:false,w:w,h:h}; }
   return null; }
-async function aiSizeSweep(){
-  var out=document.getElementById('aiOut'); if(!out)return;
-  var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,''); if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
-  var pc=document.getElementById('pdfCanvas'); if(!pc||!pc.width){ out.innerHTML='<div class="hint">Load a PDF page first, then run this.</div>'; return; }
-  var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
-  // helper: one AI call (image + prompt) through the worker pass-through -> parsed JSON or null
-  async function ask(b64, prompt, maxtok){ var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},45000);
-    try{ var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:maxtok||1200,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},{type:'text',text:prompt}]}]})}); clearTimeout(to);
-      if(!resp.ok) return null; var data=await resp.json(); if(data.error) return null;
-      var raw=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
-      try{ return JSON.parse(raw); }catch(e){ return null; } }catch(e){ clearTimeout(to); return null; } }
-  function pSegD(px,py,x1,y1,x2,y2){ var dx=x2-x1,dy=y2-y1,L2=dx*dx+dy*dy,t=L2?((px-x1)*dx+(py-y1)*dy)/L2:0; t=t<0?0:(t>1?1:t); return Math.hypot(px-(x1+t*dx),py-(y1+t*dy)); }
-  function cropB64(x,y,w,h){ var c=document.createElement('canvas'); var S=Math.min(2,1400/Math.max(w,h,1)); c.width=Math.max(8,Math.round(w*S)); c.height=Math.max(8,Math.round(h*S)); var cx=c.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,c.width,c.height); cx.drawImage(pc,x,y,w,h,0,0,c.width,c.height); return c.toDataURL('image/jpeg',0.85).split(',')[1]; }
-  // region to sweep: the work-area box if one is drawn, else the whole sheet (in pdfCanvas px)
-  var rx=0,ry=0,rw=pc.width,rh=pc.height;
-  if(typeof workArea!=='undefined' && workArea && typeof viewport!=='undefined' && viewport){ try{ var P0=applyM(viewport.transform,workArea.ux0,workArea.uy0),P1=applyM(viewport.transform,workArea.ux1,workArea.uy1); rx=Math.min(P0[0],P1[0]); ry=Math.min(P0[1],P1[1]); rw=Math.abs(P1[0]-P0[0]); rh=Math.abs(P1[1]-P0[1]); }catch(e){} }
-  var TILE=950, OV=0.12; var cols=Math.max(1,Math.round(rw/TILE)), rows=Math.max(1,Math.round(rh/TILE)); var nTiles=cols*rows;
-  out.innerHTML='<div class="hint"><span class="spin"></span> reading scale + sweeping '+nTiles+' tile'+(nTiles!==1?'s':'')+'\u2026</div>';
-  // 1) SCALE — one full-sheet call; scale needs no position so a whole-sheet read is reliable
-  var scaleMsg='';
-  try{
-    var ssc=Math.min(1,2000/Math.max(pc.width,pc.height)); var sct=document.createElement('canvas'); sct.width=Math.round(pc.width*ssc); sct.height=Math.round(pc.height*ssc); sct.getContext('2d').drawImage(pc,0,0,sct.width,sct.height);
-    var sres=await ask(sct.toDataURL('image/jpeg',0.85).split(',')[1],'Find the DRAWING SCALE note on this HVAC sheet (e.g. "3/32\\"=1\'-0\\"","1/8\\"=1\'-0\\"","1/4\\"=1\'-0\\""). Answer ONLY JSON: {"scale_text":"3/32\\"=1\'-0\\"","scale_inches_per_foot":0.09375}. If none, {}.',300);
-    if(sres && (typeof scaleAuto==='undefined'||scaleAuto)){
-      var sv=(typeof sres.scale_inches_per_foot==='number'&&sres.scale_inches_per_foot>0&&sres.scale_inches_per_foot<=12)?sres.scale_inches_per_foot:null;
-      if(sv){ scaleIPF=sv; try{updateScaleUI();}catch(e){} scaleMsg=' \u00b7 scale '+(typeof scaleLabel==='function'?scaleLabel(sv):sv)+'=1\u2032'; }
-      else if(sres.scale_text){ try{ detectScaleFromText(String(sres.scale_text)); scaleMsg=' \u00b7 scale '+vhEsc(String(sres.scale_text)); }catch(e){} }
-    }
-  }catch(e){}
-  // 2) TILED label sweep — each label's position comes from the KNOWN tile origin, not the AI's whole-sheet guess
-  var stepX=rw/cols, stepY=rh/rows, padX=stepX*OV, padY=stepY*OV;
-  var tprompt='This is a small crop from an HVAC plan drawing. List EVERY duct SIZE label you can read in THIS image: rectangular like "20x16" (width x height in inches) or round like "12\\"\u00d8"/"12 DIA". Only report a size you can ACTUALLY READ printed in THIS crop \u2014 do NOT invent, guess, or infer. IGNORE diffuser/grille/equipment tags (e.g. CD1-320, EF1), CFM numbers, and notes, and do NOT read sizes from schedules, tables, legends, equipment lists, or the title block \u2014 only sizes printed on or beside a duct line in the plan view. For each, give its text and normalized center x,y in 0..1 of THIS crop (top-left origin). Answer ONLY JSON, no prose: {"labels":[{"text":"20x16","x":0.5,"y":0.5}]}. If none, {"labels":[]}.';
-  var added=0, dup=0, read=0, done=0, offduct=0; var DUCTNEAR=130;   // px: a real size label sits within ~this of a duct line
-  for(var rr=0; rr<rows; rr++){ for(var cc=0; cc<cols; cc++){
-    var x0=Math.max(0, rx+cc*stepX-padX), y0=Math.max(0, ry+rr*stepY-padY);
-    var w0=Math.min(pc.width-x0, stepX+2*padX), h0=Math.min(pc.height-y0, stepY+2*padY);
-    done++; try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> tile '+done+' / '+nTiles+'\u2026 ('+added+' sizes)'; }catch(e){}
-    var jr=await ask(cropB64(x0,y0,w0,h0), tprompt, 1200); if(!jr||!jr.labels) continue;
-    jr.labels.forEach(function(L){ if(!L||!L.text||!_sweepDims(L.text)||L.x==null||L.y==null) return; read++;
-      var px=x0 + L.x*w0, py=y0 + L.y*h0;   // tile-local -> full-sheet px
-      var md=1e9; for(var si=0; si<segments.length; si++){ var sg=segments[si]; if(sg.cls!=='duct') continue; var dd=pSegD(px,py,sg.x1,sg.y1,sg.x2,sg.y2); if(dd<md){ md=dd; if(md<DUCTNEAR) break; } }
-      if(md>DUCTNEAR){ offduct++; return; }   // not near any duct line -> hallucination or a schedule/legend size; drop it
-      var nx=px/K, ny=py/K, near=false;
-      for(var i=0;i<tags.length;i++){ var t=tags[i]; if(!_sweepDims(t.text)) continue; var tpx=(t.x!=null?t.x:(t.nx*K)), tpy=(t.y!=null?t.y:(t.ny*K)); if(Math.hypot(tpx-px,tpy-py)<24){ near=true; break; } }
-      if(near){ dup++; return; }
-      var _u=(typeof invVP==='function')?invVP(px,py):null; var _t={x:px,y:py,nx:nx,ny:ny,text:String(L.text).replace(/\s+/g,''),_ai:true}; if(_u){_t.ux=_u[0];_t.uy=_u[1];} tags.push(_t); added++;
-    });
-    try{ drawOverlay(); }catch(e){}
-  } }
-  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Tiled sweep done.</b> '+added+' size tag(s) placed'+(dup?(', '+dup+' deduped'):'')+(offduct?(', '+offduct+' off-duct dropped'):'')+' across '+nTiles+' tile'+(nTiles!==1?'s':'')+scaleMsg+'. Check the magenta dots sit on the ducts, then hit <b>\u2795 Build takeoff</b>.</div>';
-}
-window.aiSizeSweep=aiSizeSweep;
-
-// ---- Geometry-located size read: the line scan already captures the digit strokes of size labels.
-// Cluster those short strokes into label "spots", read a tight crop of each with the AI, and place the
-// size at the geometry-known cluster center. Position comes from geometry (reliable); the AI only READS.
-// A spot that isn't really a label reads as nothing and self-discards. (Detection-bounded OCR.) ----
-// hi-DPI crop of an arbitrary box (a digit-stroke cluster): re-render straight from the PDF so the
-// glyphs are crisp, the same trick that made the per-run reader work.
-async function cropBoxHiDPI(bbox){
-  var cv=document.getElementById('pdfCanvas'); var pad=44;
-  var x=Math.max(0,bbox[0]-pad), y=Math.max(0,bbox[1]-pad);
-  var w=Math.min(cv.width-x,(bbox[2]-bbox[0])+pad*2), h=Math.min(cv.height-y,(bbox[3]-bbox[1])+pad*2);
-  var f=Math.max(1, Math.min(10, 900/Math.max(w,h,1)));   // small box -> big upscale -> crisp digits, long edge ~900px
-  try{
-    if(typeof pdfDoc!=='undefined' && pdfDoc && typeof pageNum!=='undefined'){
-      var page=await pdfDoc.getPage(pageNum);
-      var HS=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))*f;
-      var vp=page.getViewport({scale:HS});
-      var o=document.createElement('canvas'); o.width=Math.max(8,Math.round(w*f)); o.height=Math.max(8,Math.round(h*f));
-      var ctx=o.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,o.width,o.height);
-      await withPageRender(function(){ return page.render({canvasContext:ctx, viewport:vp, transform:[1,0,0,1,-x*f,-y*f], optionalContentConfigPromise:(typeof ocConfig!=='undefined'&&ocConfig)?Promise.resolve(ocConfig):undefined}).promise; });
-      return o.toDataURL('image/png').split(',')[1];
-    }
-  }catch(e){}
-  var S=Math.min(3,900/Math.max(w,h,1));
-  var o2=document.createElement('canvas'); o2.width=Math.max(8,Math.round(w*S)); o2.height=Math.max(8,Math.round(h*S));
-  var c2=o2.getContext('2d'); c2.fillStyle='#fff'; c2.fillRect(0,0,o2.width,o2.height); c2.drawImage(cv,x,y,w,h,0,0,o2.width,o2.height);
-  return o2.toDataURL('image/png').split(',')[1];
-}
-// ---- in-browser OCR (Tesseract, no API). Locate by geometry, read by OCR, AI only as fallback. ----
-var __ocrWorker=null, __ocrInit=null;
-async function getOCR(){
-  if(typeof Tesseract==='undefined') return null;
-  if(__ocrWorker) return __ocrWorker;
-  if(!__ocrInit){ __ocrInit=(async function(){ var w=await Tesseract.createWorker('eng');
-    try{ await w.setParameters({ tessedit_pageseg_mode:'7' }); }catch(e){}   // single line for tight label crops; no char whitelist (it suppresses detection)
-    __ocrWorker=w; return w; })(); }
-  return __ocrInit;
-}
-// run OCR on a base64 PNG crop, pull a duct size (WxH or diameter) out of the text, else null
-async function ocrSize(b64){
-  var w=null; try{ w=await getOCR(); }catch(e){} if(!w) return null;
-  try{ var r=await w.recognize('data:image/png;base64,'+b64); var raw=((r&&r.data&&r.data.text)||'').trim();
-    var t=raw.replace(/[^0-9xX\u00d7\u00f8\u00d8\/"DIAdia]/g,'');
-    var m=/(\d{1,3})\s*[xX\u00d7\/]\s*(\d{1,3})/.exec(t); if(m){ var ww=+m[1],hh=+m[2]; if(ww>=2&&ww<=200&&hh>=2&&hh<=200) return ww+'\u00d7'+hh; }
-    if(/[\u00f8\u00d8]/.test(raw)||/dia/i.test(raw)){ var dm=/(\d{1,3})/.exec(t); if(dm){ var dv=+dm[1]; if(dv>=3&&dv<=120) return '\u00f8'+dv; } }
-    return null;
-  }catch(e){ return null; }
-}
-// ---- Full-sheet OCR size finder: the size labels on many prints are font glyphs (not selectable text
-// and not path strokes), so geometry can't see them. But they ARE on the rendered canvas. OCR the sheet
-// in hi-DPI tiles; Tesseract returns each WORD and its bounding box, so it both LOCATES and READS every
-// label regardless of how the PDF encoded it (works on scans too). Place the dim at the word's box.
-async function renderTileForOCR(tx0,ty0,tx1,ty1,f){
-  var page=await pdfDoc.getPage(pageNum);
-  var HS=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))*f;
-  var vp=page.getViewport({scale:HS});
-  var w=tx1-tx0,h=ty1-ty0;
-  var o=document.createElement('canvas'); o.width=Math.max(8,Math.round(w*f)); o.height=Math.max(8,Math.round(h*f));
-  var ctx=o.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,o.width,o.height);
-  await withPageRender(function(){ return page.render({canvasContext:ctx, viewport:vp, transform:[1,0,0,1,-tx0*f,-ty0*f], optionalContentConfigPromise:(typeof ocConfig!=='undefined'&&ocConfig)?Promise.resolve(ocConfig):undefined}).promise; });
-  return o.toDataURL('image/png');
-}
-function sizeFromWord(s){ s=String(s||'').replace(/\s+/g,''); var m=/(\d{1,3})[xX\u00d7\/](\d{1,3})/.exec(s); if(m){ var w=+m[1],h=+m[2]; if(w>=2&&w<=200&&h>=2&&h<=200) return w+'\u00d7'+h; } if(/[\u00f8\u00d8]/.test(s)||/dia/i.test(s)){ var d=/(\d{1,3})/.exec(s); if(d){ var dv=+d[1]; if(dv>=3&&dv<=120) return '\u00f8'+dv; } } return null; }
-async function ocrSheetForSizes(){
-  var out=document.getElementById('aiOut'); if(!out)return;
-  if(typeof Tesseract==='undefined'){ out.innerHTML='<div class="hint">OCR library not loaded (Tesseract). Check the network/CDN.</div>'; return; }
-  var cv=document.getElementById('pdfCanvas'); if(!cv||!cv.width){ out.innerHTML='<div class="hint">Load a PDF page first.</div>'; return; }
-  if(!window.__nvt||typeof viewport==='undefined'||!viewport){ out.innerHTML='<div class="hint">Render the page first.</div>'; return; }
-  // region: work area if set, else the whole sheet
-  var rx0=0,ry0=0,rx1=cv.width,ry1=cv.height;
-  if(typeof workArea!=='undefined'&&workArea){ try{ var P0=applyM(viewport.transform,workArea.ux0,workArea.uy0),P1=applyM(viewport.transform,workArea.ux1,workArea.uy1); rx0=Math.max(0,Math.min(P0[0],P1[0])); ry0=Math.max(0,Math.min(P0[1],P1[1])); rx1=Math.min(cv.width,Math.max(P0[0],P1[0])); ry1=Math.min(cv.height,Math.max(P0[1],P1[1])); }catch(e){} }
-  var f=2;                                   // render tiles at ~2x so glyphs are ~30-60px tall for OCR
-  var STEP=520, OV=80;                         // pdfCanvas-px tile step (rendered ~1040px) with overlap
-  if(!(rx1>rx0)||!(ry1>ry0)){ rx0=0;ry0=0;rx1=cv.width;ry1=cv.height; }   // guard bad work-area
-  var cols=[], rows=[];
-  for(var x=rx0; x<rx1; x+=STEP-OV) cols.push(x);
-  for(var y=ry0; y<ry1; y+=STEP-OV) rows.push(y);
-  if(!cols.length) cols=[rx0]; if(!rows.length) rows=[ry0];
-  var nTiles=cols.length*rows.length;
-  out.innerHTML='<div class="hint"><span class="spin"></span> OCR scanning sheet \u2014 '+nTiles+' tile(s)\u2026 (first tile loads the OCR engine)</div>';
-  var w=null; try{ w=await getOCR(); }catch(e){}
-  if(!w){ out.innerHTML='<div class="hint">Could not start the OCR engine.</div>'; return; }
-  try{ await w.setParameters({ tessedit_pageseg_mode:'11', tessedit_char_whitelist:'', user_defined_dpi:'150' }); }catch(e){}   // sparse text, no whitelist, sane DPI
-  function collectWords(data){ if(!data) return []; if(data.words&&data.words.length) return data.words; var o=[]; (data.blocks||[]).forEach(function(b){ (b.paragraphs||[]).forEach(function(p){ (p.lines||[]).forEach(function(l){ (l.words||[]).forEach(function(wd){ o.push(wd); }); }); }); }); return o; }
-  function collectLines(data){ var o=[]; if(!data) return o; (data.blocks||[]).forEach(function(b){ (b.paragraphs||[]).forEach(function(p){ (p.lines||[]).forEach(function(l){ o.push(l); }); }); }); if(!o.length && data.lines) return data.lines; return o; }
-  var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
-  var placed=0, rawWords=0, done=0, sampleWords=[];
-  for(var ci=0; ci<cols.length; ci++){ for(var ri=0; ri<rows.length; ri++){ done++;
-    var tx0=cols[ci], ty0=rows[ri], tx1=Math.min(rx1,tx0+STEP), ty1=Math.min(ry1,ty0+STEP);
-    try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> OCR tile '+done+' / '+nTiles+'\u2026 ('+placed+' sizes, '+rawWords+' words read)'; }catch(e){}
-    var url; try{ url=await renderTileForOCR(tx0,ty0,tx1,ty1,f); }catch(e){ continue; }
-    var data; try{ var r=await w.recognize(url,{},{blocks:true,text:true}); data=r&&r.data; }catch(e){ continue; }
-    var wl=collectWords(data); rawWords+=wl.length;
-    if(sampleWords.length<60){ wl.forEach(function(wd){ if(sampleWords.length<60) sampleWords.push(wd.text); }); }
-    // match on rejoined LINES so a split "20 x 16" still matches
-    var lines=collectLines(data);
-    var src = lines.length ? lines : wl.map(function(wd){ return {text:wd.text, bbox:wd.bbox}; });
-    for(var li=0; li<src.length; li++){ var ln=src[li];
-      var txt = ln.words&&ln.words.length ? ln.words.map(function(x){return x.text;}).join('') : (ln.text||'');
-      var sz=sizeFromWord(txt); if(!sz) continue;
-      var bb=ln.bbox||{}; var icx=((bb.x0||0)+(bb.x1||0))/2, icy=((bb.y0||0)+(bb.y1||0))/2;
-      var px=tx0+icx/f, py=ty0+icy/f;
-      var near=false; for(var t=0;t<tags.length;t++){ var tg=tags[t]; if(!_sweepDims(tg.text)) continue; var tpx=(tg.x!=null?tg.x:0), tpy=(tg.y!=null?tg.y:0); if(Math.hypot(tpx-px,tpy-py)<34){ near=true; break; } }
-      if(near) continue;
-      var _u=(typeof invVP==='function')?invVP(px,py):null;
-      var nn=(_u&&typeof applyM==='function')?applyM(window.__nvt,_u[0],_u[1]):[px/K,py/K];
-      var _t={x:px,y:py,nx:nn[0],ny:nn[1],text:sz,_ai:true,_by:'ocr'}; if(_u){_t.ux=_u[0];_t.uy=_u[1];} tags.push(_t); placed++;
-    }
-    try{ drawOverlay(); }catch(e){}
-  } }
-  console.log('[sheet OCR] '+rawWords+' raw words, '+placed+' sizes, '+nTiles+' tiles');
-  console.log('[sheet OCR] sample words read: '+sampleWords.join(' | '));
-  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Sheet OCR done.</b> '+placed+' size label(s) found ('+rawWords+' words read) across '+nTiles+' tile(s).<br><span style="color:#9fb4c8">sample of words read: '+ (sampleWords.slice(0,30).join(' \u00b7 ').replace(/</g,'&lt;')||'(none)') +'</span></div>';
-}
-
-// AI-vision tiled sweep: OCR reads garbage on busy CAD tiles, but the vision model reads them fine.
-// Same hi-DPI tiling, but each tile is read by the AI worker, which lists every size and its position.
-async function aiSweepTiled(){
-  var out=document.getElementById('aiOut'); if(!out)return;
-  var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,''); if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
-  var cv=document.getElementById('pdfCanvas'); if(!cv||!cv.width){ out.innerHTML='<div class="hint">Load a PDF page first.</div>'; return; }
-  if(!window.__nvt||typeof viewport==='undefined'||!viewport){ out.innerHTML='<div class="hint">Render the page first.</div>'; return; }
-  var rx0=0,ry0=0,rx1=cv.width,ry1=cv.height;
-  if(typeof workArea!=='undefined'&&workArea){ try{ var P0=applyM(viewport.transform,workArea.ux0,workArea.uy0),P1=applyM(viewport.transform,workArea.ux1,workArea.uy1); rx0=Math.max(0,Math.min(P0[0],P1[0])); ry0=Math.max(0,Math.min(P0[1],P1[1])); rx1=Math.min(cv.width,Math.max(P0[0],P1[0])); ry1=Math.min(cv.height,Math.max(P0[1],P1[1])); }catch(e){} }
-  if(!(rx1>rx0)||!(ry1>ry0)){ rx0=0;ry0=0;rx1=cv.width;ry1=cv.height; }
-  var f=2, STEP=620, OV=90;                  // bigger tiles than OCR (AI handles more context per call)
-  var cols=[], rows=[];
-  for(var x=rx0; x<rx1; x+=STEP-OV) cols.push(x);
-  for(var y=ry0; y<ry1; y+=STEP-OV) rows.push(y);
-  if(!cols.length) cols=[rx0]; if(!rows.length) rows=[ry0];
-  var nTiles=cols.length*rows.length;
-  var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
-  var prompt='This is a HIGH-RES tile from an HVAC plan. List EVERY duct SIZE label printed in this image. Rectangular duct = WIDTHxHEIGHT in inches like "20x16"; round duct = a single diameter like "12\\"\u00f8" (report as "\u00f812"). For EACH, give its CENTER position in THIS image as fractions cx (0=left..1=right), cy (0=top..1=bottom). Ignore diffuser/grille/equipment tags (CD-500, EF1), CFM values, and notes. Do NOT guess. Output NOTHING except the JSON object \u2014 no explanation, no preamble. {"sizes":[{"size":"20x16","cx":0.3,"cy":0.5}]} or {"sizes":[]}.';
-  out.innerHTML='<div class="hint"><span class="spin"></span> AI sweeping '+nTiles+' tile(s)\u2026</div>';
-  var placed=0, done=0, errs=0;
-  for(var ci=0; ci<cols.length; ci++){ for(var ri=0; ri<rows.length; ri++){ done++;
-    var tx0=cols[ci], ty0=rows[ri], tx1=Math.min(rx1,tx0+STEP), ty1=Math.min(ry1,ty0+STEP);
-    try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> AI tile '+done+' / '+nTiles+'\u2026 ('+placed+' sizes)'; }catch(e){}
-    var url; try{ url=await renderTileForOCR(tx0,ty0,tx1,ty1,f); }catch(e){ errs++; continue; }
-    var b64=url.split(',')[1];
-    var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},45000);
-    try{ var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:2000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:prompt}]}]})}); clearTimeout(to);
-      if(!resp.ok){ errs++; continue; } var data=await resp.json(); if(data.error){ errs++; continue; }
-      var raw=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
-      console.log('[ai sweep] tile '+done+' raw:', raw.slice(0,300));
-      var res=null;
-      try{ res=JSON.parse(raw); }catch(e){}
-      if(!res){ var jm=raw.indexOf('{'); if(jm>=0){ try{ res=JSON.parse(raw.slice(jm)); }catch(e){} } }      // strip leading prose
-      if(!res){ // salvage truncated array: pull every {"size":...,"cx":...,"cy":...} object that's complete
-        var objs=raw.match(/\{[^{}]*"size"[^{}]*\}/g)||[]; if(objs.length){ res={sizes:objs.map(function(o){ try{return JSON.parse(o);}catch(e){return null;} }).filter(Boolean)}; }
-      }
-      if(!res){ console.log('[ai sweep] tile '+done+' JSON unrecoverable'); continue; }
-      console.log('[ai sweep] tile '+done+' parsed '+(((res&&res.sizes)||[]).length)+' size(s)');
-      ((res&&res.sizes)||[]).forEach(function(it){
-        var sraw=(it&&it.size!=null)?it.size:it; var sz=sizeFromWord(String(sraw)); if(!sz) return;
-        var cx=(it&&typeof it.cx==='number')?Math.max(0,Math.min(1,it.cx)):0.5;
-        var cy=(it&&typeof it.cy==='number')?Math.max(0,Math.min(1,it.cy)):0.5;
-        var px=tx0+cx*(tx1-tx0), py=ty0+cy*(ty1-ty0);
-        var near=false; for(var t=0;t<tags.length;t++){ var tg=tags[t]; if(!_sweepDims(tg.text)) continue; var tpx=(tg.x!=null?tg.x:0), tpy=(tg.y!=null?tg.y:0); if(Math.hypot(tpx-px,tpy-py)<34){ near=true; break; } }
-        if(near) return;
-        var _u=(typeof invVP==='function')?invVP(px,py):null;
-        var nn=(_u&&typeof applyM==='function')?applyM(window.__nvt,_u[0],_u[1]):[px/K,py/K];
-        var _t={x:px,y:py,nx:nn[0],ny:nn[1],text:sz,_ai:true,_by:'aitile'}; if(_u){_t.ux=_u[0];_t.uy=_u[1];} tags.push(_t); placed++;
-      });
-      try{ drawOverlay(); }catch(e){}
-    }catch(e){ clearTimeout(to); errs++; }
-  } }
-  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>AI sweep done.</b> '+placed+' size label(s) placed across '+nTiles+' tile(s) ('+errs+' tile errors). Now hit <b>\u2795 Build takeoff</b>.</div>';
-}
-window.aiSweepTiled=aiSweepTiled;
-async function aiReadSizesAtClusters(){
-  var out=document.getElementById('aiOut'); if(!out)return;
-  var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,''); if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
-  var pc=document.getElementById('pdfCanvas'); if(!pc||!pc.width){ out.innerHTML='<div class="hint">Load a PDF page first.</div>'; return; }
-  if(typeof segments==='undefined' || !segments || !segments.length){ out.innerHTML='<div class="hint">Scan the print first so geometry can find the text.</div>'; return; }
-  var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
-  var inWA=function(cx,cy){ if(typeof workArea==='undefined'||!workArea||typeof viewport==='undefined'||!viewport) return true; try{ var P0=applyM(viewport.transform,workArea.ux0,workArea.uy0),P1=applyM(viewport.transform,workArea.ux1,workArea.uy1); var x0=Math.min(P0[0],P1[0]),y0=Math.min(P0[1],P1[1]),x1=Math.max(P0[0],P1[0]),y1=Math.max(P0[1],P1[1]); return cx>=x0&&cx<=x1&&cy>=y0&&cy<=y1; }catch(e){ return true; } };
-  // 1) cluster SHORT segments (digit strokes) into tight blobs = candidate text-label spots
-  var pts=[]; for(var i=0;i<segments.length;i++){ var s=segments[i]; if((s.len||0)>70) continue; var mx=(s.x1+s.x2)/2,my=(s.y1+s.y2)/2; if(!inWA(mx,my)) continue; pts.push({idx:i,mx:mx,my:my}); }
-  var R=22, taken=new Array(pts.length).fill(false), clusters=[];
-  for(var i=0;i<pts.length;i++){ if(taken[i])continue; var stack=[i]; taken[i]=true; var grp=[];
-    while(stack.length){ var k=stack.pop(); grp.push(pts[k]); for(var j=0;j<pts.length;j++){ if(!taken[j] && Math.abs(pts[j].mx-pts[k].mx)<R && Math.abs(pts[j].my-pts[k].my)<R){ taken[j]=true; stack.push(j); } } }
-    if(grp.length<3) continue;
-    var x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; grp.forEach(function(g){ var s=segments[g.idx]; x0=Math.min(x0,s.x1,s.x2); y0=Math.min(y0,s.y1,s.y2); x1=Math.max(x1,s.x1,s.x2); y1=Math.max(y1,s.y1,s.y2); });
-    var w=x1-x0,h=y1-y0, _lo=Math.min(w,h), _hi=Math.max(w,h); if(_hi<12||_hi>260||_lo<4||_lo>120) continue;   // label-sized box, either orientation
-    clusters.push({bbox:[x0,y0,x1,y1], cx:(x0+x1)/2, cy:(y0+y1)/2, idxs:grp.map(function(g){return g.idx;})});
-  }
-  // 2) keep clusters that sit on/near a duct or maybe-duct LINE (point-to-segment distance)
-  var duct=segments.filter(function(s){return s.cls==='duct'||s.cls==='maybe';});
-  function pSegD(px,py,x1,y1,x2,y2){ var dx=x2-x1,dy=y2-y1,L2=dx*dx+dy*dy,t=L2?((px-x1)*dx+(py-y1)*dy)/L2:0; t=t<0?0:(t>1?1:t); return Math.hypot(px-(x1+t*dx),py-(y1+t*dy)); }
-  var rawCount=clusters.length;
-  clusters=clusters.filter(function(c){ for(var i=0;i<duct.length;i++){ var s=duct[i]; if(pSegD(c.cx,c.cy,s.x1,s.y1,s.x2,s.y2)<210) return true; } return false; });
-  var nearCount=clusters.length;
-  clusters=clusters.slice(0,90);
-  console.log('[geo size] funnel: '+pts.length+' short strokes \u2192 '+rawCount+' clusters \u2192 '+nearCount+' near duct/maybe \u2192 reading '+clusters.length);
-  window.__geoClusters=clusters.map(function(c){return c.bbox;}); try{ drawOverlay(); }catch(e){}
-  if(!clusters.length){ out.innerHTML='<div class="hint">No label spots kept: '+rawCount+' text-like cluster(s) formed, 0 near a duct line. '+(rawCount?'They formed but none sit near green duct \u2014 widen the duct-proximity, or the green isn\u2019t on the labels.':'No clusters formed \u2014 the digit strokes aren\u2019t being grouped (wrong size cutoff).')+'</div>'; return; }
-  var useOCR=!((document.getElementById('ocrOff')||{}).checked);   // OCR on by default; checkbox disables it
-  out.innerHTML='<div class="hint"><span class="spin"></span> reading '+clusters.length+' detected label spot(s)'+(useOCR?' (OCR first)':'')+'\u2026</div>';
-  var prompt='This is a tiny HIGH-RES crop from an HVAC plan, centered on one feature. If the feature is a duct SIZE label, read it: rectangular "20x16" (width x height, inches) or round "12\\"\u00d8" (report as "\u00f812"). If it is NOT a duct size (a diffuser/equipment/grille tag like CD1-320 or EF1, a CFM value, a note, or unreadable), return null. Do NOT guess. Answer ONLY JSON: {"size":"20x16"} or {"size":null}.';
-  var added=0, done=0, empty=0, errs=0, viaOCR=0, viaAI=0;
-  for(var ci=0; ci<clusters.length; ci++){ var c=clusters[ci]; done++;
-    try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> reading spot '+done+' / '+clusters.length+'\u2026 ('+added+' sizes, '+viaOCR+' OCR)'; }catch(e){}
-    var b64; try{ b64=await cropBoxHiDPI(c.bbox); }catch(e){ continue; }
-    var size=null, by='';
-    if(useOCR){ var os=await ocrSize(b64); if(os){ size=os; by='ocr'; viaOCR++; } }
-    if(!size){   // AI fallback (or OCR disabled)
-      var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},25000);
-      try{ var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:120,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:prompt}]}]})}); clearTimeout(to);
-        if(!resp.ok){ errs++; continue; } var data=await resp.json(); if(data.error){ errs++; continue; }
-        var raw=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
-        var res; try{ res=JSON.parse(raw); }catch(e){ continue; }
-        if(res&&res.size&&_sweepDims(res.size)){ size=String(res.size).replace(/\s+/g,''); by='ai'; viaAI++; }
-      }catch(e){ clearTimeout(to); errs++; continue; }
-    }
-    if(!size||!_sweepDims(size)){ empty++; continue; }
-    var px=c.cx, py=c.cy, near=false;
-    for(var t=0;t<tags.length;t++){ var tg=tags[t]; if(!_sweepDims(tg.text)) continue; var tpx=(tg.x!=null?tg.x:(tg.nx*K)), tpy=(tg.y!=null?tg.y:(tg.ny*K)); if(Math.hypot(tpx-px,tpy-py)<22){ near=true; break; } }
-    if(near) continue;
-    var _u=(typeof invVP==='function')?invVP(px,py):null;
-    var nn=(_u&&window.__nvt&&typeof applyM==='function')?applyM(window.__nvt,_u[0],_u[1]):[px/K,py/K];   // nvt frame so the tag links to a run
-    var _t={x:px,y:py,nx:nn[0],ny:nn[1],text:size,_ai:true,_by:by}; if(_u){_t.ux=_u[0];_t.uy=_u[1];} tags.push(_t); added++;
-    try{ drawOverlay(); }catch(e){}
-  }
-  out.innerHTML='<div class="hint" style="color:#ccffe0"><b>Geometry-located read done.</b> '+added+' size(s) placed \u2014 '+viaOCR+' by OCR, '+viaAI+' by AI ('+empty+' not a size, '+errs+' errors).<br><span style="color:#9fb4c8">locate funnel: '+pts.length+' short strokes \u2192 '+rawCount+' clusters \u2192 '+nearCount+' near duct \u2192 '+clusters.length+' read.</span> Now hit <b>\u2795 Build takeoff</b>.</div>';
-}
-window.aiReadSizesAtClusters=aiReadSizesAtClusters;
-
-// Read sizes at YOLO 'sizetag' detection boxes: the detector locates the label, hi-DPI crop reads it,
-// dim is placed at the box center. Box = exact position, AI = just the read.
-async function aiReadSizesFromYolo(){
-  var out=document.getElementById('aiOut'); if(!out)return;
-  var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,''); if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
-  var dets=(window.__yoloDets||[]).filter(function(d){ return /sizetag/.test(d.cls||'') && d.nx0!=null; });
-  if(!dets.length){ out.innerHTML='<div class="hint">No YOLO <b>sizetag</b> boxes found. Run a YOLO scan first \u2014 and since sizetag is a starved class, draw a work area and bump <b>detail</b> to catch more.</div>'; return; }
-  if(!window.__nvt||typeof viewport==='undefined'||!viewport){ out.innerHTML='<div class="hint">Render the page first.</div>'; return; }
-  var m=window.__nvt, a=m[0],b=m[1],c=m[2],d=m[3],e=m[4],f=m[5], det=(a*d-b*c)||1;
-  function n2screen(nx,ny){ var ux=(d*(nx-e)-c*(ny-f))/det, uy=(-b*(nx-e)+a*(ny-f))/det; return applyM(viewport.transform,ux,uy); }   // nvt -> user -> screen px
-  var K=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1))||1;
-  out.innerHTML='<div class="hint"><span class="spin"></span> reading '+dets.length+' YOLO sizetag box(es)\u2026</div>';
-  var prompt='This is a HIGH-RES crop centered on a duct SIZE label from an HVAC plan. Read it: rectangular "20x16" (width x height, inches) or round "12\\"\u00d8" (report as "\u00f812"). If you cannot read a duct size (it is a diffuser/equipment tag, a CFM value, a note, or unreadable), return null. Do NOT guess. Answer ONLY JSON: {"size":"20x16"} or {"size":null}.';
-  var added=0, done=0, empty=0, errs=0;
-  for(var i=0;i<dets.length;i++){ var D=dets[i]; done++;
-    try{ out.querySelector('.hint').innerHTML='<span class="spin"></span> reading sizetag '+done+' / '+dets.length+'\u2026 ('+added+' read)'; }catch(e){}
-    var p0=n2screen(D.nx0,D.ny0), p1=n2screen(D.nx1,D.ny1);
-    var bx0=Math.min(p0[0],p1[0]), by0=Math.min(p0[1],p1[1]), bx1=Math.max(p0[0],p1[0]), by1=Math.max(p0[1],p1[1]);
-    var b64; try{ b64=await cropBoxHiDPI([bx0,by0,bx1,by1]); }catch(e){ errs++; continue; }
-    var ctrl=new AbortController(); var to=setTimeout(function(){ctrl.abort();},25000);
-    try{ var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:120,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:prompt}]}]})}); clearTimeout(to);
-      if(!resp.ok){ errs++; continue; } var data=await resp.json(); if(data.error){ errs++; continue; }
-      var raw=(data.content||[]).filter(function(x){return x.type==='text';}).map(function(x){return x.text;}).join('').replace(/```json|```/g,'').trim();
-      var res; try{ res=JSON.parse(raw); }catch(e){ continue; }
-      if(!res||!res.size||!_sweepDims(res.size)){ empty++; continue; }
-      var px=(bx0+bx1)/2, py=(by0+by1)/2, near=false;
-      for(var t=0;t<tags.length;t++){ var tg=tags[t]; if(!_sweepDims(tg.text)) continue; var tpx=(tg.x!=null?tg.x:0), tpy=(tg.y!=null?tg.y:0); if(Math.hypot(tpx-px,tpy-py)<30){ near=true; break; } }
-      if(near) continue;
-      var _u=(typeof invVP==='function')?invVP(px,py):null;
-      var nn=(_u&&typeof applyM==='function')?applyM(window.__nvt,_u[0],_u[1]):[px/K,py/K];   // nvt frame so the tag links to a run
-      var _t={x:px,y:py,nx:nn[0],ny:nn[1],text:String(res.size).replace(/\s+/g,''),_ai:true}; if(_u){_t.ux=_u[0];_t.uy=_u[1];} tags.push(_t); added++;
-      try{ drawOverlay(); }catch(e){}
-    }catch(e){ clearTimeout(to); errs++; }
-  }
-  out.innerHTML='<div class="hint" style="color:#ffe6cc"><b>YOLO sizetag read done.</b> '+added+' placed of '+dets.length+' sizetag box(es) ('+empty+' not a size, '+errs+' errors). Now hit <b>\u2795 Build takeoff</b>.</div>';
-}
-window.aiReadSizesFromYolo=aiReadSizesFromYolo;
 
 function strongDuct(s){
   if(s._userMark && s.lock==='duct') return true;             // you said so
@@ -3646,6 +3291,39 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ selected.clear();
   var tl=document.getElementById('tbLock'); if(tl) tl.onclick=lockInTakeoff; var rs=document.getElementById('tbRunSel'); if(rs) rs.onclick=function(){ selectionDone=true; classify(); drawOverlay(); try{ setStatus('Line selection run \u2014 adjust filters to re-run live, or use AI review to refine.'); }catch(e){} }; var pk=document.getElementById('tbPick'); if(pk) pk.onclick=function(){ pickMode=true; try{document.getElementById('overlay').style.cursor='crosshair';}catch(e){} setStatus('🎯 Click a piece of duct on the print to set color + thickness.'); }; var mtd=document.getElementById('mTolD'), mtw=document.getElementById('mTolW'); function updTol(){ var a=document.getElementById('mTolDV'); if(a&&mtd)a.textContent=parseFloat(mtd.value).toFixed(2); var b2=document.getElementById('mTolWV'); if(b2&&mtw)b2.textContent=(parseFloat(mtw.value)>=3?'off':parseFloat(mtw.value).toFixed(1)); if(matchSample){ classify(); drawOverlay(); var bk=segments.filter(function(s){return s.cls==='duct';}).length; setStatus('Matched '+bk+' lines.'); } } if(mtd)mtd.addEventListener('input',updTol); if(mtw)mtw.addEventListener('input',updTol); var eb=document.getElementById('exportLearn'); if(eb) eb.onclick=exportLearning; var ib=document.getElementById('importLearn'), ifl=document.getElementById('importLearnFile'); if(ib&&ifl){ ib.onclick=function(){ ifl.click(); }; ifl.onchange=function(){ if(ifl.files&&ifl.files[0]) importLearning(ifl.files[0]); ifl.value=''; }; }
   var stb=document.getElementById('saveTakeoff'); if(stb) stb.onclick=saveTakeoff; var ltb=document.getElementById('loadTakeoff'), ltf=document.getElementById('loadTakeoffFile'); if(ltb&&ltf){ ltb.onclick=function(){ ltf.click(); }; ltf.onchange=function(){ if(ltf.files&&ltf.files[0]) loadTakeoff(ltf.files[0]); ltf.value=''; }; }
   var ss=document.getElementById('scaleSel'); if(ss) ss.onchange=function(){ scaleIPF=parseFloat(this.value)||0.125; scaleAuto=false; updateScaleUI(); }; var sa=document.getElementById('scaleAI'); if(sa) sa.addEventListener('click', readScaleAI); try{ updateScaleUI(); }catch(e){} })();
+
+(function(){ // collapsible, clearly-labeled sidebar sections — everything stays one click away
+  var collapseByDefault=['completed takeoff','classification','duct width filter','layers','selection','cleanup tools'];
+  document.querySelectorAll('aside .sec').forEach(function(sec){
+    var h=sec.querySelector(':scope > h3'); if(!h) return;
+    h.addEventListener('click', function(){ sec.classList.toggle('collapsed'); });
+    var t=(h.textContent||'').toLowerCase();
+    if(collapseByDefault.some(function(k){ return t.indexOf(k)>=0; })) sec.classList.add('collapsed');
+  });
+})();
+
+(function(){ // move the floating canvas tools (brush / erase / tap) to bottom-right, collapsible behind a + button
+  var tries=0;
+  function setup(){
+    var ids=['brushBtn','eraseBtn','tapToolBtn'];
+    var btns=ids.map(function(id){ return document.getElementById(id); }).filter(Boolean);
+    if(btns.length<2 && tries++<40){ return setTimeout(setup,250); }   // wait until they're created
+    if(document.getElementById('cornerFab')) return;
+    var wrap=document.createElement('div'); wrap.id='cornerTools';
+    wrap.style.cssText='position:fixed;bottom:66px;right:14px;z-index:99999;display:none;flex-direction:column;gap:8px;align-items:flex-end';
+    document.body.appendChild(wrap);
+    btns.forEach(function(b){ b.style.position='static'; b.style.top=''; b.style.right=''; b.style.left=''; b.style.bottom=''; wrap.appendChild(b); });
+    var fab=document.createElement('button'); fab.id='cornerFab'; fab.title='Canvas tools';
+    fab.style.cssText='position:fixed;bottom:14px;right:14px;z-index:100000;width:46px;height:46px;border-radius:50%;border:2px solid #2f6fb0;background:#102a44;color:#cfe6ff;font-size:20px;line-height:1;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.45)';
+    document.body.appendChild(fab);
+    var open=false;
+    function render(){ wrap.style.display=open?'flex':'none'; fab.textContent=open?'\u2715':'\u2795'; }
+    fab.onclick=function(){ open=!open; render(); }; render();
+    // pop the brush hint / tap panel up near the bottom-right buttons instead of top
+    ['brushHint','tapPanel'].forEach(function(id){ var p=document.getElementById(id); if(p){ p.style.top=''; p.style.bottom='118px'; p.style.right='14px'; } });
+  }
+  if(document.readyState!=='loading') setTimeout(setup,300); else window.addEventListener('load', function(){ setTimeout(setup,300); });
+})();
 function gapUpd(){ $('minGapV').textContent=$('minGap').value+' pt'; $('maxGapV').textContent=$('maxGap').value+' pt';
   if(+$('minGap').value> +$('maxGap').value) $('maxGap').value=$('minGap').value;
   classify(); drawOverlay(); }
