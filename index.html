@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t70 · tile sweep: clear stale + drop off-duct noise</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t72 · elbow rect/round from connected duct (fix round-on-rect)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2249,9 +2249,12 @@ function refreshSel(){
       var te=runEnd(trunk); var tinto=[te.ux,te.uy], bout=[branch.dir[0],branch.dir[1]];
       var turn=Math.atan2(tinto[0]*bout[1]-tinto[1]*bout[0], tinto[0]*bout[0]+tinto[1]*bout[1]);
       var lastP=trunk.pieces[trunk.pieces.length-1]||{};
+      // rect vs round comes from the CONNECTED DUCT, not a default: round only if a connected run is round
+      function runRound(r){ return !!(r && r.pieces && r.pieces.some(function(p){ return p.kind==='straight' && p.round; })); }
+      var elbRound = runRound(trunk) || runRound(branch);
       (window.__elbowJoins=window.__elbowJoins||[]).push({
         trunkId:trunk.id, branchId:branch.id, atX:d.nx, atY:d.ny, turn:turn,
-        round:!!lastP.round, widthIn:lastP.widthIn||trunk.widthIn, score:d.score });
+        round:elbRound, widthIn:lastP.widthIn||trunk.widthIn, score:d.score });
       d._used=true; joined++;
     });
     return joined;
@@ -3085,7 +3088,7 @@ async function aiTileSweep(){
          if(!un){ out.innerHTML='<div class="hint">Could not read page size.</div>'; return; }
          ux0=0; uy0=0; ux1=un.w; uy1=un.h; }
   var areaWu=ux1-ux0, areaHu=uy1-uy0;
-  var TILEU=300, OVERU=60, STEPU=TILEU-OVERU;                   // tile size in USER units (same render regardless of zoom)
+  var TILEU=300, OVERU=110, STEPU=TILEU-OVERU;                   // tile size in USER units (same render regardless of zoom)
   var nx=Math.max(1,Math.ceil((areaWu-OVERU)/STEPU)), ny=Math.max(1,Math.ceil((areaHu-OVERU)/STEPU)), total=nx*ny;
   var added=0, done=0, fails=0, hits=[];
   for(var gy=0; gy<ny; gy++){ for(var gx=0; gx<nx; gx++){
@@ -3138,7 +3141,7 @@ async function aiTileSweep(){
   added=kept.length;
   // DROP OPEN-SPACE NOISE: a real size tag sits next to duct. Keep only tags with a duct/maybe
   // segment within ~70px; the broad sweep otherwise picks up stray numbers in schedules/notes/empty areas.
-  function nearDuct(px,py){ var NEAR=70;
+  function nearDuct(px,py){ var NEAR=140;
     for(var i=0;i<segments.length;i++){ var s=segments[i]; if(s.cls==='not') continue;
       var dx=s.x2-s.x1, dy=s.y2-s.y1, L2=dx*dx+dy*dy||1, t=Math.max(0,Math.min(1,((px-s.x1)*dx+(py-s.y1)*dy)/L2));
       var qx=s.x1+t*dx, qy=s.y1+t*dy; if(Math.hypot(px-qx,py-qy)<=NEAR) return true; }
