@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t78 · fix rnd scope (track-walker + merge now run)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t79 · track-walk cursor: chains fragments, transitions at YOLO sizechange boxes</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2596,40 +2596,74 @@ function refreshSel(){
   // ordered straight->transition->straight chain with transitions exactly at tag-value changes. Needs scale. =====
   function buildRunsTrackWalk(){
     if(typeof scaleIPF==='undefined' || !(scaleIPF>0)){ setStatus('Set the drawing scale first — track-walk needs it for widths and single-wall rescue.'); return; }
-    try{ buildSegmentRuns(); }catch(e){}                                  // build centerlines (includes single-wall rescue)
+    try{ buildSegmentRuns(); }catch(e){}                                  // centerlines (single-wall rescue already baked in)
     var sg=window.__sgRuns||[]; if(!sg.length){ setStatus('No duct centerlines — mark/scan duct first.'); return; }
-    window.__runs2d=[]; var ci=0, single=0, scaled=0;
-    sg.forEach(function(r){
-      var c=r.corners; if(!c||c.length<4) return;
-      var A=[(c[0][0]+c[3][0])/2,(c[0][1]+c[3][1])/2], B=[(c[1][0]+c[2][0])/2,(c[1][1]+c[2][1])/2];
-      var dx=B[0]-A[0],dy=B[1]-A[1],Lpt=Math.hypot(dx,dy)||1,ux=dx/Lpt,uy=dy/Lpt,pnx=-uy,pny=ux, lenIn=ptToIn(Lpt);
-      var ev=[]; (r.tagIdx||[]).forEach(function(ti){ var tg=tags[ti]; if(!tg||tg.nx==null) return; var pd=parseTagDims(tg.text); if(!pd) return;
-        var along=ptToIn((tg.nx-A[0])*ux+(tg.ny-A[1])*uy);
-        ev.push({alongIn:Math.max(0,along), w:pd.w, h:pd.h, round:!!pd.round, str:(pd.round?('\u00f8'+pd.w):(pd.w+'\u00d7'+pd.h))}); });
-      ev.sort(function(a,b){return a.alongIn-b.alongIn;});
-      var ev2=[]; ev.forEach(function(e){ if(!ev2.some(function(p){return p.str===e.str && Math.abs(p.alongIn-e.alongIn)<6;})) ev2.push(e); }); ev=ev2;
-      var pieces=[];
-      if(ev.length){                                                       // (A) sized by tags — lay straights, transition at each size step
-        var spans=[], prev={start:0,size:ev[0]};
-        for(var i=1;i<ev.length;i++){ if(ev[i].str!==prev.size.str){ spans.push({a:prev.start,b:ev[i].alongIn,size:prev.size}); prev={start:ev[i].alongIn,size:ev[i]}; } }
-        spans.push({a:prev.start,b:lenIn,size:prev.size});
-        var prevRound=null;
-        spans.forEach(function(sp,si){ var s=sp.size, depth=s.round?s.w:s.h;
-          if(si>0){ var rc='tr',rn='Transition'; if(prevRound!==null&&prevRound!==s.round){rc='s2r';rn='Sq to Round';} else if(s.round){rc='reducer';rn='Reducer';}
-            pieces.push({kind:'fitting',cid:rc,camduct:rn,round:s.round,lenIn:0,widthIn:s.w,depthIn:depth,size:s.str,_sizeStep:true}); }
-          var rem=Math.max(0,sp.b-sp.a), jl=s.round?120:JOINT_DEFAULT;
-          while(rem>0.5){ var L=Math.min(jl,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:s.w,depthIn:depth,size:s.str,cid:s.round?'spiral':'st',camduct:s.round?'Spiral':'Straight Duct',round:s.round}); rem-=L; }
-          prevRound=s.round; });
-      } else {                                                             // (B) no tag — scale from geometry width, flagged
-        var rem=lenIn; while(rem>0.5){ var L=Math.min(JOINT_DEFAULT,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:r.widthIn,depthIn:r.widthIn,size:r.widthIn+'\u2033',cid:'st',camduct:'Straight Duct',round:false,_scaled:true}); rem-=L; }
-        scaled++;
-      }
-      if(!pieces.length) return;
-      if(r.singleWall) single++;
-      window.__runs2d.push({id:uid(),axis:r.axis,start:A,dir:[ux,uy],normal:[pnx,pny],widthIn:(pieces[0]&&pieces[0].widthIn)||r.widthIn,color:palette[ci%palette.length],label:'',confirmed:!!r.confirmed,scaled:!ev.length,tagIdx:(r.tagIdx||[]).slice(),pieces:pieces,singleWall:!!r.singleWall,synthetic:!!r.synthetic}); ci++;
+    // 1) centerline fragments
+    var frags=[]; sg.forEach(function(r){ var c=r.corners; if(!c||c.length<4) return;
+      frags.push({r:r, A:[(c[0][0]+c[3][0])/2,(c[0][1]+c[3][1])/2], B:[(c[1][0]+c[2][0])/2,(c[1][1]+c[2][1])/2], axis:r.axis, widthIn:r.widthIn, tagIdx:r.tagIdx||[], singleWall:!!r.singleWall, synthetic:!!r.synthetic}); });
+    // 2) group colinear fragments (same axis + same row/column) so the cursor can hop gaps onto a neighbor
+    var groups={};
+    frags.forEach(function(f,idx){ var mx=(f.A[0]+f.B[0])/2, my=(f.A[1]+f.B[1])/2, k;
+      if(f.axis==='vertical') k='V'+Math.round(mx/16); else if(f.axis==='horizontal') k='H'+Math.round(my/16); else k='D'+idx;
+      (groups[k]=groups[k]||[]).push(f); });
+    window.__runs2d=[]; var ci=0, single=0, scaled=0, trans=0;
+    var GAPMAX=Math.max(inToPt(48),60);                                   // bridge gaps up to ~4' onto a colinear neighbor
+    Object.keys(groups).forEach(function(k){
+      var g=groups[k], vert=k[0]==='V', horiz=k[0]==='H';
+      var sx=0,sy=0,n=0; g.forEach(function(f){ sx+=f.A[0]+f.B[0]; sy+=f.A[1]+f.B[1]; n+=2; });
+      var mx=sx/n, my=sy/n, origin, axisDir;
+      if(vert){ origin=[mx,0]; axisDir=[0,1]; } else if(horiz){ origin=[0,my]; axisDir=[1,0]; }
+      else { var f0=g[0],dx=f0.B[0]-f0.A[0],dy=f0.B[1]-f0.A[1],L=Math.hypot(dx,dy)||1; axisDir=[dx/L,dy/L]; origin=[f0.A[0],f0.A[1]]; }
+      function along(p){ return (p[0]-origin[0])*axisDir[0]+(p[1]-origin[1])*axisDir[1]; }
+      function perp(p){ return (p[0]-origin[0])*(-axisDir[1])+(p[1]-origin[1])*axisDir[0]; }
+      var grpW=g[0].widthIn||12;
+      // fragment intervals along the axis
+      var ivs=g.map(function(f){ var a=along(f.A), b=along(f.B); if(a>b){var t=a;a=b;b=t;} return {f:f,a:a,b:b}; });
+      ivs.sort(function(p,q){return p.a-q.a;});
+      var perpC=0; ivs.forEach(function(iv){ perpC+=(perp(iv.f.A)+perp(iv.f.B))/2; }); perpC/=ivs.length;
+      // size tags + YOLO sizechange/transition boxes projected onto this line
+      var sizeEv=[]; g.forEach(function(f){ f.tagIdx.forEach(function(ti){ var tg=tags[ti]; if(!tg||tg.nx==null) return; var pd=parseTagDims(tg.text); if(!pd) return;
+        sizeEv.push({along:along([tg.nx,tg.ny]), w:pd.w,h:pd.h,round:!!pd.round, str:pd.round?('\u00f8'+pd.w):(pd.w+'\u00d7'+pd.h)}); }); });
+      sizeEv.sort(function(p,q){return p.along-q.along;});
+      var se=[]; sizeEv.forEach(function(e){ if(!se.some(function(p){return p.str===e.str&&Math.abs(p.along-e.along)<inToPt(6);})) se.push(e); }); sizeEv=se;
+      var boxes=[]; (window.__yoloDets||[]).forEach(function(d){ if(d.nx==null) return; var base=(d.cls||'').replace(/^(rect|round)-/,''); if(base!=='sizechange'&&base!=='transition') return;
+        if(Math.abs(perp([d.nx,d.ny])-perpC)>inToPt(grpW/2+18)) return; boxes.push({along:along([d.nx,d.ny])}); });
+      boxes.sort(function(p,q){return p.along-q.along;});
+      // 3) split into contiguous chains: walk fragments, bridge small gaps, break on big gaps
+      var chains=[], cur=null;
+      ivs.forEach(function(iv){ if(!cur){ cur={a:iv.a,b:iv.b,frags:[iv.f]}; chains.push(cur); return; }
+        if(iv.a-cur.b<=GAPMAX){ cur.b=Math.max(cur.b,iv.b); cur.frags.push(iv.f); } else { cur={a:iv.a,b:iv.b,frags:[iv.f]}; chains.push(cur); } });
+      // 4) walk a cursor along each chain, laying pieces in order
+      chains.forEach(function(ch){
+        var startPt=[origin[0]+axisDir[0]*ch.a, origin[1]+axisDir[1]*ch.a], chLenIn=ptToIn(ch.b-ch.a);
+        var cs=sizeEv.filter(function(e){return e.along>=ch.a-inToPt(8)&&e.along<=ch.b+inToPt(8);});
+        var cb=boxes.filter(function(e){return e.along>=ch.a&&e.along<=ch.b;});
+        var anySingle=ch.frags.some(function(f){return f.singleWall;}); if(anySingle) single++;
+        var pieces=[];
+        if(!cs.length){                                                    // no tag on the chain -> scaled straight, flagged
+          var w0=ch.frags[0].widthIn, rem=chLenIn; while(rem>0.5){ var L=Math.min(JOINT_DEFAULT,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:w0,depthIn:w0,size:w0+'\u2033',cid:'st',camduct:'Straight Duct',round:false,_scaled:true}); rem-=L; } scaled++;
+        } else {
+          // breakpoints: at each size step, place the transition at a YOLO box between the two tags, else midpoint
+          var breaks=[];
+          for(var i=1;i<cs.length;i++){ if(cs[i].str!==cs[i-1].str){
+            var bx=null; for(var bi=0;bi<cb.length;bi++){ if(cb[bi].along>cs[i-1].along && cb[bi].along<cs[i].along){ bx=cb[bi]; break; } }
+            var posA=bx?bx.along:(cs[i-1].along+cs[i].along)/2;
+            breaks.push({posIn:ptToIn(posA-ch.a), size:cs[i]}); } }
+          var curSize=cs[0], cursorIn=0, prevRound=null;
+          function emitStraight(toIn,s){ var depth=s.round?s.w:s.h, rem=Math.max(0,toIn-cursorIn), jl=s.round?120:JOINT_DEFAULT;
+            while(rem>0.5){ var L=Math.min(jl,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:s.w,depthIn:depth,size:s.str,cid:s.round?'spiral':'st',camduct:s.round?'Spiral':'Straight Duct',round:s.round}); rem-=L; } cursorIn=Math.max(cursorIn,toIn); prevRound=s.round; }
+          breaks.forEach(function(bk){ emitStraight(bk.posIn,curSize);
+            var s=bk.size, depth=s.round?s.w:s.h, rc='tr',rn='Transition'; if(prevRound!==null&&prevRound!==s.round){rc='s2r';rn='Sq to Round';} else if(s.round){rc='reducer';rn='Reducer';}
+            pieces.push({kind:'fitting',cid:rc,camduct:rn,round:s.round,lenIn:0,widthIn:s.w,depthIn:depth,size:s.str,_sizeStep:true}); trans++; curSize=s; });
+          emitStraight(chLenIn,curSize);
+        }
+        if(!pieces.length) return;
+        var allTags=[]; ch.frags.forEach(function(f){ f.tagIdx.forEach(function(ti){ allTags.push(ti); }); });
+        window.__runs2d.push({id:uid(),axis:(vert?'vertical':horiz?'horizontal':ch.frags[0].axis),start:startPt,dir:[axisDir[0],axisDir[1]],normal:[-axisDir[1],axisDir[0]],widthIn:(pieces[0]&&pieces[0].widthIn)||ch.frags[0].widthIn,color:palette[ci%palette.length],label:'',confirmed:true,scaled:!cs.length,tagIdx:allTags,pieces:pieces,singleWall:anySingle,synthetic:ch.frags.some(function(f){return f.synthetic;})}); ci++;
+      });
     });
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled-no-tag. Straights + transitions, ordered.');
+    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled. Cursor walk \u2014 transitions at YOLO sizechange boxes.');
   }
   window.__buildRunsTrackWalk=buildRunsTrackWalk;
 
