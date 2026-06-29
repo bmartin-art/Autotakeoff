@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t77 · track-walker beta button (ordered straight+transition, single-wall via __sgRuns)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t78 · fix rnd scope (track-walker + merge now run)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2590,6 +2590,7 @@ function refreshSel(){
   window.__selColor=function(c){ var ids=new Set(); sel.forEach(function(k){ ids.add(k.split(':')[0]); }); ids.forEach(function(id){ var r=findRun(id); if(r)r.color=c; }); renderItems(); renderPanel(); };
   window.__selName=function(){ var el=document.getElementById('selLabel'); if(!el)return; var nm=el.value; var ids=new Set(); sel.forEach(function(k){ ids.add(k.split(':')[0]); }); ids.forEach(function(id){ var r=findRun(id); if(r)r.label=nm; }); renderItems(); renderPanel(); setStatus('Labeled '+ids.size+' run(s).'); };
 
+  function rnd(v){ return Math.round(v*10)/10; }   // module-scoped (runsFromPreview has its own local copy)
   // ===== TRACK-WALKER (beta) — separate builder. Walks each __sgRuns centerline (single-wall rescue
   // already baked into __sgRuns by buildSegmentRuns), collects its size tags in order, and emits an
   // ordered straight->transition->straight chain with transitions exactly at tag-value changes. Needs scale. =====
