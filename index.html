@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t64 · tile sweep grids in user space (zoom-independent) + fail report</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t65 · tile sweep: box-center placement + feeds association</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3046,7 +3046,7 @@ async function aiTileSweep(){
     try{ out.innerHTML='<div class="hint"><span class="spin"></span> tile '+done+'/'+total+' \u00b7 '+added+' tags'+(fails?(' \u00b7 '+fails+' failed'):'')+'\u2026'+(workArea?' (work area)':' (whole sheet)')+'</div>'; }catch(e){}
     var crop=null; try{ crop=await cropRegionB64(x,y,w,h); }catch(e){}
     if(!crop||!crop.b64){ fails++; continue; }
-    var prompt='This is a HIGH-RES crop of part of an HVAC duct plan. Find every duct SIZE label PRINTED in THIS image. RECTANGULAR = WIDTHxHEIGHT inches like "20x16". ROUND = one diameter with \u00f8 or DIA like "12\\"\u00f8" -> report as "\u00f812". Size numbers may be ROTATED (vertical) inside the ducts \u2014 include those. For EACH, give its CENTER in THIS image as cx (0=left..1=right) and cy (0=top..1=bottom). Do NOT invent sizes and do NOT repeat one to fill space; if you cannot clearly read a printed size, return empty. Ignore diffuser/grille/equipment tags (CD-500, EF1, TS) and CFM values. Answer ONLY JSON, no prose: {"sizes":[{"size":"20x16","cx":0.4,"cy":0.6}]} or {"sizes":[]}.';
+    var prompt='This is a HIGH-RES crop of part of an HVAC duct plan. Find every duct SIZE label PRINTED in THIS image. RECTANGULAR = WIDTHxHEIGHT inches like "20x16". ROUND = one diameter with \u00f8 or DIA like "12\\"\u00f8" -> report as "\u00f812". Size numbers may be ROTATED (vertical) inside the ducts \u2014 include those. For EACH label give a TIGHT bounding box around just that label, as fractions of THIS image: x0,y0 (top-left) and x1,y1 (bottom-right), each 0..1. Do NOT invent sizes and do NOT repeat one to fill space; if you cannot clearly read a printed size, return empty. Ignore diffuser/grille/equipment tags (CD-500, EF1, TS) and CFM values. Answer ONLY JSON, no prose: {"sizes":[{"size":"20x16","x0":0.30,"y0":0.55,"x1":0.46,"y1":0.63}]} or {"sizes":[]}.';
     try{
       var ctrl=new AbortController(), to=setTimeout(function(){ctrl.abort();},25000);
       var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:500,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:crop.b64}},{type:'text',text:prompt}]}]})});
@@ -3059,8 +3059,10 @@ async function aiTileSweep(){
           var s=String((it&&it.size!=null)?it.size:it);
           if(!(/\d+\s*[xX\u00d7]\s*\d+/.test(s)||/\u00f8|\u00d8|dia/i.test(s))) return;
           var mm=/(\d+)\s*[xX\u00d7]\s*(\d+)/.exec(s); var size=mm?(mm[1]+'\u00d7'+mm[2]):(function(){var dd=/(\d+)/.exec(s);return dd?('\u00f8'+dd[1]):s;})();
-          var cx=(it&&typeof it.cx==='number')?Math.max(0,Math.min(1,it.cx)):0.5;
-          var cy=(it&&typeof it.cy==='number')?Math.max(0,Math.min(1,it.cy)):0.5;
+          var cx,cy;
+          if(it && typeof it.x0==='number' && typeof it.x1==='number'){ cx=(it.x0+it.x1)/2; cy=(it.y0+it.y1)/2; }   // box center
+          else { cx=(it&&typeof it.cx==='number')?it.cx:0.5; cy=(it&&typeof it.cy==='number')?it.cy:0.5; }            // fallback to point
+          cx=Math.max(0,Math.min(1,cx)); cy=Math.max(0,Math.min(1,cy));
           var px=crop.x+cx*crop.w, py=crop.y+cy*crop.h;                 // tile origin + in-tile fraction -> sheet px
           if(hits.some(function(e){ return e.size===size && Math.hypot(e.px-px,e.py-py)<40; })) return;   // dedup across overlaps
           hits.push({px:px,py:py,size:size}); added++;
