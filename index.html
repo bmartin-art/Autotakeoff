@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t80 · real 2D fitting shapes (elbow throat/heel + tapered transition)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t82 · trunk vs branch: round taps off the side add a tap+branch, trunk keeps its size</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2472,12 +2472,16 @@ function refreshSel(){
       var throat=[f.x+tix/tl*hw*0.35, f.y+tiy/tl*hw*0.35];       // tight throat (inside)
       return [Ain,heel,Bout,Cout,throat,Din].map(function(q){return n2s(q[0],q[1]);});
     }
-    // TRANSITION / REDUCER — tapered trapezoid from inlet width to outlet width (centered on the junction)
+    // TRANSITION / REDUCER — tapered trapezoid from inlet width to outlet width
     if(p.kind==='fitting' && (p.cid==='tr'||p.cid==='reducer'||p.cid==='s2r'||p._sizeStep)){
       var prev=run.pieces[i-1], next=run.pieces[i+1];
-      var inHW=inToPt((((prev&&prev.widthIn))||p.widthIn||run.widthIn)/2);
-      var outHW=inToPt((((next&&next.widthIn))||p.widthIn||run.widthIn)/2);
-      var Ltr=Math.max(inToPt(8),(inHW+outHW)*0.7);
+      var inHW=inToPt(((p.inW)||(prev&&prev.widthIn)||p.widthIn||run.widthIn)/2);
+      var outHW=inToPt(((p.outW)||(next&&next.widthIn)||p.widthIn||run.widthIn)/2);
+      var b=inToPt(p.lenIn||0);
+      if(b>1){   // real-length piece (track-walk): taper across its OWN length so straights connect end-to-end
+        return [P(0,-inHW),P(b,-outHW),P(b,outHW),P(0,inHW)].map(function(q){return n2s(q[0],q[1]);});
+      }
+      var Ltr=Math.max(inToPt(8),(inHW+outHW)*0.7);   // legacy zero-length: centered overlay
       return [P(-Ltr/2,-inHW),P(Ltr/2,-outHW),P(Ltr/2,outHW),P(-Ltr/2,inHW)].map(function(q){return n2s(q[0],q[1]);});
     }
     // STRAIGHT
@@ -2627,7 +2631,7 @@ function refreshSel(){
     frags.forEach(function(f,idx){ var mx=(f.A[0]+f.B[0])/2, my=(f.A[1]+f.B[1])/2, k;
       if(f.axis==='vertical') k='V'+Math.round(mx/16); else if(f.axis==='horizontal') k='H'+Math.round(my/16); else k='D'+idx;
       (groups[k]=groups[k]||[]).push(f); });
-    window.__runs2d=[]; var ci=0, single=0, scaled=0, trans=0;
+    window.__runs2d=[]; var ci=0, single=0, scaled=0, trans=0, taps=0;
     var GAPMAX=Math.max(inToPt(48),60);                                   // bridge gaps up to ~4' onto a colinear neighbor
     Object.keys(groups).forEach(function(k){
       var g=groups[k], vert=k[0]==='V', horiz=k[0]==='H';
@@ -2644,7 +2648,7 @@ function refreshSel(){
       var perpC=0; ivs.forEach(function(iv){ perpC+=(perp(iv.f.A)+perp(iv.f.B))/2; }); perpC/=ivs.length;
       // size tags + YOLO sizechange/transition boxes projected onto this line
       var sizeEv=[]; g.forEach(function(f){ f.tagIdx.forEach(function(ti){ var tg=tags[ti]; if(!tg||tg.nx==null) return; var pd=parseTagDims(tg.text); if(!pd) return;
-        sizeEv.push({along:along([tg.nx,tg.ny]), w:pd.w,h:pd.h,round:!!pd.round, str:pd.round?('\u00f8'+pd.w):(pd.w+'\u00d7'+pd.h)}); }); });
+        sizeEv.push({along:along([tg.nx,tg.ny]), perp:perp([tg.nx,tg.ny]), w:pd.w,h:pd.h,round:!!pd.round, str:pd.round?('\u00f8'+pd.w):(pd.w+'\u00d7'+pd.h)}); }); });
       sizeEv.sort(function(p,q){return p.along-q.along;});
       var se=[]; sizeEv.forEach(function(e){ if(!se.some(function(p){return p.str===e.str&&Math.abs(p.along-e.along)<inToPt(6);})) se.push(e); }); sizeEv=se;
       var boxes=[]; (window.__yoloDets||[]).forEach(function(d){ if(d.nx==null) return; var base=(d.cls||'').replace(/^(rect|round)-/,''); if(base!=='sizechange'&&base!=='transition') return;
@@ -2660,31 +2664,55 @@ function refreshSel(){
         var cs=sizeEv.filter(function(e){return e.along>=ch.a-inToPt(8)&&e.along<=ch.b+inToPt(8);});
         var cb=boxes.filter(function(e){return e.along>=ch.a&&e.along<=ch.b;});
         var anySingle=ch.frags.some(function(f){return f.singleWall;}); if(anySingle) single++;
-        var pieces=[];
+        var pieces=[], chBranches=[];
         if(!cs.length){                                                    // no tag on the chain -> scaled straight, flagged
           var w0=ch.frags[0].widthIn, rem=chLenIn; while(rem>0.5){ var L=Math.min(JOINT_DEFAULT,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:w0,depthIn:w0,size:w0+'\u2033',cid:'st',camduct:'Straight Duct',round:false,_scaled:true}); rem-=L; } scaled++;
         } else {
-          // breakpoints: at each size step, place the transition at a YOLO box between the two tags, else midpoint
-          var breaks=[];
-          for(var i=1;i<cs.length;i++){ if(cs[i].str!==cs[i-1].str){
-            var bx=null; for(var bi=0;bi<cb.length;bi++){ if(cb[bi].along>cs[i-1].along && cb[bi].along<cs[i].along){ bx=cb[bi]; break; } }
-            var posA=bx?bx.along:(cs[i-1].along+cs[i].along)/2;
-            breaks.push({posIn:ptToIn(posA-ch.a), size:cs[i]}); } }
-          var curSize=cs[0], cursorIn=0, prevRound=null;
+          // TRUNK vs BRANCH: a size tag whose SHAPE differs from the trunk (round on a rect trunk) is only an
+          // in-line transition if a YOLO sizechange box confirms it; otherwise it's a duct TAPPING off the side —
+          // trunk keeps its size, and we emit a tap + a branch run going off perpendicular.
+          function boxNear(al){ return cb.some(function(b){ return Math.abs(b.along-al)<inToPt(18); }); }
+          var rc=0, ro=0; cs.forEach(function(e){ e.round?ro++:rc++; });
+          var trunkRound = ro>rc;                                          // majority shape; tie -> rect
+          var trunkTags=[], branchTags=[];
+          cs.forEach(function(e){ if(e.round===trunkRound || boxNear(e.along)) trunkTags.push(e); else branchTags.push(e); });
+          if(!trunkTags.length) trunkTags=[cs[0]];
+          var events=[];
+          for(var i=1;i<trunkTags.length;i++){ if(trunkTags[i].str!==trunkTags[i-1].str){
+            var bx=null; for(var bi=0;bi<cb.length;bi++){ if(cb[bi].along>trunkTags[i-1].along && cb[bi].along<trunkTags[i].along){ bx=cb[bi]; break; } }
+            var posA=bx?bx.along:(trunkTags[i-1].along+trunkTags[i].along)/2;
+            events.push({type:'tr', posIn:ptToIn(posA-ch.a), size:trunkTags[i]}); } }
+          branchTags.forEach(function(bt){ events.push({type:'tap', posIn:Math.max(0,ptToIn(bt.along-ch.a)), bt:bt}); });
+          events.sort(function(p,q){return p.posIn-q.posIn;});
+          var curSize=trunkTags[0], cursorIn=0, prevRound=null, TRLEN=12;
           function emitStraight(toIn,s){ var depth=s.round?s.w:s.h, rem=Math.max(0,toIn-cursorIn), jl=s.round?120:JOINT_DEFAULT;
             while(rem>0.5){ var L=Math.min(jl,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:s.w,depthIn:depth,size:s.str,cid:s.round?'spiral':'st',camduct:s.round?'Spiral':'Straight Duct',round:s.round}); rem-=L; } cursorIn=Math.max(cursorIn,toIn); prevRound=s.round; }
-          breaks.forEach(function(bk){ emitStraight(bk.posIn,curSize);
-            var s=bk.size, depth=s.round?s.w:s.h, rc='tr',rn='Transition'; if(prevRound!==null&&prevRound!==s.round){rc='s2r';rn='Sq to Round';} else if(s.round){rc='reducer';rn='Reducer';}
-            pieces.push({kind:'fitting',cid:rc,camduct:rn,round:s.round,lenIn:0,widthIn:s.w,depthIn:depth,size:s.str,_sizeStep:true}); trans++; curSize=s; });
+          events.forEach(function(ev){
+            if(ev.type==='tr'){ emitStraight(Math.max(0,ev.posIn-TRLEN/2), curSize);   // in-line size step
+              var s=ev.size, depth=s.round?s.w:s.h, rcc='tr',rn='Transition'; if(prevRound!==null&&prevRound!==s.round){rcc='s2r';rn='Sq to Round';} else if(s.round){rcc='reducer';rn='Reducer';}
+              pieces.push({kind:'fitting',cid:rcc,camduct:rn,round:s.round,lenIn:TRLEN,widthIn:s.w,depthIn:depth,size:s.str,inW:curSize.w,outW:s.w,_sizeStep:true}); trans++;
+              cursorIn=ev.posIn+TRLEN/2; curSize=s;
+            } else {                                                       // TAP off the side — trunk continues unchanged
+              emitStraight(ev.posIn, curSize);
+              var bt=ev.bt;
+              pieces.push({kind:'fitting',cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:curSize.w,depthIn:(curSize.round?curSize.w:curSize.h),size:bt.str,_tap:true}); taps++;
+              var tp=[origin[0]+axisDir[0]*bt.along, origin[1]+axisDir[1]*bt.along];
+              var side=((bt.perp-perpC)>=0)?1:-1, pd=[-axisDir[1]*side, axisDir[0]*side];
+              var bpieces=[], brem=24, jl2=bt.round?120:JOINT_DEFAULT;
+              while(brem>0.5){ var L=Math.min(jl2,brem); bpieces.push({kind:'straight',lenIn:rnd(L),widthIn:bt.w,depthIn:(bt.round?bt.w:bt.h),size:bt.str,cid:bt.round?'spiral':'st',camduct:bt.round?'Spiral':'Straight Duct',round:bt.round}); brem-=L; }
+              chBranches.push({start:tp,dir:pd,widthIn:bt.w,round:bt.round,pieces:bpieces});
+            }
+          });
           emitStraight(chLenIn,curSize);
         }
         if(!pieces.length) return;
         var allTags=[]; ch.frags.forEach(function(f){ f.tagIdx.forEach(function(ti){ allTags.push(ti); }); });
         window.__runs2d.push({id:uid(),axis:(vert?'vertical':horiz?'horizontal':ch.frags[0].axis),start:startPt,dir:[axisDir[0],axisDir[1]],normal:[-axisDir[1],axisDir[0]],widthIn:(pieces[0]&&pieces[0].widthIn)||ch.frags[0].widthIn,color:palette[ci%palette.length],label:'',confirmed:true,scaled:!cs.length,tagIdx:allTags,pieces:pieces,singleWall:anySingle,synthetic:ch.frags.some(function(f){return f.synthetic;})}); ci++;
+        chBranches.forEach(function(b){ window.__runs2d.push({id:uid(),axis:'branch',start:b.start,dir:b.dir,normal:[-b.dir[1],b.dir[0]],widthIn:b.widthIn,color:palette[ci%palette.length],label:'',confirmed:true,scaled:false,tagIdx:[],pieces:b.pieces,_branch:true}); ci++; });
       });
     });
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled. Cursor walk \u2014 transitions at YOLO sizechange boxes.');
+    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled. Round taps off the side no longer change the trunk.');
   }
   window.__buildRunsTrackWalk=buildRunsTrackWalk;
 
