@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t91 · track-walk: keep only tag-matched/connected runs (drops random duct boxes); YOLO markers hidden by default; size-tag de-dup</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t93 · single-wall: search both sides for a real wall matching the tagged width + length; never invent the opposite wall (lone line = no run)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -1452,21 +1452,26 @@ function buildSegmentRuns(){
     if(!myTags.length) continue;
     var pd0=myTags[0].dims; var wIn=pd0.w; var gapW=inToPt(wIn); if(!(gapW>0)) continue;   // first number = screen-facing span
     var side=myTags[0].side||1;
-    // (1) look for a REAL parallel line at ~gapW on the tag side
+    // ONE WALL + a dim tag -> search BOTH sides for a REAL black wall at the tagged WIDTH that also
+    // MATCHES THE LENGTH (runs alongside this wall most of its span). Pair it if found. If none -> NO run
+    // (never invent the opposite wall: a lone line is not duct).
     var partner=-1, bestd=1e9;
     for(var wj=0; wj<walls.length; wj++){ if(wj===wi||used[wj]) continue; var Wj=walls[wj];
       if(adiff(W0.th,Wj.th)>PAIRANG) continue;
-      var off=W0.nxn*Wj.mid[0]+W0.nyn*Wj.mid[1]-W0.c; if(off*side<=0) continue;            // must be on the tag side
-      if(Math.abs(Math.abs(off)-gapW)>SWTOL) continue;                                       // at the tag-specified width
+      var off=W0.nxn*Wj.mid[0]+W0.nyn*Wj.mid[1]-W0.c;                                          // either side (left or right)
+      if(Math.abs(Math.abs(off)-gapW)>SWTOL) continue;                                          // at the tag-specified width
       var pb0=W0.ux*Wj.A[0]+W0.uy*Wj.A[1], pb1=W0.ux*Wj.B[0]+W0.uy*Wj.B[1]; if(pb0>pb1){var t=pb0;pb0=pb1;pb1=t;}
-      var ov2=Math.min(W0.t1,pb1)-Math.max(W0.t0,pb0); if(ov2<inToPt(6)) continue;
+      var wjLen=pb1-pb0;                                                                         // partner's length along this wall's axis
+      var ov2=Math.min(W0.t1,pb1)-Math.max(W0.t0,pb0);                                           // how much they run alongside
+      if(ov2 < Math.max(inToPt(8), 0.55*Math.min(W0.len,wjLen))) continue;                       // must overlap most of the shorter wall
+      if(Math.abs(wjLen-W0.len) > 0.5*Math.max(wjLen,W0.len)) continue;                          // lengths must be comparable (matching length)
       var sc=Math.abs(Math.abs(off)-gapW); if(sc<bestd){ bestd=sc; partner=wj; }
     }
+    if(partner<0) continue;                                                                       // no real opposite wall found -> skip (no synthesis)
     var off1=W0.c, off2, t0r=W0.t0, t1r=W0.t1, synth=false;
-    if(partner>=0){ var PW=walls[partner]; off2=W0.nxn*PW.mid[0]+W0.nyn*PW.mid[1];
-      var qb0=W0.ux*PW.A[0]+W0.uy*PW.A[1], qb1=W0.ux*PW.B[0]+W0.uy*PW.B[1];
-      t0r=Math.min(t0r,Math.min(qb0,qb1)); t1r=Math.max(t1r,Math.max(qb0,qb1)); used[partner]=1;
-    } else { off2=W0.c+side*gapW; synth=true; swSynth++; }
+    var PW=walls[partner]; off2=W0.nxn*PW.mid[0]+W0.nyn*PW.mid[1];
+    var qb0=W0.ux*PW.A[0]+W0.uy*PW.A[1], qb1=W0.ux*PW.B[0]+W0.uy*PW.B[1];
+    t0r=Math.min(t0r,Math.min(qb0,qb1)); t1r=Math.max(t1r,Math.max(qb0,qb1)); used[partner]=1;
     used[wi]=1; swCount++;
     var thn2=W0.th, ax3=(thn2<0.35||thn2>Math.PI-0.35)?'horizontal':(Math.abs(thn2-Math.PI/2)<0.35?'vertical':'diagonal');
     function pt2(o,t){ return [o*W0.nxn+t*W0.ux, o*W0.nyn+t*W0.uy]; }
@@ -2621,7 +2626,7 @@ function refreshSel(){
     runs.forEach(function(run){
       var open=(selRun===run.id);
       h+='<div class="aicard" style="border-color:'+run.color+'33">'
-        +'<div class="h" style="cursor:pointer" onclick="__runOpen(\''+run.id+'\')"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+run.color+';margin-right:5px"></span>'+(run.label?vh(run.label)+' \u00b7 ':'')+run.axis+' run'+(run._flag==='mismatch'?' <span style="color:#e0a92a">\u26a0 size?</span>':'')+' \u00b7 '+run.pieces.length+' pc \u00b7 '+fmtFt(runLenIn(run))+'</div>';
+        +'<div class="h" style="cursor:pointer" onclick="__runOpen(\''+run.id+'\')"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+run.color+';margin-right:5px"></span>'+(run.label?vh(run.label)+' \u00b7 ':'')+run.axis+' run'+(run._flag==='mismatch'?' <span style="color:#e0a92a">\u26a0 size?</span>':run._flag==='1-wall'?' <span style="color:#e0a92a">\u26a0 1-wall</span>':'')+' \u00b7 '+run.pieces.length+' pc \u00b7 '+fmtFt(runLenIn(run))+'</div>';
       if(open){
         run.pieces.forEach(function(pc,i){
           var key=run.id+':'+i, on=sel.has(key);
@@ -2816,6 +2821,10 @@ function refreshSel(){
         return false; }
       runs.forEach(function(r){ r._anchor=false; r._flag=null;
         if(r._branch) return;
+        if(r.synthetic){                                   // 2nd wall was INVENTED at tag width = "only one line": a tag alone is NOT proof of duct.
+          if(yoloBacks(r)){ r._anchor=true; r._flag='1-wall'; TWflagged++; }   // keep only if YOLO confirms real duct there; else connectivity-pass may still rescue a 1-wall that joins a real run
+          return;
+        }
         if(r.tagIdx && r.tagIdx.length){
           var dis=(r.tagW!=null && r._geomW>0)?Math.abs(r.tagW-r._geomW)/r._geomW:0;
           if(dis<=0.40){ r._anchor=true; }
@@ -2838,7 +2847,7 @@ function refreshSel(){
       return {TWdropped:TWdropped,TWflagged:TWflagged};
     })();
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled'+(__keep.TWdropped.length?(' \u00b7 '+__keep.TWdropped.length+' unsupported dropped'):'')+(__keep.TWflagged?(' \u00b7 '+__keep.TWflagged+' size-flagged'):'')+'.');
+    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled'+(__keep.TWdropped.length?(' \u00b7 '+__keep.TWdropped.length+' unsupported dropped'):'')+(__keep.TWflagged?(' \u00b7 '+__keep.TWflagged+' flagged'):'')+'.');
   }
   window.__buildRunsTrackWalk=buildRunsTrackWalk;
 
