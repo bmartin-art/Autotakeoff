@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t90 · fix: Black-lines-only no longer stuck on (was re-checking itself); line thickness usable</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t91 · track-walk: keep only tag-matched/connected runs (drops random duct boxes); YOLO markers hidden by default; size-tag de-dup</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -327,6 +327,7 @@
         <div id="itemPanelBody" style="margin-top:7px"></div>
         <div style="margin-top:12px;border-top:1px solid #243;padding-top:10px">
           <div style="font-weight:700;color:#bfe6ff;font-size:13px;margin-bottom:5px">🔎 YOLO fitting detection</div>
+          <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="yoloShowChk"> Show detection boxes on the print <span style="opacity:.6">(off — detections still feed the builder)</span></label>
           <div class="row" style="display:flex;gap:6px;align-items:center">
             <button class="btn" id="yoloLoadBtn" style="flex:1">Load best.onnx</button>
             <span id="yoloStatus" style="font-size:11px;opacity:.7">no model</span>
@@ -2620,7 +2621,7 @@ function refreshSel(){
     runs.forEach(function(run){
       var open=(selRun===run.id);
       h+='<div class="aicard" style="border-color:'+run.color+'33">'
-        +'<div class="h" style="cursor:pointer" onclick="__runOpen(\''+run.id+'\')"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+run.color+';margin-right:5px"></span>'+(run.label?vh(run.label)+' \u00b7 ':'')+run.axis+' run \u00b7 '+run.pieces.length+' pc \u00b7 '+fmtFt(runLenIn(run))+'</div>';
+        +'<div class="h" style="cursor:pointer" onclick="__runOpen(\''+run.id+'\')"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+run.color+';margin-right:5px"></span>'+(run.label?vh(run.label)+' \u00b7 ':'')+run.axis+' run'+(run._flag==='mismatch'?' <span style="color:#e0a92a">\u26a0 size?</span>':'')+' \u00b7 '+run.pieces.length+' pc \u00b7 '+fmtFt(runLenIn(run))+'</div>';
       if(open){
         run.pieces.forEach(function(pc,i){
           var key=run.id+':'+i, on=sel.has(key);
@@ -2669,6 +2670,10 @@ function refreshSel(){
   // ordered straight->transition->straight chain with transitions exactly at tag-value changes. Needs scale. =====
   function buildRunsTrackWalk(){
     if(typeof scaleIPF==='undefined' || !(scaleIPF>0)){ setStatus('Set the drawing scale first — track-walk needs it for widths and single-wall rescue.'); return; }
+    // de-dupe size tags stacked on top of each other (e.g. the dim reader was run twice)
+    (function(){ var keep=[]; tags.forEach(function(t){ if(!/\d/.test(String(t.text||''))){ keep.push(t); return; }
+      var dup=keep.some(function(k){ return /\d/.test(String(k.text||'')) && String(k.text)===String(t.text) && Math.hypot((k.x||0)-(t.x||0),(k.y||0)-(t.y||0))<25; });
+      if(!dup) keep.push(t); }); tags=keep; })();
     try{ buildSegmentRuns(); }catch(e){}                                  // centerlines (single-wall rescue already baked in)
     var sg=window.__sgRuns||[]; if(!sg.length){ setStatus('No duct centerlines — mark/scan duct first.'); return; }
     // 1) centerline fragments
@@ -2791,12 +2796,49 @@ function refreshSel(){
         }
         if(!pieces.length) return;
         var allTags=[]; ch.frags.forEach(function(f){ f.tagIdx.forEach(function(ti){ allTags.push(ti); }); });
-        window.__runs2d.push({id:uid(),axis:(vert?'vertical':horiz?'horizontal':ch.frags[0].axis),start:startPt,dir:[axisDir[0],axisDir[1]],normal:[-axisDir[1],axisDir[0]],widthIn:(pieces[0]&&pieces[0].widthIn)||ch.frags[0].widthIn,color:palette[ci%palette.length],label:'',confirmed:true,scaled:!cs.length,tagIdx:allTags,pieces:pieces,singleWall:anySingle,synthetic:ch.frags.some(function(f){return f.synthetic;})}); ci++;
-        chBranches.forEach(function(b){ window.__runs2d.push({id:uid(),axis:'branch',start:b.start,dir:b.dir,normal:[-b.dir[1],b.dir[0]],widthIn:b.widthIn,color:palette[ci%palette.length],label:'',confirmed:true,scaled:false,tagIdx:[],pieces:b.pieces,_branch:true}); ci++; });
+        var __chainId=uid();
+        window.__runs2d.push({id:__chainId,axis:(vert?'vertical':horiz?'horizontal':ch.frags[0].axis),start:startPt,dir:[axisDir[0],axisDir[1]],normal:[-axisDir[1],axisDir[0]],widthIn:(pieces[0]&&pieces[0].widthIn)||ch.frags[0].widthIn,color:palette[ci%palette.length],label:'',confirmed:true,scaled:!cs.length,tagIdx:allTags,pieces:pieces,singleWall:anySingle,synthetic:ch.frags.some(function(f){return f.synthetic;}),_geomW:grpW,tagW:(cs.length?cs[0].w:null)}); ci++;
+        chBranches.forEach(function(b){ window.__runs2d.push({id:uid(),axis:'branch',start:b.start,dir:b.dir,normal:[-b.dir[1],b.dir[0]],widthIn:b.widthIn,color:palette[ci%palette.length],label:'',confirmed:true,scaled:false,tagIdx:[],pieces:b.pieces,_branch:true,_branchParent:__chainId}); ci++; });
       });
     });
+    // KEEP RULE: a run survives only if it carries a size tag, or connects to one that does.
+    // tagless+disconnected (a stray box marked duct) drops. A tagged run whose width grossly
+    // disagrees with its measured gap is adjudicated: kept+flagged only if a YOLO fitting backs
+    // it at >=0.80, else dropped. Small disagreements trust the tag (scale is unreliable).
+    var __keep=(function(){ var TWdropped=[], TWflagged=0; var runs=window.__runs2d||[]; if(!runs.length) return {TWdropped:TWdropped,TWflagged:TWflagged};
+      var reach=28;
+      function ends(r){ var e=runEnd(r); return [[r.start[0],r.start[1]],[e.x,e.y]]; }
+      function yoloBacks(r){ var dets=window.__yoloDets||[]; var L=runLenIn(r);
+        for(var i=0;i<dets.length;i++){ var d=dets[i]; if(d.nx==null||(d.score||0)<0.80) continue;
+          var base=(d.cls||'').replace(/^(rect|round)-/,''); if(base==='sizetag') continue;
+          var pr=projOnRun(r,d.nx,d.ny);
+          if(pr.alongIn>=-6 && pr.alongIn<=L+6 && pr.perpIn<=r.widthIn/2+12) return true; }
+        return false; }
+      runs.forEach(function(r){ r._anchor=false; r._flag=null;
+        if(r._branch) return;
+        if(r.tagIdx && r.tagIdx.length){
+          var dis=(r.tagW!=null && r._geomW>0)?Math.abs(r.tagW-r._geomW)/r._geomW:0;
+          if(dis<=0.40){ r._anchor=true; }
+          else if(yoloBacks(r)){ r._anchor=true; r._flag='mismatch'; TWflagged++; }
+          else { r._anchor=false; }
+        }
+      });
+      runs.forEach(function(r){ if(r._branch){ var p=findRun(r._branchParent); if(p && p._anchor) r._anchor=true; } });
+      var changed=true, guard=0;
+      while(changed && guard++<12){ changed=false;
+        runs.forEach(function(r){ if(r._anchor) return; var re=ends(r);
+          for(var i=0;i<runs.length;i++){ var o=runs[i]; if(o===r||!o._anchor) continue; var oe=ends(o);
+            if(re.some(function(a){ return oe.some(function(b){ return Math.hypot(a[0]-b[0],a[1]-b[1])<=reach; }); })){ r._anchor=true; changed=true; break; }
+          }
+        });
+      }
+      if(!runs.some(function(r){return r._anchor;})) return {TWdropped:TWdropped,TWflagged:TWflagged};
+      TWdropped=runs.filter(function(r){return !r._anchor;});
+      window.__runs2d=runs.filter(function(r){return r._anchor;});
+      return {TWdropped:TWdropped,TWflagged:TWflagged};
+    })();
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled.');
+    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled'+(__keep.TWdropped.length?(' \u00b7 '+__keep.TWdropped.length+' unsupported dropped'):'')+(__keep.TWflagged?(' \u00b7 '+__keep.TWflagged+' size-flagged'):'')+'.');
   }
   window.__buildRunsTrackWalk=buildRunsTrackWalk;
 
@@ -2837,6 +2879,7 @@ function refreshSel(){
   function n2sY(nx,ny){ if(!window.__nvt||!viewport) return null; var m=window.__nvt,a=m[0],b=m[1],c=m[2],d=m[3],e=m[4],f=m[5],det=(a*d-b*c)||1; var u=[(d*(nx-e)-c*(ny-f))/det,(-b*(nx-e)+a*(ny-f))/det]; return applyM(viewport.transform,u[0],u[1]); }
   function renderYolo(){
     var lay=$('yoloLayer'); if(!lay) return; lay.innerHTML='';
+    if(!window.__yoloVisible) return;
     (window.__yoloDets||[]).forEach(function(d){
       if(d.nx0==null) return; var p0=n2sY(d.nx0,d.ny0), p1=n2sY(d.nx1,d.ny1); if(!p0||!p1) return;
       var x=Math.min(p0[0],p1[0]), y=Math.min(p0[1],p1[1]), w=Math.abs(p1[0]-p0[0]), h=Math.abs(p1[1]-p0[1]);
@@ -2851,6 +2894,7 @@ function refreshSel(){
 
   // ---- load model ----
   $('yoloLoadBtn') && ($('yoloLoadBtn').onclick=function(){ $('yoloFile').click(); });
+  $('yoloShowChk') && ($('yoloShowChk').onchange=function(){ window.__yoloVisible=this.checked; try{renderYolo();}catch(e){} });
   $('yoloFile') && ($('yoloFile').onchange=async function(e){
     var f=e.target.files[0]; if(!f) return; setY('loading…');
     if(!window.ort){ setY('onnxruntime not loaded'); setStatus('onnxruntime-web did not load (CDN/network).'); return; }
