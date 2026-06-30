@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t89 · tap tool: click main run then branch run to connect with a tap</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t90 · fix: Black-lines-only no longer stuck on (was re-checking itself); line thickness usable</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3714,9 +3714,11 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ selected.clear();
   function upd(){ var v=parseFloat(lt&&lt.value)||0; var el=document.getElementById('lwThreshV'); if(el) el.textContent=v.toFixed(2); var hv=0,lg=0; segments.forEach(function(s){ if((s.lw||0)>=v) hv++; else lg++; }); var c=document.getElementById('lwCounts'); if(c) c.textContent='\u00b7 '+hv+' heavy / '+lg+' light'; classify(); drawOverlay(); }
   if(ho) ho.addEventListener('change',upd); if(lt){ lt.addEventListener('input',function(){ var el=document.getElementById('lwThreshV'); if(el) el.textContent=(parseFloat(lt.value)||0).toFixed(2); }); lt.addEventListener('input',debounce(upd,130)); } })();
 (function(){var bo=document.getElementById('blackOnly'), bt=document.getElementById('blkThresh'), bml=document.getElementById('blkMinLen');
-  function updB(){ if(!selectionDone)selectionDone=true; var bo=document.getElementById('blackOnly'); if(bo&&!bo.checked)bo.checked=true; paintBlkReadout(); classify(); drawOverlay(); }
+  function updB(){ if(!selectionDone)selectionDone=true; paintBlkReadout(); classify(); drawOverlay(); }   // respect the checkbox; don't force it back on
   if(bt) bt.addEventListener('input',function(){ var e=document.getElementById('blkThreshV'); if(e) e.textContent=parseFloat(bt.value).toFixed(2); });
-  if(bo) bo.addEventListener('change',function(){ matchSample=false; updB(); }); if(bt) bt.addEventListener('input',debounce(updB,130)); if(bml) bml.addEventListener('input',debounce(updB,130));
+  if(bo) bo.addEventListener('change',function(){ matchSample=false; updB(); });
+  function blkSlider(){ var b=document.getElementById('blackOnly'); if(b&&!b.checked)b.checked=true; matchSample=false; updB(); }   // dragging a black slider implies black mode
+  if(bt) bt.addEventListener('input',debounce(blkSlider,130)); if(bml) bml.addEventListener('input',debounce(blkSlider,130));
   var dm=document.getElementById('darkMap'); if(dm) dm.addEventListener('change',function(){ var sp=document.getElementById('shadePalette'); if(dm.checked){ if(sp){sp.style.display='block'; buildShadePalette();} } else { if(sp)sp.style.display='none'; } buildColorPalette(); drawOverlay(); }); })();
 (function(){ var dr=document.getElementById('ductRunsOnly'), rm=document.getElementById('runMinLen');
   function updDR(){ var v=document.getElementById('runMinV'); if(v&&rm)v.textContent=parseFloat(rm.value); if(!selectionDone)selectionDone=true; classify(); drawOverlay();
