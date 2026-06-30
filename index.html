@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t83 · deterministic local trunk-shape walk (fixes missed/inconsistent transitions)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t89 · tap tool: click main run then branch run to connect with a tap</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -302,6 +302,7 @@
         <button class="btn go" id="aiFullTakeoff" style="background:#2a1a3a;border-color:#6a3fb8;color:#dcccff;margin-top:6px">🤖 Run full AI takeoff (whole sheet)</button>
         <button class="btn go" id="aiSizeRuns" style="background:#1a2a3a;border-color:#3f8ab8;color:#cce6ff;margin-top:4px">🔎 Read sizes (per-run, tight crop)</button>
         <button class="btn go" id="aiTileSweep" style="background:#2a1a33;border-color:#8a5fc8;color:#e8d8ff;margin-top:4px">🗺 Read tags (tile sweep · work area)</button>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="autoDimChk"> Auto-read dim text on PDF load <span style="opacity:.7">(off — picks up random text; use tile sweep instead)</span></label>
         <button class="btn go" id="dimFind" style="background:#13351f;border-color:#2a6b40;color:#bdf5cf;margin-top:6px">📐 Find duct by dimension (tag-match)</button>
         <button class="btn go" id="buildRuns" style="background:#1f1430;border-color:#7a4fd0;color:#e6d8ff;margin-top:6px">📊 Preview runs (optional — Build takeoff does this for you)</button>
         <div class="row" style="margin-top:6px;display:flex;gap:6px">
@@ -309,6 +310,12 @@
           <button class="btn adv" id="itemsClearBtn" style="flex:1;background:#3a2030;border-color:#7a3b4b;color:#fbb">Clear</button>
         </div>
         <button class="btn go" id="trackWalkBtn" style="background:#10202e;border-color:#3a86b8;color:#cfe9ff;margin-top:6px;font-weight:700">🚂 Build (track-walk · beta)</button>
+        <div class="row" style="margin-top:6px;display:flex;gap:6px">
+          <button class="btn" id="editDelBtn" style="flex:1;background:#2a1418;border-color:#7a3b4b;color:#fbb">🗑 Click-to-delete: OFF</button>
+          <button class="btn" id="editSizeBtn" style="flex:1;background:#14202a;border-color:#3b6a8a;color:#bdf">✎ Click-to-resize: OFF</button>
+        </div>
+        <button class="btn" id="editTapBtn" style="margin-top:6px;background:#1a2410;border-color:#5a7a3b;color:#cfeab0;width:100%">➕ Tap tool: OFF — click main run, then branch run</button>
+        <div class="hint" style="margin-top:2px">Turn one on, then click a duct on the plan: <b>delete</b> removes that run; <b>resize</b> lets you type the size (and offers a transition if it differs); <b>tap</b> connects two runs — click the main, then the branch.</div>
         <div class="hint" style="margin-top:4px"><b>One click:</b> Build takeoff (re)builds the runs from your current duct selection and breaks each into 5′ joint pieces (round = 10′) — no need to hit Preview first. Click a joint to change its length (chain reflows), insert a reducer/tee/elbow (reducer resizes downstream), shift-click to multi-select, color/label runs. <b>Scan with YOLO first</b> and it will auto-split runs at detected fittings and drop in shape-correct fittings. Wheel = zoom to cursor.</div>
         <div class="row" style="margin-top:6px;display:flex;gap:6px;align-items:center">
           <button class="btn" id="yoloCleanBtn" style="flex:2;background:#1a2a0c;border-color:#7a9e2b;color:#e6ffbf">🧹 Clean with YOLO</button>
@@ -592,7 +599,7 @@ async function renderPage(){
   segments.forEach(s=>{ if(s.lock) lockSnap[lockKey(s)]=s.lock; });
   await extractVectors(page);
   if(Object.keys(lockSnap).length) segments.forEach(s=>{ const k=lockKey(s); if(lockSnap[k]) s.lock=lockSnap[k]; });
-  await extractTags(page);
+  if(window.__autoDimText){ await extractTags(page); }   // OFF by default — auto text-detect grabbed too much junk; use tile sweep / per-run reader instead
   freshScan=true; selectionDone=false; classify();  // features only here (canvas not painted yet); greening waits for 'Run line selection'
   if(!suggestedPages.has(pageNum)){ suggestDuctLayers(); suggestedPages.add(pageNum); }
   // Now apply layer visibility (reflecting the suggestion) and paint the sheet
@@ -2467,10 +2474,17 @@ function refreshSel(){
       var Din=[f.x+f.nx*inner*hw, f.y+f.ny*inner*hw];            // incoming inner corner
       var Cout=[f.x+nox*inner*hw, f.y+noy*inner*hw];            // outgoing inner corner
       var hox=(Ain[0]-f.x)+(Bout[0]-f.x), hoy=(Ain[1]-f.y)+(Bout[1]-f.y), hl=Math.hypot(hox,hoy)||1;
-      var heel=[f.x+hox/hl*hw*1.9, f.y+hoy/hl*hw*1.9];           // heel bulge (rounded outside)
+      var TH=inToPt(6);                                          // 6" throat radius (rectangular elbow/tee)
+      var heel=[f.x+hox/hl*(TH+2*hw), f.y+hoy/hl*(TH+2*hw)];     // heel = throat + full duct width (outside of the turn)
       var tix=(Din[0]-f.x)+(Cout[0]-f.x), tiy=(Din[1]-f.y)+(Cout[1]-f.y), tl=Math.hypot(tix,tiy)||1;
-      var throat=[f.x+tix/tl*hw*0.35, f.y+tiy/tl*hw*0.35];       // tight throat (inside)
+      var throat=[f.x+tix/tl*TH, f.y+tiy/tl*TH];                 // fixed 6" throat (inside of the turn)
       return [Ain,heel,Bout,Cout,throat,Din].map(function(q){return n2s(q[0],q[1]);});
+    }
+    // TAP / TEE take-off — a collar flaring off the trunk wall on the branch side; 10" throat on the upstream wall
+    if(p.kind==='fitting' && p._tap){
+      var side=p.branchSide||1, bw=inToPt((p.branchW||p.widthIn||12)/2), th=inToPt(p.throatIn||10);
+      var s0=side*hw, s1=side*(hw+2*bw);
+      return [P(-bw,s0),P(bw,s0),P(bw,s1),P(-bw+th,s1)].map(function(q){return n2s(q[0],q[1]);});   // angled upstream wall = throat
     }
     // TRANSITION / REDUCER — tapered trapezoid from inlet width to outlet width
     if(p.kind==='fitting' && (p.cid==='tr'||p.cid==='reducer'||p.cid==='s2r'||p._sizeStep)){
@@ -2492,11 +2506,11 @@ function refreshSel(){
 
   // a reducer/transition sets downstream size to its outlet
   function applyReducerDownstream(run){
-    var curW=null,curD=null,curSize=null;
+    var curW=null,curD=null,curSize=null,curRound=null;
     run.pieces.forEach(function(p){
       if(p.kind==='fitting' && (p.cid==='reducer'||p.cid==='s2r'||p.cid==='tr')){
-        if(p.outW){ curW=p.outW; curD=p.outD||p.outW; curSize=curW+(p.cid==='s2r'?('\u00f8'):('x'+curD)); }
-      } else if(p.kind==='straight' && curSize){ p.widthIn=curW; p.depthIn=curD; p.size=curSize; }
+        if(p.outW){ curW=p.outW; curD=p.outD||p.outW; curRound=!!p.round; curSize=curRound?(curW+'\u00f8'):(curW+'x'+curD); }
+      } else if(p.kind==='straight' && curSize){ p.widthIn=curW; p.depthIn=curD; p.size=curSize; p.round=curRound; p.cid=curRound?'spiral':'st'; p.camduct=curRound?'Spiral':'Straight Duct'; }
     });
   }
 
@@ -2512,9 +2526,43 @@ function refreshSel(){
         var d='M'+pts.map(function(q){return q[0].toFixed(1)+' '+q[1].toFixed(1);}).join('L')+'Z';
         var poly=document.createElementNS(ns,'path'); poly.setAttribute('d',d);
         poly.setAttribute('fill',fill); poly.setAttribute('stroke',stroke); poly.setAttribute('stroke-width',on?'3':'1.5'); poly.style.cursor='pointer';
-        poly.addEventListener('mousedown',function(e){ e.stopPropagation();
+        var pcHit=function(e){ e.stopPropagation();
+          var m=window.__editMode;
+          if(m==='delete'){ window.__runs2d=(window.__runs2d||[]).filter(function(r){return r.id!==run.id;}); sel.clear(); selRun=null; renderItems(); renderPanel(); setStatus('Deleted run.'); return; }
+          if(m==='size'){ var v=prompt('Size for this piece (e.g. 20x8 or 12\u00f8):', p.size||''); if(v==null||!v.trim()) return;
+            var pd=parseTagDims(v); if(!pd){ setStatus('Couldn\u2019t read \u201c'+v+'\u201d as a size \u2014 try like 20x8 or 12\u00f8.'); return; }
+            var nW=pd.w, nD=pd.round?pd.w:pd.h, nR=!!pd.round, nS=pd.round?('\u00f8'+pd.w):(pd.w+'\u00d7'+pd.h);
+            if(nS!==p.size && p.kind==='straight' && confirm('Size differs from this duct. Insert a transition here and resize the downstream duct to '+nS+'?')){
+              var oR=!!p.round, cid=(oR!==nR)?'s2r':(nR?'reducer':'tr'), cn=(cid==='s2r')?'Sq to Round':(cid==='reducer'?'Reducer':'Transition');
+              if(p.lenIn>13) p.lenIn=rnd(p.lenIn-12);                                 // make room for the 12" transition
+              run.pieces.splice(i+1,0,{kind:'fitting',cid:cid,camduct:cn,round:nR,lenIn:12,widthIn:nW,depthIn:nD,size:nS,inW:p.widthIn,outW:nW,outD:nD,_sizeStep:true});
+              applyReducerDownstream(run); renderItems(); renderPanel(); setStatus('Inserted transition \u2192 '+nS+'. Downstream resized.'); return;
+            }
+            p.widthIn=nW; p.depthIn=nD; p.round=nR; p.size=nS; if(p.kind==='straight'){ p.cid=nR?'spiral':'st'; p.camduct=nR?'Spiral':'Straight Duct'; }
+            if(run.pieces.indexOf(p)===0) run.widthIn=nW;
+            renderItems(); renderPanel(); setStatus('Set size '+nS+'.'); return; }
+          if(m==='tap'){
+            if(!window.__tapMain){ window.__tapMain=run.id; selRun=run.id; renderItems(); renderPanel(); setStatus('Tap tool: now click the BRANCH run.'); return; }
+            if(run.id===window.__tapMain){ setStatus('Click a DIFFERENT run for the branch.'); return; }
+            var main=findRun(window.__tapMain), br=run; if(!main){ window.__tapMain=null; return; }
+            var ms=main.start, md=main.dir, be=runEnd(br), cand=[[br.start[0],br.start[1]],[be.x,be.y]];
+            function projT(pt){ return (pt[0]-ms[0])*md[0]+(pt[1]-ms[1])*md[1]; }
+            function perpT(pt){ var t=projT(pt); return Math.hypot(pt[0]-(ms[0]+md[0]*t), pt[1]-(ms[1]+md[1]*t)); }
+            var bp=(perpT(cand[0])<=perpT(cand[1]))?cand[0]:cand[1];
+            var t0=Math.max(0,projT(bp)), posIn=ptToIn(t0);
+            var fx=ms[0]+md[0]*projT(bp), fy=ms[1]+md[1]*projT(bp), nxn=-md[1], nyn=md[0];
+            var side=(((bp[0]-fx)*nxn+(bp[1]-fy)*nyn)>=0)?1:-1;
+            var bw=br.widthIn||12, b0=br.pieces&&br.pieces[0], bsz=(b0&&b0.size)||(bw+'\u2033');
+            var tap={kind:'fitting',cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:main.widthIn,depthIn:main.widthIn,size:bsz,_tap:true,branchSide:side,branchW:bw,throatIn:10};
+            var acc=0, idx=-1, into=0;
+            for(var kk=0;kk<main.pieces.length;kk++){ var pl=main.pieces[kk].lenIn||0; if(main.pieces[kk].kind==='straight' && posIn<=acc+pl){ idx=kk; into=posIn-acc; break; } acc+=pl; }
+            if(idx>=0){ var pc=main.pieces[idx], a=Object.assign({},pc); a.lenIn=rnd(into); var b=Object.assign({},pc); b.lenIn=rnd((pc.lenIn||0)-into); main.pieces.splice(idx,1,a,tap,b); }
+            else main.pieces.push(tap);
+            window.__tapMain=null; selRun=null; renderItems(); renderPanel(); setStatus('Tap added connecting the two runs.'); return;
+          }
           if(e.shiftKey){ if(sel.has(key))sel.delete(key); else sel.add(key); } else { sel.clear(); sel.add(key); }
-          selRun=run.id; renderItems(); renderPanel(); },true);
+          selRun=run.id; renderItems(); renderPanel(); };
+        poly.addEventListener('mousedown',pcHit,true);
         lay.appendChild(poly);
         var cxm=(pts[0][0]+pts[2][0])/2, cym=(pts[0][1]+pts[2][1])/2;
         if(p.kind!=='straight'){
@@ -2522,7 +2570,7 @@ function refreshSel(){
           var R=8, mk=document.createElementNS(ns,'path');
           mk.setAttribute('d','M'+cxm+' '+(cym-R)+'L'+(cxm+R)+' '+cym+'L'+cxm+' '+(cym+R)+'L'+(cxm-R)+' '+cym+'Z');
           mk.setAttribute('fill','#f59e0b'); mk.setAttribute('stroke','#7a3d00'); mk.setAttribute('stroke-width',on?'2.5':'1.5'); mk.style.cursor='pointer';
-          mk.addEventListener('mousedown',function(e){ e.stopPropagation(); if(e.shiftKey){ if(sel.has(key))sel.delete(key); else sel.add(key);} else { sel.clear(); sel.add(key);} selRun=run.id; renderItems(); renderPanel(); },true);
+          mk.addEventListener('mousedown',pcHit,true);
           lay.appendChild(mk);
         }
         var t=document.createElementNS(ns,'text'); t.setAttribute('x',cxm); t.setAttribute('y',p.kind==='straight'?cym:(cym-12));
@@ -2631,7 +2679,7 @@ function refreshSel(){
     frags.forEach(function(f,idx){ var mx=(f.A[0]+f.B[0])/2, my=(f.A[1]+f.B[1])/2, k;
       if(f.axis==='vertical') k='V'+Math.round(mx/16); else if(f.axis==='horizontal') k='H'+Math.round(my/16); else k='D'+idx;
       (groups[k]=groups[k]||[]).push(f); });
-    window.__runs2d=[]; var ci=0, single=0, scaled=0, trans=0, taps=0;
+    window.__runs2d=[]; var ci=0, single=0, scaled=0, trans=0, taps=0, elbows=0;
     var GAPMAX=Math.max(inToPt(48),60);                                   // bridge gaps up to ~4' onto a colinear neighbor
     Object.keys(groups).forEach(function(k){
       var g=groups[k], vert=k[0]==='V', horiz=k[0]==='H';
@@ -2654,6 +2702,21 @@ function refreshSel(){
       var boxes=[]; (window.__yoloDets||[]).forEach(function(d){ if(d.nx==null) return; var base=(d.cls||'').replace(/^(rect|round)-/,''); if(base!=='sizechange'&&base!=='transition') return;
         if(Math.abs(perp([d.nx,d.ny])-perpC)>inToPt(grpW/2+18)) return; boxes.push({along:along([d.nx,d.ny])}); });
       boxes.sort(function(p,q){return p.along-q.along;});
+      // YOLO elbow / tee / tap detections near this line (drive turns and branches in the walk)
+      var fdets=[]; (window.__yoloDets||[]).forEach(function(d){ if(d.nx==null) return; var base=(d.cls||'').replace(/^(rect|round)-/,'');
+        if(base!=='elbow'&&base!=='tee'&&base!=='tap') return;
+        if(Math.abs(perp([d.nx,d.ny])-perpC)>inToPt(grpW/2+30)) return; fdets.push({base:base, along:along([d.nx,d.ny]), nx:d.nx, ny:d.ny}); });
+      // find a duct fragment leaving a point at ~90° to the trunk (sets an elbow's new heading / a branch's direction)
+      function contFrag(px,py){ var best=null, bestd=1e9;
+        for(var fi=0;fi<frags.length;fi++){ var fr=frags[fi]; if(g.indexOf(fr)>=0) continue;   // not part of this trunk
+          var ends=[fr.A,fr.B];
+          for(var ei=0;ei<2;ei++){ var e=ends[ei], o=ends[1-ei];
+            var dd=Math.hypot(e[0]-px,e[1]-py); if(dd>inToPt(36)||dd>=bestd) continue;
+            var dx=o[0]-e[0], dy=o[1]-e[1], dl=Math.hypot(dx,dy)||1; var dot=Math.abs((dx/dl)*axisDir[0]+(dy/dl)*axisDir[1]);
+            if(dot>0.5) continue;                                        // must be roughly perpendicular to the trunk
+            bestd=dd; best={dir:[dx/dl,dy/dl], frag:fr}; }
+        }
+        return best; }
       // 3) split into contiguous chains: walk fragments, bridge small gaps, break on big gaps
       var chains=[], cur=null;
       ivs.forEach(function(iv){ if(!cur){ cur={a:iv.a,b:iv.b,frags:[iv.f]}; chains.push(cur); return; }
@@ -2690,6 +2753,13 @@ function refreshSel(){
               events.push({type:'tap', posIn:Math.max(0,ptToIn(e.along-ch.a)), bt:e});
             }
           }
+          // inject YOLO elbow / tee / tap events — the cursor consumes these as it walks
+          fdets.forEach(function(fd){ if(fd.along<ch.a-inToPt(8)||fd.along>ch.b+inToPt(8)) return;
+            var posIn=Math.max(0,ptToIn(fd.along-ch.a)), cf=contFrag(fd.nx,fd.ny);
+            if(fd.base==='elbow'){ events.push({type:'elbow', posIn:posIn, cf:cf}); }
+            else { var bsz=null; if(cf&&cf.frag&&cf.frag.tagIdx&&cf.frag.tagIdx.length){ var tg=tags[cf.frag.tagIdx[0]], pd=tg&&parseTagDims(tg.text); if(pd) bsz={w:pd.w,h:pd.h,round:!!pd.round,str:pd.round?('\u00f8'+pd.w):(pd.w+'\u00d7'+pd.h)}; }
+              events.push({type:'tapY', posIn:posIn, along:fd.along, perp:perp([fd.nx,fd.ny]), cf:cf, bsz:bsz}); }
+          });
           events.sort(function(p,q){return p.posIn-q.posIn;});
           var cursorIn=0, prevRound=null, TRLEN=12;
           function emitStraight(toIn,s){ var depth=s.round?s.w:s.h, rem=Math.max(0,toIn-cursorIn), jl=s.round?120:JOINT_DEFAULT;
@@ -2699,12 +2769,19 @@ function refreshSel(){
               var s=ev.size, depth=s.round?s.w:s.h, rcc='tr',rn='Transition'; if(prevRound!==null&&prevRound!==s.round){rcc='s2r';rn='Sq to Round';} else if(s.round){rcc='reducer';rn='Reducer';}
               pieces.push({kind:'fitting',cid:rcc,camduct:rn,round:s.round,lenIn:TRLEN,widthIn:s.w,depthIn:depth,size:s.str,inW:curSize.w,outW:s.w,_sizeStep:true}); trans++;
               cursorIn=ev.posIn+TRLEN/2; curSize=s;
-            } else {                                                       // TAP off the side — trunk continues unchanged
+            } else if(ev.type==='elbow'){                                  // ELBOW — turn the heading toward the continuing fragment
               emitStraight(ev.posIn, curSize);
-              var bt=ev.bt;
-              pieces.push({kind:'fitting',cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:curSize.w,depthIn:(curSize.round?curSize.w:curSize.h),size:bt.str,_tap:true}); taps++;
-              var tp=[origin[0]+axisDir[0]*bt.along, origin[1]+axisDir[1]*bt.along];
-              var side=((bt.perp-perpC)>=0)?1:-1, pd=[-axisDir[1]*side, axisDir[0]*side];
+              var dir2=ev.cf?ev.cf.dir:null, turn=0;
+              if(dir2){ var dot=axisDir[0]*dir2[0]+axisDir[1]*dir2[1], crs=axisDir[0]*dir2[1]-axisDir[1]*dir2[0]; turn=Math.atan2(crs,dot); }
+              pieces.push({kind:'fitting',cid:'e90',camduct:'90 Elbow',round:curSize.round,lenIn:0,turn:turn,widthIn:curSize.w,depthIn:(curSize.round?curSize.w:curSize.h),size:curSize.str,_elbow:true}); elbows++;
+            } else {                                                       // TAP / TEE / off-shape branch — trunk continues, branch off the side
+              emitStraight(ev.posIn, curSize);
+              var bt=ev.bt||ev.bsz||{w:curSize.w,h:curSize.h,round:curSize.round,str:curSize.str};
+              var pvT=(ev.perp!=null?ev.perp:(ev.bt?ev.bt.perp:perpC)), bSide=((pvT-perpC)>=0)?1:-1;
+              pieces.push({kind:'fitting',cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:curSize.w,depthIn:(curSize.round?curSize.w:curSize.h),size:bt.str,_tap:true,branchSide:bSide,branchW:bt.w,throatIn:10}); taps++;
+              var bAlong=(ev.along!=null?ev.along:(ev.bt?ev.bt.along:ch.a+inToPt(ev.posIn)));
+              var tp=[origin[0]+axisDir[0]*bAlong, origin[1]+axisDir[1]*bAlong];
+              var pd; if(ev.cf&&ev.cf.dir){ pd=ev.cf.dir; } else { pd=[-axisDir[1]*bSide, axisDir[0]*bSide]; }
               var bpieces=[], brem=24, jl2=bt.round?120:JOINT_DEFAULT;
               while(brem>0.5){ var L=Math.min(jl2,brem); bpieces.push({kind:'straight',lenIn:rnd(L),widthIn:bt.w,depthIn:(bt.round?bt.w:bt.h),size:bt.str,cid:bt.round?'spiral':'st',camduct:bt.round?'Spiral':'Straight Duct',round:bt.round}); brem-=L; }
               chBranches.push({start:tp,dir:pd,widthIn:bt.w,round:bt.round,pieces:bpieces});
@@ -2719,12 +2796,21 @@ function refreshSel(){
       });
     });
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled. Round taps off the side no longer change the trunk.');
+    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled.');
   }
   window.__buildRunsTrackWalk=buildRunsTrackWalk;
 
   (function(){ var b=document.getElementById('itemsFromRunsBtn'); if(b) b.onclick=runsFromPreview;
     var tw=document.getElementById('trackWalkBtn'); if(tw) tw.onclick=buildRunsTrackWalk;
+    (function(){ var dB=document.getElementById('editDelBtn'), sB=document.getElementById('editSizeBtn'), tB=document.getElementById('editTapBtn');
+      function upd(){ var m=window.__editMode;
+        if(dB){ dB.textContent='\uD83D\uDDD1 Click-to-delete: '+(m==='delete'?'ON':'OFF'); dB.style.background=m==='delete'?'#5a1820':'#2a1418'; }
+        if(sB){ sB.textContent='\u270E Click-to-resize: '+(m==='size'?'ON':'OFF'); sB.style.background=m==='size'?'#1a3a52':'#14202a'; }
+        if(tB){ tB.textContent='\u2795 Tap tool: '+(m==='tap'?'ON — click main run, then branch':'OFF — click main run, then branch run'); tB.style.background=m==='tap'?'#2f4a18':'#1a2410'; } }
+      if(dB) dB.onclick=function(){ window.__editMode=(window.__editMode==='delete')?null:'delete'; window.__tapMain=null; upd(); setStatus(window.__editMode==='delete'?'Click-to-delete ON \u2014 click a duct on the plan to remove that run.':'Click-to-delete off.'); };
+      if(sB) sB.onclick=function(){ window.__editMode=(window.__editMode==='size')?null:'size'; window.__tapMain=null; upd(); setStatus(window.__editMode==='size'?'Click-to-resize ON \u2014 click a piece and type its size.':'Click-to-resize off.'); };
+      if(tB) tB.onclick=function(){ window.__editMode=(window.__editMode==='tap')?null:'tap'; window.__tapMain=null; upd(); setStatus(window.__editMode==='tap'?'Tap tool ON \u2014 click the MAIN run, then the BRANCH run.':'Tap tool off.'); };
+    })();
     var c=document.getElementById('itemsClearBtn'); if(c) c.onclick=function(){ if(!confirm('Clear the takeoff?'))return; window.__runs2d=[]; sel.clear(); selRun=null; renderItems(); renderPanel(); }; })();
   renderPanel();
 })();
@@ -3171,7 +3257,8 @@ function renderVisionSummary(p, meta){
   h+='<div class="hint" style="margin-top:6px">This is the AI\u2019s read of the whole sheet \u2014 eyeball it against the print. If the runs and sizes look right, the next step is turning these into placed, editable 3D pieces.</div>';
   return h;
 }
-(function(){ try{ var b=document.getElementById('aiFullTakeoff'); if(b) b.addEventListener('click', runFullAITakeoff); var s=document.getElementById('aiSizeRuns'); if(s) s.addEventListener('click', aiReadSizesPerRun); var ts=document.getElementById('aiTileSweep'); if(ts) ts.addEventListener('click', aiTileSweep); }catch(e){} })();
+(function(){ try{ var b=document.getElementById('aiFullTakeoff'); if(b) b.addEventListener('click', runFullAITakeoff); var s=document.getElementById('aiSizeRuns'); if(s) s.addEventListener('click', aiReadSizesPerRun); var ts=document.getElementById('aiTileSweep'); if(ts) ts.addEventListener('click', aiTileSweep);
+  var ad=document.getElementById('autoDimChk'); if(ad){ ad.checked=!!window.__autoDimText; ad.addEventListener('change',function(){ window.__autoDimText=ad.checked; }); } }catch(e){} })();
 // ---- Per-run size reader: crop each detected run, read ordered W×D + fittings, write back as size tags ----
 function groupDuctRuns(){
   var segs=(typeof segments!=='undefined'?segments:[]).filter(function(s){return s.cls==='duct';}); if(!segs.length) return [];
