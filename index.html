@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t79 · track-walk cursor: chains fragments, transitions at YOLO sizechange boxes</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t80 · real 2D fitting shapes (elbow throat/heel + tapered transition)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2457,9 +2457,30 @@ function refreshSel(){
     var fr=runFrames(run); var f=fr[i]; if(!f) return [null];
     var p=run.pieces[i]; var hw=inToPt((p.widthIn||run.widthIn)/2);
     function P(t,s){ return [f.x+f.ux*t+f.nx*s, f.y+f.uy*t+f.ny*s]; }
-    if(p.kind==='fitting' && p.turn){          // elbow footprint: a width-square at the corner
-      return [P(-hw,-hw),P(hw,-hw),P(hw,hw),P(-hw,hw)].map(function(q){return n2s(q[0],q[1]);});
+    // ELBOW — real top-view throat/heel corner (heel bulges out, throat tight)
+    if(p.kind==='fitting' && p.turn){
+      var a=p.turn, ca=Math.cos(a), sa=Math.sin(a);
+      var nox=-(f.ux*sa+f.uy*ca), noy=(f.ux*ca-f.uy*sa);          // left normal of the OUTGOING heading
+      var ts=(a>=0)?1:-1, outer=-ts, inner=ts;                    // heel on outer side of the turn, throat inner
+      var Ain=[f.x+f.nx*outer*hw, f.y+f.ny*outer*hw];             // incoming outer corner
+      var Bout=[f.x+nox*outer*hw, f.y+noy*outer*hw];             // outgoing outer corner
+      var Din=[f.x+f.nx*inner*hw, f.y+f.ny*inner*hw];            // incoming inner corner
+      var Cout=[f.x+nox*inner*hw, f.y+noy*inner*hw];            // outgoing inner corner
+      var hox=(Ain[0]-f.x)+(Bout[0]-f.x), hoy=(Ain[1]-f.y)+(Bout[1]-f.y), hl=Math.hypot(hox,hoy)||1;
+      var heel=[f.x+hox/hl*hw*1.9, f.y+hoy/hl*hw*1.9];           // heel bulge (rounded outside)
+      var tix=(Din[0]-f.x)+(Cout[0]-f.x), tiy=(Din[1]-f.y)+(Cout[1]-f.y), tl=Math.hypot(tix,tiy)||1;
+      var throat=[f.x+tix/tl*hw*0.35, f.y+tiy/tl*hw*0.35];       // tight throat (inside)
+      return [Ain,heel,Bout,Cout,throat,Din].map(function(q){return n2s(q[0],q[1]);});
     }
+    // TRANSITION / REDUCER — tapered trapezoid from inlet width to outlet width (centered on the junction)
+    if(p.kind==='fitting' && (p.cid==='tr'||p.cid==='reducer'||p.cid==='s2r'||p._sizeStep)){
+      var prev=run.pieces[i-1], next=run.pieces[i+1];
+      var inHW=inToPt((((prev&&prev.widthIn))||p.widthIn||run.widthIn)/2);
+      var outHW=inToPt((((next&&next.widthIn))||p.widthIn||run.widthIn)/2);
+      var Ltr=Math.max(inToPt(8),(inHW+outHW)*0.7);
+      return [P(-Ltr/2,-inHW),P(Ltr/2,-outHW),P(Ltr/2,outHW),P(-Ltr/2,inHW)].map(function(q){return n2s(q[0],q[1]);});
+    }
+    // STRAIGHT
     var b=inToPt(p.lenIn||0.1);
     return [P(0,-hw),P(b,-hw),P(b,hw),P(0,hw)].map(function(q){ return n2s(q[0],q[1]); });
   }
