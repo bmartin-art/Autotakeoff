@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t93 · single-wall: search both sides for a real wall matching the tagged width + length; never invent the opposite wall (lone line = no run)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t94 · confirm runs by tag WIDTH only (not height) + one tag→one run; tagIdx now holds matched tags only, so phantom pockets drop</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -1396,15 +1396,15 @@ function buildSegmentRuns(){
     var off1=A.c, off2=A.nxn*B.mid[0]+A.nyn*B.mid[1];
     var loOff=Math.min(off1,off2), hiOff=Math.max(off1,off2);
     var thn=A.th, axis=(thn<0.35||thn>Math.PI-0.35)?'horizontal':(Math.abs(thn-Math.PI/2)<0.35?'vertical':'diagonal');
-    var inside=[], match=false, wtol=Math.max(2,gIn*0.2);
+    var inside=[], matchTis=[], wtol=Math.max(2,gIn*0.2);
     for(var ti=0; ti<tags.length; ti++){ var tg=tags[ti]; if(tg.nx==null) continue; var pd=parseTagDims(tg.text); if(!pd) continue;
       var ax=A.ux*tg.nx+A.uy*tg.ny; if(ax<t0r-PADAX||ax>t1r+PADAX) continue;
       var of=A.nxn*tg.nx+A.nyn*tg.ny; if(of<loOff-PADPERP||of>hiOff+PADPERP) continue;
       inside.push({ti:ti,ta:ax,nx:tg.nx,ny:tg.ny,dims:pd});
-      if(Math.min(Math.abs(pd.w-gIn),Math.abs(pd.h-gIn))<=wtol) match=true;   // tag dim matches the wall gap
+      if(Math.abs(pd.w-gIn)<=wtol) matchTis.push(ti);   // WIDTH only: in top-down plan the wall gap is the duct's width (1st number); height goes into the page. (round: w===h)
     }
     inside.sort(function(p,q){ if(axis==='horizontal') return p.nx-q.nx; if(axis==='vertical') return p.ny-q.ny; return p.ta-q.ta; });
-    return {A:A,B:B,ai:ai,bi:bi,ov:ov,gap:gap,gIn:gIn,t0r:t0r,t1r:t1r,lenP:lenP,off1:off1,off2:off2,axis:axis,inside:inside,confirmed:match};
+    return {A:A,B:B,ai:ai,bi:bi,ov:ov,gap:gap,gIn:gIn,t0r:t0r,t1r:t1r,lenP:lenP,off1:off1,off2:off2,axis:axis,inside:inside,matchTis:matchTis,confirmed:matchTis.length>0};
   }
   var cands=[];
   for(var a=0;a<walls.length;a++){ for(var b=a+1;b<walls.length;b++){ var A=walls[a],B=walls[b];
@@ -1423,18 +1423,21 @@ function buildSegmentRuns(){
     var gp=gband(p.gap), gq=gband(q.gap); if(gp!==gq) return gp-gq;             // else nearest parallel partner
     return q.ov-p.ov;
   });
-  var used={}, runs=[], squares=0;
+  var used={}, usedTags={}, runs=[], squares=0;
   cands.forEach(function(P){ if(used[P.ai]||used[P.bi]) return;
     if(P.lenP<inToPt(8)) return;                                               // too small to be a run
-    if(tagOnly && !P.confirmed){ squares++; return; }
-    if(!P.confirmed && P.lenP < ASPECT*P.gap){ squares++; return; }            // squarish pocket between ducts, not a run
-    if(P.confirmed && P.lenP < 1.02*P.gap){ squares++; return; }               // even a tagged blob must be longer than wide
-    used[P.ai]=1; used[P.bi]=1;
+    var freeMatch=(P.matchTis||[]).filter(function(ti){return !usedTags[ti];}); // width-matching tags not already claimed by a better run
+    var eff=freeMatch.length>0;                                                 // CONFIRMED = this run can claim a width-matching tag (one tag -> one run)
+    if(tagOnly && !eff){ squares++; return; }
+    if(!eff && P.lenP < ASPECT*P.gap){ squares++; return; }                     // squarish pocket between ducts, not a run
+    if(eff && P.lenP < 1.02*P.gap){ squares++; return; }                        // even a tagged blob must be longer than wide
+    used[P.ai]=1; used[P.bi]=1; freeMatch.forEach(function(ti){ usedTags[ti]=1; }); // claim the matched tag(s) so nothing else can confirm on them
     function pt(off,t){ return [off*P.A.nxn+t*P.A.ux, off*P.A.nyn+t*P.A.uy]; }
     var corners=[pt(P.off1,P.t0r),pt(P.off1,P.t1r),pt(P.off2,P.t1r),pt(P.off2,P.t0r)];
-    runs.push({axis:P.axis, widthIn:Math.round(P.gap/k6), lenP:P.lenP, corners:corners, confirmed:P.confirmed,
-      tagIdx:P.inside.map(function(o){return o.ti;}),
-      sizes:P.inside.map(function(o){return o.dims.round?('\u00d8'+o.dims.w):(o.dims.w+'\u00d7'+o.dims.h);}) });
+    var dimOf={}; P.inside.forEach(function(o){ dimOf[o.ti]=o.dims; });
+    runs.push({axis:P.axis, widthIn:Math.round(P.gap/k6), lenP:P.lenP, corners:corners, confirmed:eff,
+      tagIdx:freeMatch.slice(),                                                  // ONLY matched+claimed tags (proximity tags no longer ride along)
+      sizes:freeMatch.map(function(ti){ var d=dimOf[ti]; return d?(d.round?('\u00d8'+d.w):(d.w+'\u00d7'+d.h)):''; }) });
   });
   // 3.5) SINGLE-WALL RESCUE: an unclaimed wall with a size tag on it -> the tag's WIDTH (first number =
   // screen-facing side) gives the true span. Convert to px via the scale, look for a real parallel line
