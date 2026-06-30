@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t82 · trunk vs branch: round taps off the side add a tap+branch, trunk keeps its size</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t83 · deterministic local trunk-shape walk (fixes missed/inconsistent transitions)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2668,23 +2668,30 @@ function refreshSel(){
         if(!cs.length){                                                    // no tag on the chain -> scaled straight, flagged
           var w0=ch.frags[0].widthIn, rem=chLenIn; while(rem>0.5){ var L=Math.min(JOINT_DEFAULT,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:w0,depthIn:w0,size:w0+'\u2033',cid:'st',camduct:'Straight Duct',round:false,_scaled:true}); rem-=L; } scaled++;
         } else {
-          // TRUNK vs BRANCH: a size tag whose SHAPE differs from the trunk (round on a rect trunk) is only an
-          // in-line transition if a YOLO sizechange box confirms it; otherwise it's a duct TAPPING off the side —
-          // trunk keeps its size, and we emit a tap + a branch run going off perpendicular.
+          // Decide each size step LOCALLY against the duct we're currently on — no global shape vote (which
+          // flipped the whole trunk when one branch tag tipped the count, dropping real transitions).
           function boxNear(al){ return cb.some(function(b){ return Math.abs(b.along-al)<inToPt(18); }); }
-          var rc=0, ro=0; cs.forEach(function(e){ e.round?ro++:rc++; });
-          var trunkRound = ro>rc;                                          // majority shape; tie -> rect
-          var trunkTags=[], branchTags=[];
-          cs.forEach(function(e){ if(e.round===trunkRound || boxNear(e.along)) trunkTags.push(e); else branchTags.push(e); });
-          if(!trunkTags.length) trunkTags=[cs[0]];
+          function boxBetween(a0,a1){ for(var bi=0;bi<cb.length;bi++){ if(cb[bi].along>a0 && cb[bi].along<a1) return cb[bi]; } return null; }
+          // trunk starts rect if ANY rect tag is present (rect trunk + round branches is the common case); all-round => round
+          var anyRect=cs.some(function(e){return !e.round;}), runShape=anyRect?false:true;
+          var startIdx=0; for(var k=0;k<cs.length;k++){ if(cs[k].round===runShape){ startIdx=k; break; } }
+          var curSize=cs[startIdx], curStr=cs[startIdx].str, prevAlong=cs[startIdx].along;
           var events=[];
-          for(var i=1;i<trunkTags.length;i++){ if(trunkTags[i].str!==trunkTags[i-1].str){
-            var bx=null; for(var bi=0;bi<cb.length;bi++){ if(cb[bi].along>trunkTags[i-1].along && cb[bi].along<trunkTags[i].along){ bx=cb[bi]; break; } }
-            var posA=bx?bx.along:(trunkTags[i-1].along+trunkTags[i].along)/2;
-            events.push({type:'tr', posIn:ptToIn(posA-ch.a), size:trunkTags[i]}); } }
-          branchTags.forEach(function(bt){ events.push({type:'tap', posIn:Math.max(0,ptToIn(bt.along-ch.a)), bt:bt}); });
+          for(var j=0;j<startIdx;j++){ if(cs[j].round!==runShape && !boxNear(cs[j].along)) events.push({type:'tap',posIn:Math.max(0,ptToIn(cs[j].along-ch.a)),bt:cs[j]}); }
+          for(var i=startIdx+1;i<cs.length;i++){ var e=cs[i];
+            if(e.round===runShape){                                        // same-shape duct continuing
+              if(e.str!==curStr){ var bx=boxBetween(prevAlong,e.along); var posA=bx?bx.along:(prevAlong+e.along)/2;
+                events.push({type:'tr', posIn:ptToIn(posA-ch.a), size:e}); curStr=e.str; }
+              prevAlong=e.along;
+            } else if(boxNear(e.along)){                                    // shape change CONFIRMED by a YOLO box -> in-line transition
+              var posA2=(boxBetween(prevAlong,e.along)||{along:e.along}).along;
+              events.push({type:'tr', posIn:ptToIn(posA2-ch.a), size:e}); runShape=e.round; curStr=e.str; prevAlong=e.along;
+            } else {                                                        // shape differs, no box -> branch tapping off the side
+              events.push({type:'tap', posIn:Math.max(0,ptToIn(e.along-ch.a)), bt:e});
+            }
+          }
           events.sort(function(p,q){return p.posIn-q.posIn;});
-          var curSize=trunkTags[0], cursorIn=0, prevRound=null, TRLEN=12;
+          var cursorIn=0, prevRound=null, TRLEN=12;
           function emitStraight(toIn,s){ var depth=s.round?s.w:s.h, rem=Math.max(0,toIn-cursorIn), jl=s.round?120:JOINT_DEFAULT;
             while(rem>0.5){ var L=Math.min(jl,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:s.w,depthIn:depth,size:s.str,cid:s.round?'spiral':'st',camduct:s.round?'Spiral':'Straight Duct',round:s.round}); rem-=L; } cursorIn=Math.max(cursorIn,toIn); prevRound=s.round; }
           events.forEach(function(ev){
