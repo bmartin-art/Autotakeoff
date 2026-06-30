@@ -5,7 +5,7 @@
    >>> BUMP THIS on every release. Match it to the build badge (t93, t94, ...).
        The version is part of the cache name, so changing it makes `activate`
        delete every older cache and serve a clean shell — no stale t-builds. <<< */
-const VERSION = 't94';
+const VERSION = 't95';
 const CACHE = 'autotakeoff-' + VERSION;
 const ASSETS = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
