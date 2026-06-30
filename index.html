@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t94 · confirm runs by tag WIDTH only (not height) + one tag→one run; tagIdx now holds matched tags only, so phantom pockets drop</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t95 · keep-rule connectivity tightened: tagless runs survive only on a real end-to-end join (10px, colinear or tee), not loose 28px proximity</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2814,8 +2814,18 @@ function refreshSel(){
     // disagrees with its measured gap is adjudicated: kept+flagged only if a YOLO fitting backs
     // it at >=0.80, else dropped. Small disagreements trust the tag (scale is unreliable).
     var __keep=(function(){ var TWdropped=[], TWflagged=0; var runs=window.__runs2d||[]; if(!runs.length) return {TWdropped:TWdropped,TWflagged:TWflagged};
-      var reach=28;
+      var reach=10;                                   // tight end-to-end coincidence only (was 28 = "near anything" on a dense sheet)
       function ends(r){ var e=runEnd(r); return [[r.start[0],r.start[1]],[e.x,e.y]]; }
+      function dirOf(r){ var e=runEnd(r), dx=e.x-r.start[0], dy=e.y-r.start[1], m=Math.hypot(dx,dy)||1; return [dx/m,dy/m]; }
+      function joins(r,o){                              // true only if an END of r meets an END of o, AND they're either colinear (continuation) or perpendicular (a real tee), not a random brush-by
+        var re=ends(r), oe=ends(o);
+        for(var i=0;i<2;i++) for(var j=0;j<2;j++){
+          if(Math.hypot(re[i][0]-oe[j][0],re[i][1]-oe[j][1])>reach) continue;
+          var a=dirOf(r), b=dirOf(o), dot=Math.abs(a[0]*b[0]+a[1]*b[1]);
+          if(dot>0.92 || dot<0.38) return true;         // ~colinear continuation OR ~square tee; mid-angle near-misses rejected
+        }
+        return false;
+      }
       function yoloBacks(r){ var dets=window.__yoloDets||[]; var L=runLenIn(r);
         for(var i=0;i<dets.length;i++){ var d=dets[i]; if(d.nx==null||(d.score||0)<0.80) continue;
           var base=(d.cls||'').replace(/^(rect|round)-/,''); if(base==='sizetag') continue;
@@ -2838,9 +2848,9 @@ function refreshSel(){
       runs.forEach(function(r){ if(r._branch){ var p=findRun(r._branchParent); if(p && p._anchor) r._anchor=true; } });
       var changed=true, guard=0;
       while(changed && guard++<12){ changed=false;
-        runs.forEach(function(r){ if(r._anchor) return; var re=ends(r);
-          for(var i=0;i<runs.length;i++){ var o=runs[i]; if(o===r||!o._anchor) continue; var oe=ends(o);
-            if(re.some(function(a){ return oe.some(function(b){ return Math.hypot(a[0]-b[0],a[1]-b[1])<=reach; }); })){ r._anchor=true; changed=true; break; }
+        runs.forEach(function(r){ if(r._anchor) return;
+          for(var i=0;i<runs.length;i++){ var o=runs[i]; if(o===r||!o._anchor) continue;
+            if(joins(r,o)){ r._anchor=true; changed=true; break; }
           }
         });
       }
