@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t95 · keep-rule connectivity tightened: tagless runs survive only on a real end-to-end join (10px, colinear or tee), not loose 28px proximity</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t96 · export carries runs+fittings+centerlines (nvt frame); builds now dump __ductDiag (doubling / missing / gaps / orphaned fittings) to console</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2143,7 +2143,7 @@ function refreshSel(){
     var nCarry = carryForwardSizes();
     var nDrop = dropUnsupportedRuns();
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nCarry?(' \u00b7 '+nCarry+' inherited size'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.');
+    setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nCarry?(' \u00b7 '+nCarry+' inherited size'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.'); try{ __ductDiag('joints'); }catch(e){}
   }
   window.__runsFromPreview=runsFromPreview;
 
@@ -2860,8 +2860,72 @@ function refreshSel(){
       return {TWdropped:TWdropped,TWflagged:TWflagged};
     })();
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled'+(__keep.TWdropped.length?(' \u00b7 '+__keep.TWdropped.length+' unsupported dropped'):'')+(__keep.TWflagged?(' \u00b7 '+__keep.TWflagged+' flagged'):'')+'.');
+    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled'+(__keep.TWdropped.length?(' \u00b7 '+__keep.TWdropped.length+' unsupported dropped'):'')+(__keep.TWflagged?(' \u00b7 '+__keep.TWflagged+' flagged'):'')+'.'); try{ __ductDiag('track-walk'); }catch(e){}
   }
+  // ── DIAGNOSTICS — why is duct missing / doubling? Structured coverage + overlap dump.
+  // Auto-runs after each build; re-run anytime from the console with __ductDiag().
+  function __ductDiag(tag){
+    var R=window.__runs2d||[], SG=window.__sgRuns||[], DET=window.__yoloDets||[], T=(typeof tags!=='undefined'&&tags)?tags:[];
+    var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
+    function ftIn(inch){ inch=Math.round(inch); var f=Math.floor(inch/12); return f+"'"+(inch-f*12)+'"'; }
+    function lenOf(r){ try{ return runLenIn(r); }catch(_){ return (r.pieces||[]).reduce(function(a,b){return a+(b.lenIn||0);},0); } }
+    function endOf(r){ try{ var e=runEnd(r); return [e.x,e.y]; }catch(_){ var L=lenOf(r)*ppi; return [r.start[0]+r.dir[0]*L, r.start[1]+r.dir[1]*L]; } }
+    function onRun(r,nx,ny,slack){ var pr=projOnRun(r,nx,ny); return pr.alongIn>=-(slack||3) && pr.alongIn<=lenOf(r)+(slack||3) && pr.perpIn<=r.widthIn/2+(slack||4); }
+    try{
+      console.group('%c\uD83E\uDE7A duct diag'+(tag?' ['+tag+']':'')+'  '+new Date().toLocaleTimeString(),'color:#6cf;font-weight:700');
+      function cnt(f){ return R.filter(f).length; }
+      console.log('runs '+R.length+'  \u00b7 confirmed '+cnt(function(r){return r.confirmed;})+' \u00b7 scaled '+cnt(function(r){return r.scaled;})
+        +' \u00b7 flagged '+cnt(function(r){return r._flag;})+' \u00b7 branch '+cnt(function(r){return r._branch;})
+        +' \u00b7 synthetic '+cnt(function(r){return r.synthetic;})+' \u00b7 tagless '+cnt(function(r){return !(r.tagIdx&&r.tagIdx.length);})
+        +'   ||   bands '+SG.length+' \u00b7 fittings '+DET.length+' \u00b7 tags '+T.length+' \u00b7 ppi '+ppi.toFixed(3));
+      console.groupCollapsed('runs table');
+      console.table(R.map(function(r,i){ var e=endOf(r); return {i:i, axis:r.axis, size:(r.pieces&&r.pieces[0]&&r.pieces[0].size)||'?', w:r.widthIn,
+        len:ftIn(lenOf(r)), pcs:(r.pieces||[]).length, tags:(r.tagIdx&&r.tagIdx.length)||0, conf:!!r.confirmed, scaled:!!r.scaled,
+        flag:r._flag||'', branch:!!r._branch, synth:!!r.synthetic, sx:Math.round(r.start[0]), sy:Math.round(r.start[1]), ex:Math.round(e[0]), ey:Math.round(e[1]) }; }));
+      console.groupEnd();
+      // A) DOUBLING — two runs on a shared centerline whose spans overlap
+      var dupes=[];
+      for(var i=0;i<R.length;i++) for(var j=i+1;j<R.length;j++){ var a=R[i],b=R[j];
+        if(Math.abs(a.dir[0]*b.dir[0]+a.dir[1]*b.dir[1])<0.9) continue;
+        var eb=endOf(b), p0=projOnRun(a,b.start[0],b.start[1]), p1=projOnRun(a,eb[0],eb[1]);
+        if(Math.max(p0.perpIn,p1.perpIn) > a.widthIn/2+6) continue;
+        var La=lenOf(a), lo=Math.max(0,Math.min(p0.alongIn,p1.alongIn)), hi=Math.min(La,Math.max(p0.alongIn,p1.alongIn)), ov=hi-lo;
+        if(ov>6) dupes.push({runA:i,runB:j,overlap:ftIn(ov),axis:a.axis,wA:a.widthIn,wB:b.widthIn,perp:Math.round(Math.max(p0.perpIn,p1.perpIn))+'"',
+          atX:Math.round(a.start[0]+a.dir[0]*((lo+hi)/2)*ppi), atY:Math.round(a.start[1]+a.dir[1]*((lo+hi)/2)*ppi)}); }
+      if(dupes.length){ console.group('%c\u29C9 DOUBLING \u2014 '+dupes.length+' overlapping pair(s) on a shared centerline','color:#ff9500;font-weight:700'); console.table(dupes); console.groupEnd(); }
+      else console.log('%c\u29C9 doubling: none','color:#6c6');
+      // B) MISSING — band centerlines poorly covered by any run
+      var missing=[];
+      SG.forEach(function(sg,si){ var c=sg.corners; if(!c||c.length<4) return;
+        var a=[(c[0][0]+c[3][0])/2,(c[0][1]+c[3][1])/2], b=[(c[1][0]+c[2][0])/2,(c[1][1]+c[2][1])/2];
+        var Lpt=Math.hypot(b[0]-a[0],b[1]-a[1]); if(Lpt<ppi*3) return;
+        var N=Math.min(30,Math.max(4,Math.round(Lpt/(ppi*6)))), cov=0;
+        for(var k=0;k<=N;k++){ var t=k/N, px=a[0]+(b[0]-a[0])*t, py=a[1]+(b[1]-a[1])*t, hit=false;
+          for(var ri=0;ri<R.length;ri++){ if(onRun(R[ri],px,py,3)){ hit=true; break; } }
+          if(hit) cov++; }
+        var frac=cov/(N+1);
+        if(frac<0.85) missing.push({band:si,len:ftIn(Lpt/ppi),covered:Math.round(frac*100)+'%',midX:Math.round((a[0]+b[0])/2),midY:Math.round((a[1]+b[1])/2)}); });
+      if(missing.length){ console.group('%c\u2301 MISSING \u2014 '+missing.length+' band(s) <85% covered by any run','color:#ff9500;font-weight:700');
+        console.table(missing.sort(function(x,y){return parseInt(x.covered)-parseInt(y.covered);})); console.groupEnd(); }
+      else console.log('%c\u2301 missing: none (all bands \u226585% covered)','color:#6c6');
+      // C) GAPS — colinear runs on the same line with a straight break between them
+      var gaps=[];
+      for(var g1=0;g1<R.length;g1++) for(var g2=0;g2<R.length;g2++){ if(g1===g2) continue; var a2=R[g1],b2=R[g2];
+        if(Math.abs(a2.dir[0]*b2.dir[0]+a2.dir[1]*b2.dir[1])<0.95) continue;
+        var pr=projOnRun(a2,b2.start[0],b2.start[1]); if(pr.perpIn>a2.widthIn/2+6) continue;
+        var gap=pr.alongIn-lenOf(a2); if(gap>6 && gap<=240){ var e2=endOf(a2); gaps.push({from:g1,to:g2,gap:ftIn(gap),axis:a2.axis,atX:Math.round(e2[0]),atY:Math.round(e2[1])}); } }
+      if(gaps.length){ console.group('%c\u2500 GAPS \u2014 '+gaps.length+' break(s) between colinear runs (a missing straight?)','color:#ffd000'); console.table(gaps); console.groupEnd(); }
+      else console.log('%c\u2500 gaps: none between colinear runs','color:#6c6');
+      // D) FITTINGS — detected vs actually sitting on a run
+      var orphan=0, placed=0;
+      DET.forEach(function(d){ if((d.cls||'').replace(/^(rect|round)-/,'')==='sizetag'||d.nx==null) return;
+        var on=false; for(var ri=0;ri<R.length;ri++){ if(onRun(R[ri],d.nx,d.ny,6)){ on=true; break; } }
+        if(on) placed++; else orphan++; });
+      console.log('%c\u25C8 fittings: '+placed+' on a run \u00b7 '+orphan+' orphaned (no run beneath)', orphan?'color:#ffd000':'color:#6c6');
+      console.groupEnd();
+    }catch(e){ try{console.groupEnd();}catch(_){} console.warn('duct diag failed:',e); }
+  }
+  window.__ductDiag=__ductDiag;
   window.__buildRunsTrackWalk=buildRunsTrackWalk;
 
   (function(){ var b=document.getElementById('itemsFromRunsBtn'); if(b) b.onclick=runsFromPreview;
@@ -3876,13 +3940,31 @@ $('exportBtn').onclick=()=>{
   });
   const nvp=viewport ? {w:viewport.width/(baseScale*scale), h:viewport.height/(baseScale*scale)} : {w:0,h:0};
   const tagOut=tags.map(t=>({x:round(t.nx),y:round(t.ny),text:t.text}));
+  // ── every other layer, in the SAME nvt frame, so one file is fully overlay-able ──
+  const ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);   // pt per real-inch at current scale
+  const r4=v=>Math.round(v*10000)/10000;
+  const yoloOut=(window.__yoloDets||[]).map(d=>({cls:d.cls,clsIdx:d.clsIdx,score:d.score,
+    nx:round(d.nx),ny:round(d.ny),nx0:round(d.nx0),ny0:round(d.ny0),nx1:round(d.nx1),ny1:round(d.ny1)}));
+  const runOut=(window.__runs2d||[]).map(r=>{
+    const Lpt=(typeof r._Lpt==='number'&&r._Lpt>0)?r._Lpt:(r.pieces||[]).reduce((a,b)=>a+(b.lenIn||0),0)*ppi;
+    const end=[r.start[0]+r.dir[0]*Lpt, r.start[1]+r.dir[1]*Lpt];
+    return {id:r.id,axis:r.axis,confirmed:!!r.confirmed,scaled:!!r.scaled,flag:r._flag||null,branch:!!r._branch,synthetic:!!r.synthetic,
+      widthIn:r.widthIn,lenPt:round(Lpt),start:[round(r.start[0]),round(r.start[1])],end:[round(end[0]),round(end[1])],dir:[r4(r.dir[0]),r4(r.dir[1])],
+      tagIdx:r.tagIdx||[],nPieces:(r.pieces||[]).length,
+      pieces:(r.pieces||[]).map(p=>({kind:p.kind,cid:p.cid,size:p.size,lenIn:p.lenIn,widthIn:p.widthIn,round:!!p.round}))};
+  });
+  const clOut=(window.__sgRuns||[]).map(r=>{ const c=r.corners; if(!c||c.length<4) return null;
+    return {start:[round((c[0][0]+c[3][0])/2),round((c[0][1]+c[3][1])/2)], end:[round((c[1][0]+c[2][0])/2),round((c[1][1]+c[2][1])/2)]};
+  }).filter(Boolean);
   const out={page:pageNum, pageWidthPt:round(nvp.w), pageHeightPt:round(nvp.h),
     units:'pdf-points, rotation-normalized to on-screen orientation (y-down)',
     scaleInPerPt:null,   // fill in inches-per-point, or leave null and tell Claude the drawing scale
-    count:duct.length, ductLines:duct, sizeTags:tagOut};
+    scaleIPF:(typeof scaleIPF!=='undefined'?scaleIPF:null), ptPerInch:round(ppi),
+    count:duct.length, ductLines:duct, sizeTags:tagOut,
+    yoloDets:yoloOut, runs:runOut, centerlines:clOut};
   const json=JSON.stringify(out,null,2);
   try{ const blob=new Blob([json],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='duct-lines-page'+pageNum+'.json'; document.body.appendChild(a); a.click(); a.remove(); }catch(_){}
-  showExport(json, duct.length);   // copyable fallback (downloads are blocked in the in-app sandbox)
+  showExport(json, duct.length+' lines \u00b7 '+yoloOut.length+' fittings \u00b7 '+runOut.length+' runs \u00b7 '+clOut.length+' centerlines');   // copyable fallback (downloads are blocked in the in-app sandbox)
 };
 function showExport(json, count){
   let m=document.getElementById('expModal');
@@ -3890,7 +3972,7 @@ function showExport(json, count){
   m.style.cssText='position:fixed;inset:0;background:rgba(8,11,15,.95);z-index:60;display:flex;flex-direction:column;padding:22px';
   m.innerHTML='';
   const hd=document.createElement('div'); hd.style.cssText='display:flex;gap:10px;align-items:baseline;margin-bottom:10px;color:#e6edf3;font-family:ui-monospace,monospace';
-  hd.innerHTML='<b style="letter-spacing:.1em">DUCT JSON</b><span style="color:#7d8da0;font-size:12px">'+count+' lines — copy this (download is blocked inside the app)</span>';
+  hd.innerHTML='<b style="letter-spacing:.1em">TAKEOFF JSON</b><span style="color:#7d8da0;font-size:12px">'+count+' — copy this (download is blocked inside the app)</span>';
   const ta=document.createElement('textarea'); ta.value=json; ta.readOnly=true;
   ta.style.cssText='flex:1;width:100%;background:#0d1117;color:#e6edf3;border:1px solid #243140;border-radius:8px;padding:12px;font-family:ui-monospace,monospace;font-size:12px';
   const bar=document.createElement('div'); bar.style.cssText='display:flex;gap:8px;margin-top:10px';
