@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t96 · export carries runs+fittings+centerlines (nvt frame); builds now dump __ductDiag (doubling / missing / gaps / orphaned fittings) to console</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t98 · keep-rule also anchors perpendicular mid-span taps (recovers tagless diffuser drops off a trunk); t97 de-dupe of wrong-size overlays retained</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2826,6 +2826,14 @@ function refreshSel(){
         }
         return false;
       }
+      function tapsInto(r,o){                          // an END of r lands on the BODY (mid-span) of o and r runs ~perpendicular = a real tap off o's side.
+        var a=dirOf(r), b=dirOf(o), dot=Math.abs(a[0]*b[0]+a[1]*b[1]);   // colinear end-joins are handled by joins(); this covers side-taps only
+        if(dot>0.45) return false;                      // must be roughly perpendicular (a tap), not a continuation
+        var re=ends(r), L=runLenIn(o), buf=6;           // land on the body, not within buf" of either end (that's an end-join)
+        for(var i=0;i<2;i++){ var pr=projOnRun(o,re[i][0],re[i][1]);
+          if(pr.perpIn<=o.widthIn/2+8 && pr.alongIn>buf && pr.alongIn<L-buf) return true; }
+        return false;
+      }
       function yoloBacks(r){ var dets=window.__yoloDets||[]; var L=runLenIn(r);
         for(var i=0;i<dets.length;i++){ var d=dets[i]; if(d.nx==null||(d.score||0)<0.80) continue;
           var base=(d.cls||'').replace(/^(rect|round)-/,''); if(base==='sizetag') continue;
@@ -2850,7 +2858,7 @@ function refreshSel(){
       while(changed && guard++<12){ changed=false;
         runs.forEach(function(r){ if(r._anchor) return;
           for(var i=0;i<runs.length;i++){ var o=runs[i]; if(o===r||!o._anchor) continue;
-            if(joins(r,o)){ r._anchor=true; changed=true; break; }
+            if(joins(r,o) || tapsInto(r,o)){ r._anchor=true; changed=true; break; }
           }
         });
       }
@@ -2859,6 +2867,7 @@ function refreshSel(){
       window.__runs2d=runs.filter(function(r){return r._anchor;});
       return {TWdropped:TWdropped,TWflagged:TWflagged};
     })();
+    try{ var _dd=dedupeOverlappingRuns(); if(_dd) console.log('[takeoff] de-dupe removed '+_dd+' wrong-size overlay run(s)'); }catch(e){}
     sel.clear(); selRun=null; renderItems(); renderPanel();
     setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled'+(__keep.TWdropped.length?(' \u00b7 '+__keep.TWdropped.length+' unsupported dropped'):'')+(__keep.TWflagged?(' \u00b7 '+__keep.TWflagged+' flagged'):'')+'.'); try{ __ductDiag('track-walk'); }catch(e){}
   }
@@ -2925,6 +2934,38 @@ function refreshSel(){
       console.groupEnd();
     }catch(e){ try{console.groupEnd();}catch(_){} console.warn('duct diag failed:',e); }
   }
+  // ── DE-DUPE wrong-size overlays. A trunk walked twice — once at its tagged size, once at
+  // the raw wall gap (an odd size like 17"/3"/7"). When a SCALED (gap-width, tagless) run lies
+  // on the same centerline as a TAG-BACKED run and mostly overlaps it, drop the scaled twin.
+  // Conservative by design: only scaled runs die; a tag-backed run is NEVER removed, and real-
+  // width tagless runs (manifold walks) are left for separate review, so this can't delete duct.
+  function dedupeOverlappingRuns(){
+    var R=window.__runs2d||[]; if(R.length<2) return 0;
+    function leni(r){ try{ return runLenIn(r); }catch(_){ return (r.pieces||[]).reduce(function(a,b){return a+(b.lenIn||0);},0); } }
+    function endOf(r){ try{ var e=runEnd(r); return [e.x,e.y]; }catch(_){ var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125); var L=leni(r)*ppi; return [r.start[0]+r.dir[0]*L, r.start[1]+r.dir[1]*L]; } }
+    function tagBacked(r){ return !r.scaled && r.tagIdx && r.tagIdx.length>0; }
+    var drop={};
+    for(var i=0;i<R.length;i++){ var a=R[i]; if(drop[a.id]) continue;
+      for(var j=0;j<R.length;j++){ if(i===j) continue; var b=R[j]; if(drop[b.id]) continue;
+        if(Math.abs(a.dir[0]*b.dir[0]+a.dir[1]*b.dir[1])<0.9) continue;                 // colinear only
+        var eb=endOf(b), p0=projOnRun(a,b.start[0],b.start[1]), p1=projOnRun(a,eb[0],eb[1]);
+        if(Math.max(p0.perpIn,p1.perpIn) > a.widthIn/2+6) continue;                     // b sits on a's centerline
+        var La=leni(a), Lb=leni(b);
+        var lo=Math.max(0,Math.min(p0.alongIn,p1.alongIn)), hi=Math.min(La,Math.max(p0.alongIn,p1.alongIn)), ov=hi-lo;
+        if(ov<18 || ov<0.6*Math.min(La,Lb)) continue;                                   // real, mostly-covering overlap
+        var loser=null;
+        if(b.scaled && tagBacked(a)) loser=b;
+        else if(a.scaled && tagBacked(b)) loser=a;                                      // never drop a tag-backed run
+        if(!loser) continue;
+        drop[loser.id]=true;
+        if(loser===a) break;
+      }
+    }
+    var n=Object.keys(drop).length; if(!n) return 0;
+    window.__runs2d=R.filter(function(r){return !drop[r.id];});
+    return n;
+  }
+  window.__dedupeRuns=dedupeOverlappingRuns;
   window.__ductDiag=__ductDiag;
   window.__buildRunsTrackWalk=buildRunsTrackWalk;
 
