@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t99 · de-dupe now collapses ALL non-tagged colinear duplicate walks (scaled + real-width), never drops a tag-backed run; mid-span tap keep-rule retained</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t100 · de-dupe now bend-aware (footprint coverage, catches twins on a bent trunk's leg); parseTagDims rejects grille/slot necks (25x5) so no oversized phantom width; diag doubling bend-aware</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -1756,7 +1756,9 @@ function parseTagDims(text){
   var mr=/\u00d8\s*(\d{1,3})|(\d{1,3})\s*\u00d8|(\d{1,3})\s*["\u201d]?\s*DIA/.exec(t);
   if(mr){ var dia=parseInt(mr[1]||mr[2]||mr[3],10); if(dia>=3&&dia<=120) return {round:true,w:dia,h:dia}; }
   var m=/(\d{1,3})\s*[\/xX\u00d7]\s*(\d{1,3})/.exec(t);
-  if(m){ var w=parseInt(m[1],10),h=parseInt(m[2],10); if(w>=2&&w<=200&&h>=2&&h<=200) return {round:false,w:w,h:h}; }
+  if(m){ var w=parseInt(m[1],10),h=parseInt(m[2],10); if(w>=2&&w<=200&&h>=2&&h<=200){
+    var hi=Math.max(w,h), lo=Math.min(w,h); if(hi/lo>=4 && lo<=6) return null;   // grille/slot neck (e.g. 25x5 = SRG-5X25), not duct
+    return {round:false,w:w,h:h}; } }
   return null;
 }
 function debounce(fn,ms){ var h=null; return function(){ var a=arguments,t=this; clearTimeout(h); h=setTimeout(function(){ fn.apply(t,a); }, ms||120); }; }
@@ -2892,16 +2894,17 @@ function refreshSel(){
         len:ftIn(lenOf(r)), pcs:(r.pieces||[]).length, tags:(r.tagIdx&&r.tagIdx.length)||0, conf:!!r.confirmed, scaled:!!r.scaled,
         flag:r._flag||'', branch:!!r._branch, synth:!!r.synthetic, sx:Math.round(r.start[0]), sy:Math.round(r.start[1]), ex:Math.round(e[0]), ey:Math.round(e[1]) }; }));
       console.groupEnd();
-      // A) DOUBLING — two runs on a shared centerline whose spans overlap
+      // A) DOUBLING — a run whose centerline lies mostly inside another run's footprint (bend-aware; nearest-leg perp)
       var dupes=[];
-      for(var i=0;i<R.length;i++) for(var j=i+1;j<R.length;j++){ var a=R[i],b=R[j];
-        if(Math.abs(a.dir[0]*b.dir[0]+a.dir[1]*b.dir[1])<0.9) continue;
-        var eb=endOf(b), p0=projOnRun(a,b.start[0],b.start[1]), p1=projOnRun(a,eb[0],eb[1]);
-        if(Math.max(p0.perpIn,p1.perpIn) > a.widthIn/2+6) continue;
-        var La=lenOf(a), lo=Math.max(0,Math.min(p0.alongIn,p1.alongIn)), hi=Math.min(La,Math.max(p0.alongIn,p1.alongIn)), ov=hi-lo;
-        if(ov>6) dupes.push({runA:i,runB:j,overlap:ftIn(ov),axis:a.axis,wA:a.widthIn,wB:b.widthIn,perp:Math.round(Math.max(p0.perpIn,p1.perpIn))+'"',
-          atX:Math.round(a.start[0]+a.dir[0]*((lo+hi)/2)*ppi), atY:Math.round(a.start[1]+a.dir[1]*((lo+hi)/2)*ppi)}); }
-      if(dupes.length){ console.group('%c\u29C9 DOUBLING \u2014 '+dupes.length+' overlapping pair(s) on a shared centerline','color:#ff9500;font-weight:700'); console.table(dupes); console.groupEnd(); }
+      for(var i=0;i<R.length;i++){ var t=R[i]; var te=endOf(t), sx=t.start[0],sy=t.start[1],ex=te[0],ey=te[1];
+        var Lp=Math.hypot(ex-sx,ey-sy); if(Lp<ppi*12) continue; var N=Math.max(4,Math.min(24,Math.round(Lp/(ppi*6))));
+        for(var j=0;j<R.length;j++){ if(i===j) continue; var K=R[j]; var LK=lenOf(K), on=0;
+          for(var s=0;s<=N;s++){ var u=s/N,px=sx+(ex-sx)*u,py=sy+(ey-sy)*u; var pr=projOnRun(K,px,py);
+            if(pr.perpIn<=K.widthIn/2+6 && pr.alongIn>=-6 && pr.alongIn<=LK+6) on++; }
+          if(on/(N+1)>=0.6){ dupes.push({run:i,insideOf:j,cover:Math.round(on/(N+1)*100)+'%',wRun:t.widthIn,wOf:K.widthIn,
+            runTagged:!!(t.tagIdx&&t.tagIdx.length),ofTagged:!!(K.tagIdx&&K.tagIdx.length),sx:Math.round(sx),sy:Math.round(sy)}); break; } }
+      }
+      if(dupes.length){ console.group('%c\u29C9 DOUBLING \u2014 '+dupes.length+' run(s) lying inside another run\u2019s footprint','color:#ff9500;font-weight:700'); console.table(dupes); console.groupEnd(); }
       else console.log('%c\u29C9 doubling: none','color:#6c6');
       // B) MISSING — band centerlines poorly covered by any run
       var missing=[];
@@ -2934,38 +2937,29 @@ function refreshSel(){
       console.groupEnd();
     }catch(e){ try{console.groupEnd();}catch(_){} console.warn('duct diag failed:',e); }
   }
-  // ── DE-DUPE wrong-size overlays. A trunk walked twice — once at its tagged size, once at
-  // the raw wall gap (an odd size like 17"/3"/7"). When a SCALED (gap-width, tagless) run lies
-  // on the same centerline as a TAG-BACKED run and mostly overlaps it, drop the scaled twin.
-  // Conservative by design: only scaled runs die; a tag-backed run is NEVER removed, and real-
-  // width tagless runs (manifold walks) are left for separate review, so this can't delete duct.
+  // ── DE-DUPE duplicate walks. A duct sometimes gets walked twice — a tag-backed run plus a
+  // straight scaled/tagless twin lying on the SAME footprint (often on one leg of a bent trunk).
+  // We drop a run only if it is NOT tag-backed AND >=70% of its centerline lies inside a
+  // tag-backed run's footprint. projOnRun measures perp to the NEAREST leg, so this is bend-aware
+  // and needs no colinearity assumption (that assumption is exactly what missed twins on a bent
+  // trunk's second leg). A real branch leaves the trunk's footprint, so its coverage stays low.
+  // Hard floor: a tag-backed run is NEVER dropped.
   function dedupeOverlappingRuns(){
     var R=window.__runs2d||[]; if(R.length<2) return 0;
+    var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
     function leni(r){ try{ return runLenIn(r); }catch(_){ return (r.pieces||[]).reduce(function(a,b){return a+(b.lenIn||0);},0); } }
-    function endOf(r){ try{ var e=runEnd(r); return [e.x,e.y]; }catch(_){ var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125); var L=leni(r)*ppi; return [r.start[0]+r.dir[0]*L, r.start[1]+r.dir[1]*L]; } }
+    function endOf(r){ try{ var e=runEnd(r); return [e.x,e.y]; }catch(_){ var L=leni(r)*ppi; return [r.start[0]+r.dir[0]*L, r.start[1]+r.dir[1]*L]; } }
     function tagBacked(r){ return !r.scaled && r.tagIdx && r.tagIdx.length>0; }
     var drop={};
-    for(var i=0;i<R.length;i++){ var a=R[i]; if(drop[a.id]) continue;
-      for(var j=0;j<R.length;j++){ if(i===j) continue; var b=R[j]; if(drop[b.id]) continue;
-        if(Math.abs(a.dir[0]*b.dir[0]+a.dir[1]*b.dir[1])<0.9) continue;                 // colinear only
-        var eb=endOf(b), p0=projOnRun(a,b.start[0],b.start[1]), p1=projOnRun(a,eb[0],eb[1]);
-        if(Math.max(p0.perpIn,p1.perpIn) > a.widthIn/2+6) continue;                     // b sits on a's centerline
-        var La=leni(a), Lb=leni(b);
-        var lo=Math.max(0,Math.min(p0.alongIn,p1.alongIn)), hi=Math.min(La,Math.max(p0.alongIn,p1.alongIn)), ov=hi-lo;
-        if(ov<18 || ov<0.6*Math.min(La,Lb)) continue;                                   // real, mostly-covering overlap
-        var loser=null;
-        // colinear + shared-centerline + heavy overlap => a duplicate WALK of the same duct
-        // (a real branch is ~perpendicular, dot~0, and never reaches here). Collapse to one.
-        // Hard floor: NEVER drop a tag-backed run; if BOTH are tag-backed, leave them (tag mis-assign — flag, don't delete).
-        var aT=tagBacked(a), bT=tagBacked(b);
-        if(aT && bT) continue;
-        if(aT) loser=b;
-        else if(bT) loser=a;
-        else { var qa=(a.tagIdx&&a.tagIdx.length)?1:0, qb=(b.tagIdx&&b.tagIdx.length)?1:0;
-               loser=(qb<qa)?b:((qa<qb)?a:((Lb<La)?b:((La<Lb)?a:((b.id>a.id)?b:a)))); }
-        if(!loser) continue;
-        drop[loser.id]=true;
-        if(loser===a) break;
+    for(var i=0;i<R.length;i++){ var t=R[i]; if(drop[t.id]||tagBacked(t)) continue;
+      var e=endOf(t), sx=t.start[0], sy=t.start[1], ex=e[0], ey=e[1];
+      var Lp=Math.hypot(ex-sx,ey-sy); if(Lp < ppi*18) continue;               // ignore short stubs (<18") — too easy to false-match
+      var N=Math.max(4,Math.min(24,Math.round(Lp/(ppi*6))));
+      for(var k=0;k<R.length;k++){ var K=R[k]; if(K===t||drop[K.id]||!tagBacked(K)) continue;
+        var LK=leni(K), on=0;
+        for(var s=0;s<=N;s++){ var u=s/N, px=sx+(ex-sx)*u, py=sy+(ey-sy)*u; var pr=projOnRun(K,px,py);
+          if(pr.perpIn<=K.widthIn/2+6 && pr.alongIn>=-6 && pr.alongIn<=LK+6) on++; }
+        if(on/(N+1)>=0.7){ drop[t.id]=true; break; }                         // >=70% of t sits inside K's footprint -> duplicate walk
       }
     }
     var n=Object.keys(drop).length; if(!n) return 0;
