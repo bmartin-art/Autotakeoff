@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t98 · keep-rule also anchors perpendicular mid-span taps (recovers tagless diffuser drops off a trunk); t97 de-dupe of wrong-size overlays retained</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t99 · de-dupe now collapses ALL non-tagged colinear duplicate walks (scaled + real-width), never drops a tag-backed run; mid-span tap keep-rule retained</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2954,8 +2954,15 @@ function refreshSel(){
         var lo=Math.max(0,Math.min(p0.alongIn,p1.alongIn)), hi=Math.min(La,Math.max(p0.alongIn,p1.alongIn)), ov=hi-lo;
         if(ov<18 || ov<0.6*Math.min(La,Lb)) continue;                                   // real, mostly-covering overlap
         var loser=null;
-        if(b.scaled && tagBacked(a)) loser=b;
-        else if(a.scaled && tagBacked(b)) loser=a;                                      // never drop a tag-backed run
+        // colinear + shared-centerline + heavy overlap => a duplicate WALK of the same duct
+        // (a real branch is ~perpendicular, dot~0, and never reaches here). Collapse to one.
+        // Hard floor: NEVER drop a tag-backed run; if BOTH are tag-backed, leave them (tag mis-assign — flag, don't delete).
+        var aT=tagBacked(a), bT=tagBacked(b);
+        if(aT && bT) continue;
+        if(aT) loser=b;
+        else if(bT) loser=a;
+        else { var qa=(a.tagIdx&&a.tagIdx.length)?1:0, qb=(b.tagIdx&&b.tagIdx.length)?1:0;
+               loser=(qb<qa)?b:((qa<qb)?a:((Lb<La)?b:((La<Lb)?a:((b.id>a.id)?b:a)))); }
         if(!loser) continue;
         drop[loser.id]=true;
         if(loser===a) break;
