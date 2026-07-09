@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t101 · export now carries each run's exact bent polyline; de-dupe result/errors always logged to console (diagnostic build to pin down remaining doubles/missing)</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t104 · new 🧹 AI cleanup button — draws numbered runs on the full sheet, AI flags duplicates + not-ductwork, auto-removes with one-click undo · tag→duct test + snap + polyline retained</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -310,6 +310,12 @@
           <button class="btn adv" id="itemsClearBtn" style="flex:1;background:#3a2030;border-color:#7a3b4b;color:#fbb">Clear</button>
         </div>
         <button class="btn go" id="trackWalkBtn" style="background:#10202e;border-color:#3a86b8;color:#cfe9ff;margin-top:6px;font-weight:700">🚂 Build (track-walk · beta)</button>
+        <button class="btn go" id="aiAssignTest" style="background:#33231a;border-color:#b8763f;color:#ffe0c8;margin-top:6px;font-weight:700">🧪 AI: assign tags → ducts (test)</button>
+        <div class="hint" style="margin-top:2px">Experiment — after a build, sends the extracted centerlines + size tags + the full sheet image to the AI and asks only <b>which tag labels which duct</b>. Draws its picks on the plan (blue dot = tag → orange dot = chosen duct) and tables width-agreement. Changes no runs; open the downloaded file so the worker call isn't sandbox-blocked.</div>
+        <button class="btn go" id="aiCleanupRuns" style="background:#2a1420;border-color:#b83f6a;color:#ffd0e0;margin-top:6px;font-weight:700">🧹 AI cleanup: drop doubles + not-ductwork</button>
+        <div class="hint" style="margin-top:2px">After a build: draws every run numbered on the full sheet and asks the AI which are <b>duplicates</b> of another run and which sit on <b>non-ductwork</b> (text, walls, grilles, empty). Auto-removes what it flags (↶ undo appears). It can only pick from runs that exist — it never adds duct.</div>
+        <button class="btn go" id="aiCleanupTiles" style="background:#2a1a1a;border-color:#b84f4f;color:#ffd0d0;margin-top:6px;font-weight:700">🧹 AI cleanup (tile scan · auto-remove)</button>
+        <div class="hint" style="margin-top:2px">After a build: tiles the sheet, draws each run's number on the tile, and asks the AI which numbered runs are <b>not real ductwork</b> (sitting on text/walls/grilles) or a <b>duplicate</b> of another — then removes those automatically. Removed runs are stashed; run <code>__aiRestore()</code> in the console to undo. Open the downloaded file so the worker call isn't sandbox-blocked.</div>
         <div class="row" style="margin-top:6px;display:flex;gap:6px">
           <button class="btn" id="editDelBtn" style="flex:1;background:#2a1418;border-color:#7a3b4b;color:#fbb">🗑 Click-to-delete: OFF</button>
           <button class="btn" id="editSizeBtn" style="flex:1;background:#14202a;border-color:#3b6a8a;color:#bdf">✎ Click-to-resize: OFF</button>
@@ -1435,7 +1441,7 @@ function buildSegmentRuns(){
     function pt(off,t){ return [off*P.A.nxn+t*P.A.ux, off*P.A.nyn+t*P.A.uy]; }
     var corners=[pt(P.off1,P.t0r),pt(P.off1,P.t1r),pt(P.off2,P.t1r),pt(P.off2,P.t0r)];
     var dimOf={}; P.inside.forEach(function(o){ dimOf[o.ti]=o.dims; });
-    runs.push({axis:P.axis, widthIn:Math.round(P.gap/k6), lenP:P.lenP, corners:corners, confirmed:eff,
+    runs.push({axis:P.axis, widthIn:snapDuctW(P.gap/k6), lenP:P.lenP, corners:corners, confirmed:eff,
       tagIdx:freeMatch.slice(),                                                  // ONLY matched+claimed tags (proximity tags no longer ride along)
       sizes:freeMatch.map(function(ti){ var d=dimOf[ti]; return d?(d.round?('\u00d8'+d.w):(d.w+'\u00d7'+d.h)):''; }) });
   });
@@ -2031,6 +2037,8 @@ function refreshSel(){
   function ptToIn(pt){ return pt/(6*ipf()); }
   function invApplyN(m,X,Y){ var a=m[0],b=m[1],c=m[2],d=m[3],e=m[4],f=m[5],det=(a*d-b*c)||1; return [(d*(X-e)-c*(Y-f))/det,(-b*(X-e)+a*(Y-f))/det]; }
   function n2s(nx,ny){ if(!window.__nvt||!viewport) return null; var u=invApplyN(window.__nvt,nx,ny); return applyM(viewport.transform,u[0],u[1]); }
+  window.__n2s=n2s;
+  window.__renderPanel=function(){ try{ return renderPanel(); }catch(e){} };
   function fmtFt(inch){ var f=Math.floor(inch/12), i=Math.round(inch-f*12); if(i>=12){f++;i-=12;} return (f>0?f+"'":'')+(i?i+'"':(f>0?'':'0"')); }
   function hexA(hex,a){ var h=(hex||'#15e06a').replace('#',''); if(h.length===3)h=h.split('').map(function(c){return c+c;}).join(''); var r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16); return 'rgba('+r+','+g+','+b+','+a+')'; }
   function vh(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
@@ -3438,7 +3446,133 @@ function renderVisionSummary(p, meta){
   return h;
 }
 (function(){ try{ var b=document.getElementById('aiFullTakeoff'); if(b) b.addEventListener('click', runFullAITakeoff); var s=document.getElementById('aiSizeRuns'); if(s) s.addEventListener('click', aiReadSizesPerRun); var ts=document.getElementById('aiTileSweep'); if(ts) ts.addEventListener('click', aiTileSweep);
+  var at=document.getElementById('aiAssignTest'); if(at) at.addEventListener('click', aiAssignTagsTest);
+  var ac=document.getElementById('aiCleanupRuns'); if(ac) ac.addEventListener('click', aiCleanupRuns);
+  var ct=document.getElementById('aiCleanupTiles'); if(ct) ct.addEventListener('click', aiCleanupTileScan);
   var ad=document.getElementById('autoDimChk'); if(ad){ ad.checked=!!window.__autoDimText; ad.addEventListener('change',function(){ window.__autoDimText=ad.checked; }); } }catch(e){} })();
+
+// ---- TEST: let the AI decide which size tag labels which duct (proposes only; changes no runs) ----
+function drawAiAssignOverlay(assign, clById, TG){
+  try{
+    var layer=document.getElementById('lineLayer'); var n2s=window.__n2s; if(!layer||typeof n2s!=='function') return;
+    var parent=layer.parentNode; var viz=document.getElementById('aiAssignViz');
+    if(!viz){ viz=document.createElementNS('http://www.w3.org/2000/svg','g'); viz.id='aiAssignViz'; parent.appendChild(viz); }
+    var frag='';
+    (assign||[]).forEach(function(a){ var tg=TG[a.tag]; if(!tg||tg.nx==null) return; var ts=n2s(tg.nx,tg.ny); if(!ts) return;
+      var cl=clById[a.cl];
+      if(cl){ var ms=n2s((cl.ax+cl.bx)/2,(cl.ay+cl.by)/2); if(ms){
+        frag+='<line x1="'+ts[0].toFixed(1)+'" y1="'+ts[1].toFixed(1)+'" x2="'+ms[0].toFixed(1)+'" y2="'+ms[1].toFixed(1)+'" stroke="#ff8a3f" stroke-width="1.6" stroke-opacity="0.9"/>';
+        frag+='<circle cx="'+ms[0].toFixed(1)+'" cy="'+ms[1].toFixed(1)+'" r="3.5" fill="#ff8a3f"/>'; } }
+      frag+='<circle cx="'+ts[0].toFixed(1)+'" cy="'+ts[1].toFixed(1)+'" r="3.5" fill="#3fd0ff"/>';
+    });
+    viz.innerHTML=frag;
+  }catch(e){ console.warn('assign overlay failed',e); }
+}
+async function aiCleanupRuns(){
+  var out=document.getElementById('aiOut'); if(!out) return;
+  var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,'');
+  if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
+  if(!pdfDoc){ out.innerHTML='<div class="hint">Load a print first.</div>'; return; }
+  var R=window.__runs2d||[]; if(!R.length){ out.innerHTML='<div class="hint">Build runs first (\uD83D\uDE82 track-walk), then run cleanup.</div>'; return; }
+  var poly=window.__runPoly;
+  out.innerHTML='<div class="hint"><span class="spin"></span> drawing '+R.length+' runs on the sheet and asking the AI which are doubles / not ductwork\u2026</div>';
+  var imgB64=null;
+  try{
+    var page=await pdfDoc.getPage(pageNum); var vp1=page.getViewport({scale:1});
+    var S=Math.min(1, 2200/Math.max(vp1.width,vp1.height)); var vp=page.getViewport({scale:S});
+    var cc=document.createElement('canvas'); cc.width=Math.ceil(vp.width); cc.height=Math.ceil(vp.height); var cx=cc.getContext('2d');
+    await withPageRender(function(){ return page.render({canvasContext:cx, viewport:vp, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
+    var COLORS=['#ff2db4','#12b6ff','#ffb020','#22c55e','#a855f7','#ef4444','#06b6d4','#eab308'];
+    R.forEach(function(r,idx){                                              // burn numbered run centerlines onto the render
+      var pts=(poly?poly(r):[[r.start[0],r.start[1]],[r.end[0],r.end[1]]]);
+      cx.strokeStyle=COLORS[idx%COLORS.length]; cx.lineWidth=2.5; cx.globalAlpha=0.9;
+      cx.beginPath(); pts.forEach(function(p,k){ var x=p[0]*S,y=p[1]*S; if(k===0)cx.moveTo(x,y); else cx.lineTo(x,y); }); cx.stroke(); cx.globalAlpha=1;
+      var mid=pts[Math.floor(pts.length/2)]||pts[0]; var mx=mid[0]*S, my=mid[1]*S;
+      cx.font='bold 12px sans-serif'; cx.lineWidth=3; cx.strokeStyle='#000'; cx.strokeText(String(idx),mx+2,my-2);
+      cx.fillStyle=COLORS[idx%COLORS.length]; cx.fillText(String(idx),mx+2,my-2);
+    });
+    imgB64=cc.toDataURL('image/jpeg',0.9).split(',')[1];
+  }catch(e){ out.innerHTML='<div class="hint">Couldn\u2019t render the sheet: '+vhEsc(e.message||e)+'</div>'; return; }
+  var meta=R.map(function(r,idx){ return {id:idx, w:r.widthIn, scaled:!!r.scaled, tagged:!!(r.tagIdx&&r.tagIdx.length)}; });
+  var prompt='This is an HVAC duct plan. Each duct RUN the software built is drawn as a numbered colored centerline over the print. Your job is CLEANUP only \u2014 list runs to REMOVE. Flag a run number if EITHER: (A) DUPLICATE \u2014 it lies on the same duct as another numbered run (two centerlines on one duct); keep one, list the extras. (B) NOT DUCTWORK \u2014 the centerline sits on something that is not a duct: printed text/labels, a wall or door, a grille/diffuser/register, hatching, or empty space with no parallel duct walls under it. Do NOT flag a run only because of its size. Never add runs. Reply ONLY JSON, no prose: {"remove":[{"id":<run number>,"reason":"dup"|"notduct","of":<run number it duplicates or null>,"conf":0..1,"why":"<=6 words"}]}. Run metadata (id,width,scaled,tagged): '+JSON.stringify(meta);
+  try{
+    var ctrl=new AbortController(), to=setTimeout(function(){ctrl.abort();}, 120000);
+    var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:3000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:imgB64}},{type:'text',text:prompt}]}]})});
+    clearTimeout(to);
+    if(!resp.ok){ var et=await resp.text(); out.innerHTML='<div class="hint">HTTP '+resp.status+': '+vhEsc(et.slice(0,240))+'</div>'; return; }
+    var data=await resp.json(); if(data.error){ out.innerHTML='<div class="hint">AI error: '+vhEsc(JSON.stringify(data.error).slice(0,240))+'</div>'; return; }
+    var txt=(data.content||[]).filter(function(z){return z.type==='text';}).map(function(z){return z.text;}).join('').replace(/```json|```/g,'').trim();
+    var jm=txt.indexOf('{'); if(jm>0) txt=txt.slice(jm); var res=null; try{res=JSON.parse(txt);}catch(e){}
+    if(!res||!res.remove){ window.__aiCleanRaw=txt; out.innerHTML='<div class="hint">AI didn\u2019t return clean JSON (raw in window.__aiCleanRaw).</div>'; return; }
+    var flag={}; res.remove.forEach(function(a){ var r=R[a.id]; if(r) flag[r.id]=a; });
+    var removed=R.filter(function(r){return flag[r.id];});
+    if(!removed.length){ out.innerHTML='<div class="hint" style="color:#bdf5cf">AI flagged nothing to remove \u2014 '+R.length+' runs kept.</div>'; return; }
+    window.__aiCleanUndo=R.slice();
+    window.__runs2d=R.filter(function(r){return !flag[r.id];});
+    try{ drawOverlay(); }catch(e){} try{ window.__renderPanel&&window.__renderPanel(); }catch(e){}
+    var dups=removed.filter(function(r){return flag[r.id].reason==='dup';}).length, nd=removed.length-dups;
+    console.log('[takeoff] AI cleanup removed '+removed.length+' run(s):', res.remove);
+    var h='<div class="hint" style="color:#ffd0e0"><b>AI cleanup:</b> removed '+removed.length+' run(s) \u2014 '+dups+' duplicate, '+nd+' not-ductwork'+(data.usage?(' \u00b7 '+(data.usage.input_tokens||0)+'+'+(data.usage.output_tokens||0)+' tok'):'')+'. <button id="aiCleanUndoBtn" style="margin-left:6px;padding:3px 9px;background:#222;border:1px solid #666;color:#ccc;border-radius:6px;cursor:pointer">\u21b6 Undo</button></div>';
+    h+='<div style="max-height:300px;overflow:auto;font-size:11px;font-family:ui-monospace,monospace;margin-top:4px"><table style="width:100%;border-collapse:collapse"><tr style="color:#9fb2c8"><th>run</th><th>reason</th><th>of</th><th>conf</th><th style="text-align:left">why</th></tr>';
+    res.remove.forEach(function(a){ if(!R[a.id]) return; h+='<tr style="border-top:1px solid #1e2a38"><td style="text-align:center">'+a.id+'</td><td style="text-align:center;color:'+(a.reason==='dup'?'#e0a030':'#f88')+'">'+vhEsc(a.reason||'')+'</td><td style="text-align:center">'+(a.of==null?'-':a.of)+'</td><td style="text-align:center">'+(a.conf!=null?a.conf:'')+'</td><td>'+vhEsc(a.why||'')+'</td></tr>'; });
+    h+='</table></div>'; out.innerHTML=h;
+    var ub=document.getElementById('aiCleanUndoBtn'); if(ub) ub.onclick=function(){ if(window.__aiCleanUndo){ window.__runs2d=window.__aiCleanUndo.slice(); try{drawOverlay();}catch(e){} try{window.__renderPanel&&window.__renderPanel();}catch(e){} out.innerHTML='<div class="hint">Restored '+window.__runs2d.length+' runs.</div>'; } };
+  }catch(e){ out.innerHTML='<div class="hint">'+(e.name==='AbortError'?'Timed out \u2014 dense sheet; try again.':('Error: '+vhEsc(e.message||e)))+'</div>'; }
+}
+async function aiAssignTagsTest(){
+  var out=document.getElementById('aiOut'); if(!out) return;
+  var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,'');
+  if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
+  if(!pdfDoc){ out.innerHTML='<div class="hint">Load a print first.</div>'; return; }
+  var SG=window.__sgRuns||[], TG=(typeof tags!=='undefined'&&tags)?tags:[];
+  if(!SG.length){ out.innerHTML='<div class="hint">Build runs first (🚂 track-walk) so there are centerlines to assign to.</div>'; return; }
+  var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
+  var CL=[], clById={};
+  SG.forEach(function(sg,i){ var c=sg.corners; if(!c||c.length<4) return;
+    var ax=(c[0][0]+c[3][0])/2, ay=(c[0][1]+c[3][1])/2, bx=(c[1][0]+c[2][0])/2, by=(c[1][1]+c[2][1])/2;
+    if(Math.hypot(bx-ax,by-ay) < ppi*24) return;                                // >=2ft candidates only
+    var o={i:i, ax:Math.round(ax),ay:Math.round(ay),bx:Math.round(bx),by:Math.round(by), wIn:Math.round(Math.hypot(c[0][0]-c[3][0],c[0][1]-c[3][1])/ppi)};
+    CL.push(o); clById[i]=o;
+  });
+  var TAGL=[]; TG.forEach(function(t,i){ if(t.nx==null) return; TAGL.push({i:i, x:Math.round(t.nx), y:Math.round(t.ny), text:t.text}); });
+  if(!CL.length||!TAGL.length){ out.innerHTML='<div class="hint">Need both centerlines and readable tags — run an AI scan + a build first.</div>'; return; }
+  out.innerHTML='<div class="hint"><span class="spin"></span> rendering the sheet and asking the AI which tag labels which duct\u2026</div>';
+  var imgB64=null, pageW=0, pageH=0;
+  try{
+    var page=await pdfDoc.getPage(pageNum); var vp1=page.getViewport({scale:1}); pageW=Math.round(vp1.width); pageH=Math.round(vp1.height);
+    var S=Math.min(1, 2000/Math.max(vp1.width,vp1.height)); var vp=page.getViewport({scale:S});
+    var cc=document.createElement('canvas'); cc.width=Math.ceil(vp.width); cc.height=Math.ceil(vp.height);
+    await withPageRender(function(){ return page.render({canvasContext:cc.getContext('2d'), viewport:vp, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
+    imgB64=cc.toDataURL('image/jpeg',0.85).split(',')[1];
+  }catch(e){ out.innerHTML='<div class="hint">Couldn\u2019t render the page image: '+vhEsc(e.message||e)+'</div>'; return; }
+  var payload={ page:{w:pageW,h:pageH}, coordsNote:'page points; x right, y down; the image is the full plan at exactly this frame', centerlines:CL, tags:TAGL };
+  var prompt='You are an HVAC estimator reading the attached duct plan (the FULL sheet). From the vector geometry I already extracted the duct CENTERLINES (each has index i, endpoints ax,ay->bx,by in PAGE POINTS that match the image, and a measured width wIn) and the printed SIZE TAGS (each has index i, a position x,y in page points, and its text). For EACH tag decide which ONE centerline index it labels: the duct the tag sits on or immediately beside, following the run it is centered over (a straight run continuing through an elbow is still the same duct). Use the image to disambiguate at junctions where several ducts are close. If a tag labels none of the given centerlines, use cl:-1. Reply with ONLY JSON, no prose: {"assign":[{"tag":<tag i>,"cl":<centerline i or -1>,"conf":0..1,"why":"<=6 words"}]}. Data:\n'+JSON.stringify(payload);
+  try{
+    var ctrl=new AbortController(), to=setTimeout(function(){ctrl.abort();}, 90000);
+    var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:2500,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:imgB64}},{type:'text',text:prompt}]}]})});
+    clearTimeout(to);
+    if(!resp.ok){ var et=await resp.text(); out.innerHTML='<div class="hint">HTTP '+resp.status+': '+vhEsc(et.slice(0,240))+'</div>'; return; }
+    var data=await resp.json(); if(data.error){ out.innerHTML='<div class="hint">AI error: '+vhEsc(JSON.stringify(data.error).slice(0,240))+'</div>'; return; }
+    var txt=(data.content||[]).filter(function(z){return z.type==='text';}).map(function(z){return z.text;}).join('').replace(/```json|```/g,'').trim();
+    var jm=txt.indexOf('{'); if(jm>0) txt=txt.slice(jm); var res=null; try{res=JSON.parse(txt);}catch(e){}
+    if(!res||!res.assign){ window.__aiAssignRaw=txt; out.innerHTML='<div class="hint">AI didn\u2019t return clean JSON (raw saved to window.__aiAssignRaw).</div>'; return; }
+    window.__aiAssign=res.assign;
+    drawAiAssignOverlay(res.assign, clById, TG);
+    var walkerBy={}; (window.__runs2d||[]).forEach(function(r){ (r.tagIdx||[]).forEach(function(ti){ walkerBy[ti]=true; }); });
+    var okN=0, offN=0;
+    var rowsH=res.assign.map(function(a){
+      var tg=TG[a.tag]||{}; var cl=clById[a.cl];
+      var pd=(typeof parseTagDims==='function')?parseTagDims(tg.text||''):null; var tagW=pd?pd.w:null;
+      var match=(cl&&tagW!=null)?(Math.abs(cl.wIn-tagW)<=Math.max(2,tagW*0.25)):null;
+      if(match===true) okN++; else if(match===false) offN++;
+      var ok=match==null?'?':(match?'\u2713':'\u2717');
+      return '<tr style="border-top:1px solid #1e2a38"><td>'+vhEsc(tg.text||'')+'</td><td style="text-align:center">'+(tagW==null?'-':tagW)+'</td><td style="text-align:center">'+(a.cl<0?'none':a.cl)+'</td><td style="text-align:center">'+(cl?cl.wIn:'-')+'</td><td style="text-align:center;color:'+(ok==='\u2713'?'#7ddb7d':ok==='\u2717'?'#f88':'#888')+'">'+ok+'</td><td style="text-align:center">'+(a.conf!=null?a.conf:'')+'</td><td>'+vhEsc(a.why||'')+(walkerBy[a.tag]?'':' <span style="color:#e0a030">(builder: unclaimed)</span>')+'</td></tr>';
+    }).join('');
+    var h='<div class="hint" style="color:#ffe0c8"><b>AI tag\u2192duct test:</b> '+res.assign.length+' picks \u00b7 width match '+okN+'\u2713 / '+offN+'\u2717'+(data.usage?(' \u00b7 '+(data.usage.input_tokens||0)+'+'+(data.usage.output_tokens||0)+' tok'):'')+'. Lines drawn on the plan (blue = tag, orange = chosen duct).</div>';
+    h+='<div style="max-height:320px;overflow:auto;font-size:11px;font-family:ui-monospace,monospace;margin-top:4px"><table style="width:100%;border-collapse:collapse"><tr style="color:#9fb2c8"><th style="text-align:left">tag</th><th>w</th><th>\u2192cl</th><th>clW</th><th>ok</th><th>conf</th><th style="text-align:left">why</th></tr>'+rowsH+'</table></div>';
+    out.innerHTML=h;
+  }catch(e){ out.innerHTML='<div class="hint">'+(e.name==='AbortError'?'Timed out \u2014 dense sheet; try again.':('Error: '+vhEsc(e.message||e)))+'</div>'; }
+}
 // ---- Per-run size reader: crop each detected run, read ordered W×D + fittings, write back as size tags ----
 function groupDuctRuns(){
   var segs=(typeof segments!=='undefined'?segments:[]).filter(function(s){return s.cls==='duct';}); if(!segs.length) return [];
@@ -4035,6 +4169,7 @@ function showExport(json, count){
   ta.focus(); ta.select();
 }
 function round(n){ return Math.round(n*100)/100; }
+function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*Math.round(w/2)); }  // no-tag width from the wall gap -> nearest real (even) duct size; rect duct is made in even inches, odd = gap-measure error
 </script>
 
 <script>
