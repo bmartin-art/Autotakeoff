@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t105 · AI cleanup now compares TWO separate images (clean print + runs-only overlay) instead of a burned composite, and only auto-removes flags ≥0.7 confidence (was over-removing) · undo retained</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t106 · no-tag wall pairs now rejected at build time when the gap is an implausible duct size (>32" span, or a long <5" sliver) — kills the phantom 46"/38"/3-4" runs that cluttered the overlay · AI cleanup two-image + conf gate retained</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -1435,6 +1435,8 @@ function buildSegmentRuns(){
     if(tagOnly && !eff){ squares++; return; }
     if(!eff && P.lenP < ASPECT*P.gap){ squares++; return; }                     // squarish pocket between ducts, not a run
     if(eff && P.lenP < 1.02*P.gap){ squares++; return; }                        // even a tagged blob must be longer than wide
+    if(!eff){ var _wS=snapDuctW(P.gap/k6), _lf=(P.lenP/k6)/12;                    // NO TAG -> the gap must be a plausible untagged-duct size, else it's not duct
+      if(_wS>32 || (_wS<5 && _lf>=6)){ squares++; return; } }                    // >32" (architectural span) or a long <5" sliver (text/single line) = phantom pair
     used[P.ai]=1; used[P.bi]=1; freeMatch.forEach(function(ti){ usedTags[ti]=1; }); // claim the matched tag(s) so nothing else can confirm on them
     function pt(off,t){ return [off*P.A.nxn+t*P.A.ux, off*P.A.nyn+t*P.A.uy]; }
     var corners=[pt(P.off1,P.t0r),pt(P.off1,P.t1r),pt(P.off2,P.t1r),pt(P.off2,P.t0r)];
