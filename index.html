@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t108 · no-tag runs now report width from line scale with height marked UNKNOWN (size shows "W×?", run flagged ⚠ H?) instead of guessing a square depth — set the height via ✎ resize · t107 find-missing + t106 gate retained</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t110 · keep-rule now keeps EVERY real two-wall pair on the green trace (any length, tagged or not) — fills the whole trace; tag/geometry size disagreements are flagged (⚠ size?) not dropped. Lean it up with 🧹 AI cleanup, set heights via resize</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2827,7 +2827,7 @@ function refreshSel(){
     // disagrees with its measured gap is adjudicated: kept+flagged only if a YOLO fitting backs
     // it at >=0.80, else dropped. Small disagreements trust the tag (scale is unreliable).
     var __keep=(function(){ var TWdropped=[], TWflagged=0; var runs=window.__runs2d||[]; if(!runs.length) return {TWdropped:TWdropped,TWflagged:TWflagged};
-      var reach=10;                                   // tight end-to-end coincidence only (was 28 = "near anything" on a dense sheet)
+      var reach=Math.max(10, inToPt(18));             // scale-aware: bridge the trace gap at an elbow/fitting (flat 10px was ~13" on a 1/8" sheet — too tight, isolated real runs)
       function ends(r){ var e=runEnd(r); return [[r.start[0],r.start[1]],[e.x,e.y]]; }
       function dirOf(r){ var e=runEnd(r), dx=e.x-r.start[0], dy=e.y-r.start[1], m=Math.hypot(dx,dy)||1; return [dx/m,dy/m]; }
       function joins(r,o){                              // true only if an END of r meets an END of o, AND they're either colinear (continuation) or perpendicular (a real tee), not a random brush-by
@@ -2859,11 +2859,11 @@ function refreshSel(){
           if(yoloBacks(r)){ r._anchor=true; r._flag='1-wall'; TWflagged++; }   // keep only if YOLO confirms real duct there; else connectivity-pass may still rescue a 1-wall that joins a real run
           return;
         }
-        if(r.tagIdx && r.tagIdx.length){
+        if(r.tagIdx && r.tagIdx.length){                   // tagged: flag (never drop) a gross tag-vs-geometry size disagreement so you can eyeball it
           var dis=(r.tagW!=null && r._geomW>0)?Math.abs(r.tagW-r._geomW)/r._geomW:0;
-          if(dis<=0.40){ r._anchor=true; }
-          else if(yoloBacks(r)){ r._anchor=true; r._flag='mismatch'; TWflagged++; }
-          else { r._anchor=false; }
+          r._anchor=true; if(dis>0.40){ r._flag='mismatch'; TWflagged++; }
+        } else {                                           // NO tag, real two-wall pair = tracks the green trace -> KEEP (any length; height shows unknown). AI cleanup removes any that aren't really duct.
+          r._anchor=true;
         }
       });
       runs.forEach(function(r){ if(r._branch){ var p=findRun(r._branchParent); if(p && p._anchor) r._anchor=true; } });
