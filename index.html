@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t100 · de-dupe now bend-aware (footprint coverage, catches twins on a bent trunk's leg); parseTagDims rejects grille/slot necks (25x5) so no oversized phantom width; diag doubling bend-aware</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t101 · export now carries each run's exact bent polyline; de-dupe result/errors always logged to console (diagnostic build to pin down remaining doubles/missing)</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2869,7 +2869,7 @@ function refreshSel(){
       window.__runs2d=runs.filter(function(r){return r._anchor;});
       return {TWdropped:TWdropped,TWflagged:TWflagged};
     })();
-    try{ var _dd=dedupeOverlappingRuns(); if(_dd) console.log('[takeoff] de-dupe removed '+_dd+' wrong-size overlay run(s)'); }catch(e){}
+    try{ var _dd=dedupeOverlappingRuns(); console.log('[takeoff] de-dupe removed '+_dd+' duplicate run(s)'); }catch(e){ console.warn('[takeoff] de-dupe error:',e); }
     sel.clear(); selRun=null; renderItems(); renderPanel();
     setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled'+(__keep.TWdropped.length?(' \u00b7 '+__keep.TWdropped.length+' unsupported dropped'):'')+(__keep.TWflagged?(' \u00b7 '+__keep.TWflagged+' flagged'):'')+'.'); try{ __ductDiag('track-walk'); }catch(e){}
   }
@@ -2967,6 +2967,14 @@ function refreshSel(){
     return n;
   }
   window.__dedupeRuns=dedupeOverlappingRuns;
+  function __runPoly(r){                          // exact bent centerline vertices (mirrors runFrames walk) for accurate export/analysis
+    var x=r.start[0],y=r.start[1],ux=r.dir[0],uy=r.dir[1]; var pts=[[Math.round(x),Math.round(y)]];
+    for(var i=0;i<r.pieces.length;i++){ var p=r.pieces[i];
+      if(p.kind==='fitting'&&p.turn){ var a=p.turn,cu=Math.cos(a),su=Math.sin(a),rx=ux*cu-uy*su,ry=ux*su+uy*cu; ux=rx; uy=ry; }
+      else { var L=inToPt(p.lenIn||0); x+=ux*L; y+=uy*L; pts.push([Math.round(x),Math.round(y)]); } }
+    return pts;
+  }
+  window.__runPoly=__runPoly;
   window.__ductDiag=__ductDiag;
   window.__buildRunsTrackWalk=buildRunsTrackWalk;
 
@@ -3993,6 +4001,7 @@ $('exportBtn').onclick=()=>{
     return {id:r.id,axis:r.axis,confirmed:!!r.confirmed,scaled:!!r.scaled,flag:r._flag||null,branch:!!r._branch,synthetic:!!r.synthetic,
       widthIn:r.widthIn,lenPt:round(Lpt),start:[round(r.start[0]),round(r.start[1])],end:[round(end[0]),round(end[1])],dir:[r4(r.dir[0]),r4(r.dir[1])],
       tagIdx:r.tagIdx||[],nPieces:(r.pieces||[]).length,
+      poly:(window.__runPoly?window.__runPoly(r):[[round(r.start[0]),round(r.start[1])],[round(end[0]),round(end[1])]]),
       pieces:(r.pieces||[]).map(p=>({kind:p.kind,cid:p.cid,size:p.size,lenIn:p.lenIn,widthIn:p.widthIn,round:!!p.round}))};
   });
   const clOut=(window.__sgRuns||[]).map(r=>{ const c=r.corners; if(!c||c.length<4) return null;
