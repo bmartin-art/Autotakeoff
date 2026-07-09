@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t106 · no-tag wall pairs now rejected at build time when the gap is an implausible duct size (>32" span, or a long <5" sliver) — kills the phantom 46"/38"/3-4" runs that cluttered the overlay · AI cleanup two-image + conf gate retained</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t108 · no-tag runs now report width from line scale with height marked UNKNOWN (size shows "W×?", run flagged ⚠ H?) instead of guessing a square depth — set the height via ✎ resize · t107 find-missing + t106 gate retained</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -314,6 +314,8 @@
         <div class="hint" style="margin-top:2px">Experiment — after a build, sends the extracted centerlines + size tags + the full sheet image to the AI and asks only <b>which tag labels which duct</b>. Draws its picks on the plan (blue dot = tag → orange dot = chosen duct) and tables width-agreement. Changes no runs; open the downloaded file so the worker call isn't sandbox-blocked.</div>
         <button class="btn go" id="aiCleanupRuns" style="background:#2a1420;border-color:#b83f6a;color:#ffd0e0;margin-top:6px;font-weight:700">🧹 AI cleanup: drop doubles + not-ductwork</button>
         <div class="hint" style="margin-top:2px">After a build: draws every run numbered on the full sheet and asks the AI which are <b>duplicates</b> of another run and which sit on <b>non-ductwork</b> (text, walls, grilles, empty). Auto-removes what it flags (↶ undo appears). It can only pick from runs that exist — it never adds duct.</div>
+        <button class="btn go" id="aiFindMissing" style="background:#2a2410;border-color:#b8a03f;color:#fff0c0;margin-top:6px;font-weight:700">🔎 AI: find missing duct (second look)</button>
+        <div class="hint" style="margin-top:2px">Finds duct centerlines the builder <b>skipped</b> (often where the size isn't printed), shows them to the AI against the clean print, and flags the ones that are <b>real duct</b> (dashed yellow ! on the plan) so you can add them with the ➕ Tap / resize tools. Doesn't auto-build — it points, you place.</div>
         <div class="row" style="margin-top:6px;display:flex;gap:6px">
           <button class="btn" id="editDelBtn" style="flex:1;background:#2a1418;border-color:#7a3b4b;color:#fbb">🗑 Click-to-delete: OFF</button>
           <button class="btn" id="editSizeBtn" style="flex:1;background:#14202a;border-color:#3b6a8a;color:#bdf">✎ Click-to-resize: OFF</button>
@@ -2116,8 +2118,9 @@ function refreshSel(){
       function rnd(v){ return Math.round(v*10)/10; }
       var pieces=[];
       if(scaled){
-        var rem=lenIn; while(rem>0.5){ var L=Math.min(JOINT_DEFAULT,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:r.widthIn,depthIn:r.widthIn,size:r.widthIn+'"',cid:'st',camduct:'Straight Duct',round:false,_scaled:true}); rem-=L; }
-        if(!pieces.length) pieces.push({kind:'straight',lenIn:rnd(lenIn),widthIn:r.widthIn,depthIn:r.widthIn,size:r.widthIn+'"',cid:'st',camduct:'Straight Duct',round:false,_scaled:true});
+        var _sz=r.widthIn+'\u00d7?';                                        // width from line scale; HEIGHT (depth into page) unknown w/o a tag
+        var rem=lenIn; while(rem>0.5){ var L=Math.min(JOINT_DEFAULT,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:r.widthIn,depthIn:null,size:_sz,cid:'st',camduct:'Straight Duct',round:false,_scaled:true,_needH:true}); rem-=L; }
+        if(!pieces.length) pieces.push({kind:'straight',lenIn:rnd(lenIn),widthIn:r.widthIn,depthIn:null,size:_sz,cid:'st',camduct:'Straight Duct',round:false,_scaled:true,_needH:true});
       } else {
         // rule 3: a size holds until the next tag; build spans, drop a transition wherever it steps with no fitting
         var spans=[], prev={start:0,size:ev[0]};
@@ -2138,7 +2141,7 @@ function refreshSel(){
         });
         if(!pieces.length){ var s0=ev[0]; pieces.push({kind:'straight',lenIn:rnd(lenIn),widthIn:s0.w,depthIn:s0.round?s0.w:s0.h,size:s0.str,cid:s0.round?'spiral':'st',camduct:s0.round?'Spiral':'Straight Duct',round:s0.round}); }
       }
-      window.__runs2d.push({id:uid(),axis:r.axis,start:[sx,sy],dir:[ux,uy],normal:[pnx,pny],widthIn:(pieces[0]&&pieces[0].widthIn)||r.widthIn,color:palette[ci%palette.length],label:'',confirmed:!!r.confirmed,scaled:scaled,tagIdx:_linkedTi,pieces:pieces,
+      window.__runs2d.push({id:uid(),axis:r.axis,start:[sx,sy],dir:[ux,uy],normal:[pnx,pny],widthIn:(pieces[0]&&pieces[0].widthIn)||r.widthIn,color:palette[ci%palette.length],label:'',confirmed:!!r.confirmed,scaled:scaled,_needH:scaled,tagIdx:_linkedTi,pieces:pieces,
         _startN:[c[0],c[3]], _Lpt:Lpt});
       ci++;
     });
@@ -2639,7 +2642,7 @@ function refreshSel(){
     runs.forEach(function(run){
       var open=(selRun===run.id);
       h+='<div class="aicard" style="border-color:'+run.color+'33">'
-        +'<div class="h" style="cursor:pointer" onclick="__runOpen(\''+run.id+'\')"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+run.color+';margin-right:5px"></span>'+(run.label?vh(run.label)+' \u00b7 ':'')+run.axis+' run'+(run._flag==='mismatch'?' <span style="color:#e0a92a">\u26a0 size?</span>':run._flag==='1-wall'?' <span style="color:#e0a92a">\u26a0 1-wall</span>':'')+' \u00b7 '+run.pieces.length+' pc \u00b7 '+fmtFt(runLenIn(run))+'</div>';
+        +'<div class="h" style="cursor:pointer" onclick="__runOpen(\''+run.id+'\')"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+run.color+';margin-right:5px"></span>'+(run.label?vh(run.label)+' \u00b7 ':'')+run.axis+' run'+(run._flag==='mismatch'?' <span style="color:#e0a92a">\u26a0 size?</span>':run._flag==='1-wall'?' <span style="color:#e0a92a">\u26a0 1-wall</span>':'')+(run._needH?' <span style="color:#e0a92a" title="width from line scale; height unknown \u2014 no size tag on this run">\u26a0 H?</span>':'')+' \u00b7 '+run.pieces.length+' pc \u00b7 '+fmtFt(runLenIn(run))+'</div>';
       if(open){
         run.pieces.forEach(function(pc,i){
           var key=run.id+':'+i, on=sel.has(key);
@@ -3448,6 +3451,7 @@ function renderVisionSummary(p, meta){
 (function(){ try{ var b=document.getElementById('aiFullTakeoff'); if(b) b.addEventListener('click', runFullAITakeoff); var s=document.getElementById('aiSizeRuns'); if(s) s.addEventListener('click', aiReadSizesPerRun); var ts=document.getElementById('aiTileSweep'); if(ts) ts.addEventListener('click', aiTileSweep);
   var at=document.getElementById('aiAssignTest'); if(at) at.addEventListener('click', aiAssignTagsTest);
   var ac=document.getElementById('aiCleanupRuns'); if(ac) ac.addEventListener('click', aiCleanupRuns);
+  var fm=document.getElementById('aiFindMissing'); if(fm) fm.addEventListener('click', aiFindMissing);
   var ad=document.getElementById('autoDimChk'); if(ad){ ad.checked=!!window.__autoDimText; ad.addEventListener('change',function(){ window.__autoDimText=ad.checked; }); } }catch(e){} })();
 
 // ---- TEST: let the AI decide which size tag labels which duct (proposes only; changes no runs) ----
@@ -3523,6 +3527,81 @@ async function aiCleanupRuns(){
     res.remove.forEach(function(a){ var r=R[a.id]; if(!r) return; var kept=!flag[r.id]; h+='<tr style="border-top:1px solid #1e2a38'+(kept?';opacity:.5':'')+'"><td style="text-align:center">'+a.id+(kept?' <span style="color:#888">(kept)</span>':'')+'</td><td style="text-align:center;color:'+(a.reason==='dup'?'#e0a030':'#f88')+'">'+vhEsc(a.reason||'')+'</td><td style="text-align:center">'+(a.of==null?'-':a.of)+'</td><td style="text-align:center">'+(a.conf!=null?a.conf:'')+'</td><td>'+vhEsc(a.why||'')+'</td></tr>'; });
     h+='</table></div>'; out.innerHTML=h;
     var ub=document.getElementById('aiCleanUndoBtn'); if(ub) ub.onclick=function(){ if(window.__aiCleanUndo){ window.__runs2d=window.__aiCleanUndo.slice(); try{drawOverlay();}catch(e){} try{window.__renderPanel&&window.__renderPanel();}catch(e){} out.innerHTML='<div class="hint">Restored '+window.__runs2d.length+' runs.</div>'; } };
+  }catch(e){ out.innerHTML='<div class="hint">'+(e.name==='AbortError'?'Timed out \u2014 dense sheet; try again.':('Error: '+vhEsc(e.message||e)))+'</div>'; }
+}
+function drawMissViz(items){
+  try{
+    var layer=document.getElementById('lineLayer'); var n2s=window.__n2s; if(!layer||typeof n2s!=='function') return;
+    var parent=layer.parentNode; var viz=document.getElementById('aiMissViz');
+    if(!viz){ viz=document.createElementNS('http://www.w3.org/2000/svg','g'); viz.id='aiMissViz'; parent.appendChild(viz); }
+    var frag='';
+    (items||[]).forEach(function(c){ var a=n2s(c.ax,c.ay), b=n2s(c.bx,c.by); if(!a||!b) return;
+      frag+='<line x1="'+a[0].toFixed(1)+'" y1="'+a[1].toFixed(1)+'" x2="'+b[0].toFixed(1)+'" y2="'+b[1].toFixed(1)+'" stroke="#ffd000" stroke-width="4" stroke-opacity="0.85" stroke-dasharray="7 5"/>';
+      var mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2;
+      frag+='<circle cx="'+mx.toFixed(1)+'" cy="'+my.toFixed(1)+'" r="7" fill="#ffd000" fill-opacity="0.9"/><text x="'+mx.toFixed(1)+'" y="'+(my+4).toFixed(1)+'" font-size="10" font-weight="700" text-anchor="middle" fill="#000">!</text>';
+    });
+    viz.innerHTML=frag;
+  }catch(e){ console.warn('miss viz failed',e); }
+}
+async function aiFindMissing(){
+  var out=document.getElementById('aiOut'); if(!out) return;
+  var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,'');
+  if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
+  if(!pdfDoc){ out.innerHTML='<div class="hint">Load a print first.</div>'; return; }
+  var R=window.__runs2d||[], SG=window.__sgRuns||[];
+  if(!SG.length){ out.innerHTML='<div class="hint">Build runs first (\uD83D\uDE82 track-walk) so there are candidate centerlines.</div>'; return; }
+  var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125); var poly=window.__runPoly;
+  var RP=R.map(function(r){ return poly?poly(r):[[r.start[0],r.start[1]],[r.end[0],r.end[1]]]; });
+  function spd(px,py,ax,ay,bx,by){ var dx=bx-ax,dy=by-ay,L2=dx*dx+dy*dy; if(L2===0) return Math.hypot(px-ax,py-ay); var t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/L2)); return Math.hypot(px-(ax+dx*t),py-(ay+dy*t)); }
+  function p2poly(px,py,pl){ var b=1e9; for(var i=0;i<pl.length-1;i++){ b=Math.min(b,spd(px,py,pl[i][0],pl[i][1],pl[i+1][0],pl[i+1][1])); } return b; }
+  var cand=[];                                                              // candidate centerlines with NO run built on them
+  SG.forEach(function(sg,i){ var c=sg.corners; if(!c||c.length<4) return;
+    var ax=(c[0][0]+c[3][0])/2, ay=(c[0][1]+c[3][1])/2, bx=(c[1][0]+c[2][0])/2, by=(c[1][1]+c[2][1])/2;
+    var L=Math.hypot(bx-ax,by-ay); if(L < ppi*48) return;                    // >=4ft
+    var n=Math.max(4,Math.min(16,Math.round(L/(ppi*12)))), on=0;
+    for(var k=0;k<=n;k++){ var t=k/n, px=ax+(bx-ax)*t, py=ay+(by-ay)*t, cov=false;
+      for(var j=0;j<RP.length;j++){ if(p2poly(px,py,RP[j]) <= R[j].widthIn/2*ppi+ppi*4){ cov=true; break; } }
+      if(cov) on++; }
+    if(on/(n+1) < 0.5){ var wpt=Math.hypot(c[0][0]-c[3][0],c[0][1]-c[3][1]); cand.push({id:cand.length, sg:i, ax:ax,ay:ay,bx:bx,by:by, wIn:Math.round(wpt/ppi), lenFt:Math.round(L/ppi/12)}); }
+  });
+  if(!cand.length){ out.innerHTML='<div class="hint" style="color:#bdf5cf">No uncovered duct candidates \u2014 every substantial centerline already has a run.</div>'; return; }
+  out.innerHTML='<div class="hint"><span class="spin"></span> found '+cand.length+' un-built centerlines \u2014 asking the AI which are real duct\u2026</div>';
+  var imgPrint=null, imgOv=null;
+  try{
+    var page=await pdfDoc.getPage(pageNum); var vp1=page.getViewport({scale:1});
+    var S=Math.min(1, 2200/Math.max(vp1.width,vp1.height)); var vp=page.getViewport({scale:S}); var W=Math.ceil(vp.width),H=Math.ceil(vp.height);
+    var pc=document.createElement('canvas'); pc.width=W; pc.height=H; var pcx=pc.getContext('2d');
+    await withPageRender(function(){ return page.render({canvasContext:pcx, viewport:vp, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
+    imgPrint=pc.toDataURL('image/jpeg',0.9).split(',')[1];
+    var oc=document.createElement('canvas'); oc.width=W; oc.height=H; var ox=oc.getContext('2d');
+    ox.fillStyle='#ffffff'; ox.fillRect(0,0,W,H);
+    ox.strokeStyle='#16a34a'; ox.lineWidth=2;                               // existing runs = solid green
+    RP.forEach(function(pl){ ox.beginPath(); pl.forEach(function(p,k){ var x=p[0]*S,y=p[1]*S; if(k===0)ox.moveTo(x,y); else ox.lineTo(x,y); }); ox.stroke(); });
+    ox.strokeStyle='#ea580c'; ox.lineWidth=3; ox.setLineDash([7,5]);        // uncovered candidates = dashed orange, numbered
+    cand.forEach(function(c){ ox.beginPath(); ox.moveTo(c.ax*S,c.ay*S); ox.lineTo(c.bx*S,c.by*S); ox.stroke();
+      var mx=(c.ax+c.bx)/2*S, my=(c.ay+c.by)/2*S; ox.setLineDash([]); ox.font='bold 13px sans-serif'; ox.lineWidth=3; ox.strokeStyle='#fff'; ox.strokeText(String(c.id),mx+2,my-2); ox.fillStyle='#ea580c'; ox.fillText(String(c.id),mx+2,my-2); ox.setLineDash([7,5]); ox.strokeStyle='#ea580c'; });
+    ox.setLineDash([]);
+    imgOv=oc.toDataURL('image/jpeg',0.9).split(',')[1];
+  }catch(e){ out.innerHTML='<div class="hint">Couldn\u2019t render the sheet: '+vhEsc(e.message||e)+'</div>'; return; }
+  var meta=cand.map(function(c){ return {id:c.id, wIn:c.wIn, lenFt:c.lenFt}; });
+  var prompt='You are checking an HVAC takeoff for MISSED duct. Two images, SAME frame. IMAGE 1 = clean printed plan. IMAGE 2 = green solid lines are duct runs the software already built; orange dashed NUMBERED lines are candidate centerlines where it built NO run. For each numbered orange candidate, look at that location in IMAGE 1 and decide: is there REAL ductwork there (a pair of parallel duct walls forming a duct) that was missed? Answer true only if you can see actual duct at that spot; answer false if the orange line is on text, a wall, a grille, dimension leaders, or empty space. Reply ONLY JSON: {"add":[{"id":<candidate number>,"isDuct":true|false,"conf":0..1,"why":"<=6 words"}]}. Candidate metadata (id,wIn,lenFt): '+JSON.stringify(meta);
+  try{
+    var ctrl=new AbortController(), to=setTimeout(function(){ctrl.abort();}, 120000);
+    var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:3000,messages:[{role:'user',content:[{type:'text',text:'IMAGE 1 \u2014 clean print:'},{type:'image',source:{type:'base64',media_type:'image/jpeg',data:imgPrint}},{type:'text',text:'IMAGE 2 \u2014 built runs (green) + un-built candidates (orange dashed, numbered):'},{type:'image',source:{type:'base64',media_type:'image/jpeg',data:imgOv}},{type:'text',text:prompt}]}]})});
+    clearTimeout(to);
+    if(!resp.ok){ var et=await resp.text(); out.innerHTML='<div class="hint">HTTP '+resp.status+': '+vhEsc(et.slice(0,240))+'</div>'; return; }
+    var data=await resp.json(); if(data.error){ out.innerHTML='<div class="hint">AI error: '+vhEsc(JSON.stringify(data.error).slice(0,240))+'</div>'; return; }
+    var txt=(data.content||[]).filter(function(z){return z.type==='text';}).map(function(z){return z.text;}).join('').replace(/```json|```/g,'').trim();
+    var jm=txt.indexOf('{'); if(jm>0) txt=txt.slice(jm); var res=null; try{res=JSON.parse(txt);}catch(e){}
+    if(!res||!res.add){ window.__aiMissRaw=txt; out.innerHTML='<div class="hint">AI didn\u2019t return clean JSON (raw in window.__aiMissRaw).</div>'; return; }
+    var byId={}; cand.forEach(function(c){ byId[c.id]=c; });
+    var confirmed=res.add.filter(function(a){ return a.isDuct && (a.conf==null?0.5:a.conf)>=0.6 && byId[a.id]; }).map(function(a){ var c=byId[a.id]; c._why=a.why; c._conf=a.conf; return c; });
+    window.__aiMissing=confirmed;
+    drawMissViz(confirmed);
+    var h='<div class="hint" style="color:#ffe9b0"><b>Missing-duct second look:</b> '+cand.length+' un-built centerlines checked \u00b7 <b>'+confirmed.length+'</b> look like real duct (drawn dashed yellow with !)'+(data.usage?(' \u00b7 '+(data.usage.input_tokens||0)+'+'+(data.usage.output_tokens||0)+' tok'):'')+'. These are candidates to add \u2014 use the \u2795 Tap / resize tools to build them, or eyeball first.</div>';
+    h+='<div style="max-height:300px;overflow:auto;font-size:11px;font-family:ui-monospace,monospace;margin-top:4px"><table style="width:100%;border-collapse:collapse"><tr style="color:#9fb2c8"><th>cand</th><th>~w</th><th>len ft</th><th>duct?</th><th>conf</th><th style="text-align:left">why</th></tr>';
+    res.add.forEach(function(a){ var c=byId[a.id]; if(!c) return; h+='<tr style="border-top:1px solid #1e2a38'+(a.isDuct?'':';opacity:.45')+'"><td style="text-align:center">'+a.id+'</td><td style="text-align:center">'+c.wIn+'</td><td style="text-align:center">'+c.lenFt+'</td><td style="text-align:center;color:'+(a.isDuct?'#7ddb7d':'#888')+'">'+(a.isDuct?'yes':'no')+'</td><td style="text-align:center">'+(a.conf!=null?a.conf:'')+'</td><td>'+vhEsc(a.why||'')+'</td></tr>'; });
+    h+='</table></div>'; out.innerHTML=h;
   }catch(e){ out.innerHTML='<div class="hint">'+(e.name==='AbortError'?'Timed out \u2014 dense sheet; try again.':('Error: '+vhEsc(e.message||e)))+'</div>'; }
 }
 async function aiAssignTagsTest(){
