@@ -131,7 +131,7 @@
 <body>
 <div class="app">
   <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t110 · keep-rule now keeps EVERY real two-wall pair on the green trace (any length, tagged or not) — fills the whole trace; tag/geometry size disagreements are flagged (⚠ size?) not dropped. Lean it up with 🧹 AI cleanup, set heights via resize</span></div>
+    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t113 · code review: de-dupe hardened for high run counts (bbox pre-check + polyline memoization); confirmed all gates/de-dupe fire in track-walk, no dead refs · no-tag runs size off green-line gap (t112), export carries gapIn</span></div>
     <label class="btn go" for="fileIn">Load PDF</label>
     <input type="file" id="fileIn" accept="application/pdf">
     <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2153,7 +2153,7 @@ function refreshSel(){
     var nOut = containYoloToGreen();
     var nJoin = joinRunsAtElbows();
     var nFit = integrateYoloFittings();
-    var nCarry = carryForwardSizes();
+    var nCarry = 0;   // DISABLED: a no-tag run keeps its OWN green-line width (was inheriting a nearby tagged run's size, overriding the measured gap). Height stays unknown — set via ✎ resize.
     var nDrop = dropUnsupportedRuns();
     sel.clear(); selRun=null; renderItems(); renderPanel();
     setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nCarry?(' \u00b7 '+nCarry+' inherited size'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.'); try{ __ductDiag('joints'); }catch(e){}
@@ -2948,29 +2948,40 @@ function refreshSel(){
       console.groupEnd();
     }catch(e){ try{console.groupEnd();}catch(_){} console.warn('duct diag failed:',e); }
   }
-  // ── DE-DUPE duplicate walks. A duct sometimes gets walked twice — a tag-backed run plus a
-  // straight scaled/tagless twin lying on the SAME footprint (often on one leg of a bent trunk).
-  // We drop a run only if it is NOT tag-backed AND >=70% of its centerline lies inside a
-  // tag-backed run's footprint. projOnRun measures perp to the NEAREST leg, so this is bend-aware
-  // and needs no colinearity assumption (that assumption is exactly what missed twins on a bent
-  // trunk's second leg). A real branch leaves the trunk's footprint, so its coverage stays low.
-  // Hard floor: a tag-backed run is NEVER dropped.
+  // ── DE-DUPE duplicate walks. When two runs trace the SAME duct, drop the weaker one:
+  // tagged beats tagless, then longer beats shorter (tiebreak by id). Coverage is measured along
+  // the weaker run's true bent polyline vs the stronger run's footprint (projOnRun = nearest-leg
+  // perp, so it's bend-aware). Two TAGGED runs are never auto-resolved (a tag mis-assignment is
+  // flagged for review, not silently deleted). A real branch leaves the trunk, so its coverage stays low.
   function dedupeOverlappingRuns(){
     var R=window.__runs2d||[]; if(R.length<2) return 0;
     var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
     function leni(r){ try{ return runLenIn(r); }catch(_){ return (r.pieces||[]).reduce(function(a,b){return a+(b.lenIn||0);},0); } }
     function endOf(r){ try{ var e=runEnd(r); return [e.x,e.y]; }catch(_){ var L=leni(r)*ppi; return [r.start[0]+r.dir[0]*L, r.start[1]+r.dir[1]*L]; } }
     function tagBacked(r){ return !r.scaled && r.tagIdx && r.tagIdx.length>0; }
+    function qual(r){ return (tagBacked(r)?1e7:0) + leni(r); }                    // tagged always wins; else the longer (more complete) walk
+    function worse(a,b){ var qa=qual(a),qb=qual(b); if(qa<qb-0.01) return a; if(qb<qa-0.01) return b; return (String(a.id)>String(b.id))?a:b; }
+    var PLc={}, BB={};                                                            // memoize polylines + bounding boxes (run counts are high now)
+    function PLof(r){ if(PLc[r.id]) return PLc[r.id]; var pl=(window.__runPoly?window.__runPoly(r):[[r.start[0],r.start[1]],endOf(r)]); return (PLc[r.id]=pl); }
+    function bbOf(r){ if(BB[r.id]) return BB[r.id]; var pl=PLof(r), xs=pl.map(function(p){return p[0];}), ys=pl.map(function(p){return p[1];}), pad=(r.widthIn/2)*ppi+ppi*6;
+      return (BB[r.id]={x0:Math.min.apply(null,xs)-pad,x1:Math.max.apply(null,xs)+pad,y0:Math.min.apply(null,ys)-pad,y1:Math.max.apply(null,ys)+pad}); }
+    function bbHit(a,b){ var A=bbOf(a),B=bbOf(b); return !(A.x1<B.x0||B.x1<A.x0||A.y1<B.y0||B.y1<A.y0); }
+    function coverInside(X,Y){                                                    // fraction of X's (bent) centerline lying inside Y's footprint
+      var pl=PLof(X); if(pl.length<2) return 0;
+      var LY=leni(Y), tot=0, on=0;
+      for(var q=0;q<pl.length-1;q++){ var ax=pl[q][0],ay=pl[q][1],bx=pl[q+1][0],by=pl[q+1][1];
+        var m=Math.max(1,Math.round(Math.hypot(bx-ax,by-ay)/(ppi*6)));
+        for(var s=0;s<=m;s++){ var u=s/m, px=ax+(bx-ax)*u, py=ay+(by-ay)*u; tot++;
+          var pr=projOnRun(Y,px,py); if(pr.perpIn<=Y.widthIn/2+6 && pr.alongIn>=-6 && pr.alongIn<=LY+6) on++; } }
+      return tot?on/tot:0;
+    }
     var drop={};
-    for(var i=0;i<R.length;i++){ var t=R[i]; if(drop[t.id]||tagBacked(t)) continue;
-      var e=endOf(t), sx=t.start[0], sy=t.start[1], ex=e[0], ey=e[1];
-      var Lp=Math.hypot(ex-sx,ey-sy); if(Lp < ppi*18) continue;               // ignore short stubs (<18") — too easy to false-match
-      var N=Math.max(4,Math.min(24,Math.round(Lp/(ppi*6))));
-      for(var k=0;k<R.length;k++){ var K=R[k]; if(K===t||drop[K.id]||!tagBacked(K)) continue;
-        var LK=leni(K), on=0;
-        for(var s=0;s<=N;s++){ var u=s/N, px=sx+(ex-sx)*u, py=sy+(ey-sy)*u; var pr=projOnRun(K,px,py);
-          if(pr.perpIn<=K.widthIn/2+6 && pr.alongIn>=-6 && pr.alongIn<=LK+6) on++; }
-        if(on/(N+1)>=0.7){ drop[t.id]=true; break; }                         // >=70% of t sits inside K's footprint -> duplicate walk
+    for(var i=0;i<R.length;i++){ var a=R[i]; if(drop[a.id]) continue;
+      for(var j=i+1;j<R.length;j++){ var b=R[j]; if(drop[b.id]) continue;
+        if(tagBacked(a)&&tagBacked(b)) continue;                                  // never auto-resolve two tagged runs
+        if(!bbHit(a,b)) continue;                                                 // bounding boxes don't touch -> can't overlap; skip the costly test
+        var lo=worse(a,b), keep=(lo===a?b:a);
+        if(coverInside(lo,keep)>=0.7){ drop[lo.id]=true; if(lo===a) break; }       // weaker run rides on the stronger's footprint -> duplicate
       }
     }
     var n=Object.keys(drop).length; if(!n) return 0;
@@ -4224,7 +4235,8 @@ $('exportBtn').onclick=()=>{
       pieces:(r.pieces||[]).map(p=>({kind:p.kind,cid:p.cid,size:p.size,lenIn:p.lenIn,widthIn:p.widthIn,round:!!p.round}))};
   });
   const clOut=(window.__sgRuns||[]).map(r=>{ const c=r.corners; if(!c||c.length<4) return null;
-    return {start:[round((c[0][0]+c[3][0])/2),round((c[0][1]+c[3][1])/2)], end:[round((c[1][0]+c[2][0])/2),round((c[1][1]+c[2][1])/2)]};
+    const gapPt=Math.hypot(c[0][0]-c[3][0], c[0][1]-c[3][1]);                 // perpendicular gap between the two green walls
+    return {start:[round((c[0][0]+c[3][0])/2),round((c[0][1]+c[3][1])/2)], end:[round((c[1][0]+c[2][0])/2),round((c[1][1]+c[2][1])/2)], gapIn:round(gapPt/ppi)};
   }).filter(Boolean);
   const out={page:pageNum, pageWidthPt:round(nvp.w), pageHeightPt:round(nvp.h),
     units:'pdf-points, rotation-normalized to on-screen orientation (y-down)',
