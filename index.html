@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.25</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.27</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2090,7 +2090,12 @@ function refreshSel(){
     var before=mkS(a), after=mkS(L-a), t=spec.type;
     if(t==='cap'){ pieces.splice(pieceIdx, pieces.length-pieceIdx, before, {kind:'fitting',cid:'cap',camduct:'End Cap',round:rr,lenIn:0,widthIn:w,depthIn:dep,size:sz,_cap:true}); renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Capped the duct here.'); return true; }
     if(t==='straight'){ var add={kind:'straight',lenIn:24,widthIn:w,depthIn:dep,size:sz,cid:rr?'spiral':'st',camduct:rr?'Spiral':'Straight Duct',round:rr}; pieces.splice(pieceIdx,1,before,add,after); renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Added 24" of straight \u2014 drag-end to adjust.'); return true; }
-    if(t==='tap'){ var tap={kind:'fitting',cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:w,depthIn:dep,size:sz,_tap:true,branchSide:1,branchW:Math.max(6,Math.round(w/2)),throatIn:10}; pieces.splice(pieceIdx,1,before,tap,after); renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Added a tap.'); return true; }
+    if(t==='tap'){ var bW=spec.branchW||Math.max(6,Math.round(w/2)), bSide=spec.branchSide||1;
+      var tap={kind:'fitting',cid:'stap',camduct:(spec.shopTap?'Shop Tap':'Tap'),round:false,lenIn:0,widthIn:w,depthIn:dep,size:sz,_tap:true,shopTap:!!spec.shopTap,branchSide:bSide,branchW:bW,branchLenIn:10,throatIn:10};
+      pieces.splice(pieceIdx,1,before,tap,after);
+      if(spec.branch){ var fr=runFrames(run), f=fr[pieceIdx+1]; if(f){ var hwB=inToPt(w/2);
+        window.__runs2d=window.__runs2d||[]; window.__runs2d.push({ id:'br'+Date.now().toString(36), start:[f.x+f.nx*bSide*hwB, f.y+f.ny*bSide*hwB], dir:[f.nx*bSide, f.ny*bSide], widthIn:bW, pieces:[{kind:'straight',lenIn:(spec.branchLenIn||24),widthIn:bW,depthIn:null,size:bW+'\u00d7?',cid:'st',camduct:'Straight Duct',round:false}], _branch:true }); } }
+      renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Added a tap'+(spec.branch?' + straight branch \u2014 drag its end to length':'')+'.'); return true; }
     var fit;
     if(t==='elbow90'||t==='elbow45'){ var ang=(t==='elbow45'?Math.PI/4:Math.PI/2)*((spec.dir==='L')?1:-1);
       fit={kind:'fitting',cid:(t==='elbow45'?'e45':'e90'),camduct:(t==='elbow45'?'45 Elbow':'90 Elbow'),round:rr,lenIn:0,turn:ang,widthIn:w,depthIn:dep,size:sz,_elbow:true}; }
@@ -2558,27 +2563,30 @@ function refreshSel(){
     var fr=runFrames(run); var f=fr[i]; if(!f) return [null];
     var p=run.pieces[i]; var hw=inToPt((p.widthIn||run.widthIn)/2);
     function P(t,s){ return [f.x+f.ux*t+f.nx*s, f.y+f.uy*t+f.ny*s]; }
-    // ELBOW — real top-view throat/heel corner (heel bulges out, throat tight)
+    // ELBOW — clean mitered corner: outer walls meet at the heel, inner walls at the throat (square-throat top view)
     if(p.kind==='fitting' && p.turn){
-      var a=p.turn, ca=Math.cos(a), sa=Math.sin(a);
-      var nox=-(f.ux*sa+f.uy*ca), noy=(f.ux*ca-f.uy*sa);          // left normal of the OUTGOING heading
-      var ts=(a>=0)?1:-1, outer=-ts, inner=ts;                    // heel on outer side of the turn, throat inner
-      var Ain=[f.x+f.nx*outer*hw, f.y+f.ny*outer*hw];             // incoming outer corner
-      var Bout=[f.x+nox*outer*hw, f.y+noy*outer*hw];             // outgoing outer corner
-      var Din=[f.x+f.nx*inner*hw, f.y+f.ny*inner*hw];            // incoming inner corner
-      var Cout=[f.x+nox*inner*hw, f.y+noy*inner*hw];            // outgoing inner corner
-      var hox=(Ain[0]-f.x)+(Bout[0]-f.x), hoy=(Ain[1]-f.y)+(Bout[1]-f.y), hl=Math.hypot(hox,hoy)||1;
-      var TH=inToPt(6);                                          // 6" throat radius (rectangular elbow/tee)
-      var heel=[f.x+hox/hl*(TH+2*hw), f.y+hoy/hl*(TH+2*hw)];     // heel = throat + full duct width (outside of the turn)
-      var tix=(Din[0]-f.x)+(Cout[0]-f.x), tiy=(Din[1]-f.y)+(Cout[1]-f.y), tl=Math.hypot(tix,tiy)||1;
-      var throat=[f.x+tix/tl*TH, f.y+tiy/tl*TH];                 // fixed 6" throat (inside of the turn)
-      return [Ain,heel,Bout,Cout,throat,Din].map(function(q){return n2s(q[0],q[1]);});
+      var a=p.turn, cu=Math.cos(a), su=Math.sin(a);
+      var oux=f.ux*cu-f.uy*su, ouy=f.ux*su+f.uy*cu;                 // outgoing heading
+      var noutx=-ouy, nouty=oux;                                    // left normal of outgoing heading
+      var ts=(a>=0)?1:-1, outer=-ts, inner=ts;
+      function lx(p1,d1,p2,d2){ var den=d1[0]*d2[1]-d1[1]*d2[0]; if(Math.abs(den)<1e-6) return p1; var t=((p2[0]-p1[0])*d2[1]-(p2[1]-p1[1])*d2[0])/den; return [p1[0]+d1[0]*t,p1[1]+d1[1]*t]; }
+      var inOut=[f.x+f.nx*outer*hw, f.y+f.ny*outer*hw];             // incoming outer wall point
+      var inIn =[f.x+f.nx*inner*hw, f.y+f.ny*inner*hw];             // incoming inner wall point
+      var otOut=[f.x+noutx*outer*hw, f.y+nouty*outer*hw];          // outgoing outer wall point
+      var otIn =[f.x+noutx*inner*hw, f.y+nouty*inner*hw];          // outgoing inner wall point
+      var heel  =lx(inOut,[f.ux,f.uy], otOut,[oux,ouy]);           // outer walls intersect -> heel (mitered)
+      var throat=lx(inIn ,[f.ux,f.uy], otIn ,[oux,ouy]);           // inner walls intersect -> throat
+      return [inOut, heel, otOut, otIn, throat, inIn].map(function(q){return n2s(q[0],q[1]);});
     }
-    // TAP / TEE take-off — a collar flaring off the trunk wall on the branch side; 10" throat on the upstream wall
-    if(p.kind==='fitting' && p._tap){
-      var side=p.branchSide||1, bw=inToPt((p.branchW||p.widthIn||12)/2), th=inToPt(p.throatIn||10);
-      var s0=side*hw, s1=side*(hw+2*bw);
-      return [P(-bw,s0),P(bw,s0),P(bw,s1),P(-bw+th,s1)].map(function(q){return n2s(q[0],q[1]);});   // angled upstream wall = throat
+    // TAP — a short straight branch stub off the trunk wall (unless it's a shop tap collar)
+    if(p.kind==='fitting' && p._tap && !p.shopTap){
+      var sd=p.branchSide||1, bhw=inToPt((p.branchW||8)/2), stub=inToPt(p.branchLenIn||10);
+      var w0=sd*hw, w1=sd*(hw+stub);
+      return [P(-bhw,w0),P(bhw,w0),P(bhw,w1),P(-bhw,w1)].map(function(q){return n2s(q[0],q[1]);});   // simple rectangular stub
+    }
+    if(p.kind==='fitting' && p._tap && p.shopTap){   // SHOP TAP — fabricated collar with an angled upstream throat
+      var side=p.branchSide||1, bw=inToPt((p.branchW||p.widthIn||12)/2), th=inToPt(p.throatIn||10), s0=side*hw, s1=side*(hw+2*bw);
+      return [P(-bw,s0),P(bw,s0),P(bw,s1),P(-bw+th,s1)].map(function(q){return n2s(q[0],q[1]);});
     }
     // TRANSITION / REDUCER — tapered trapezoid from inlet width to outlet width
     if(p.kind==='fitting' && (p.cid==='tr'||p.cid==='reducer'||p.cid==='s2r'||p._sizeStep)){
@@ -2736,6 +2744,7 @@ function refreshSel(){
   function findRun(id){ return (window.__runs2d||[]).find(function(r){return r.id===id;}); }
 
   function renderPanel(){
+    try{ window.__selRunId=selRun; }catch(_){}
     var p=document.getElementById('itemPanelBody'); if(!p) return;
     var runs=window.__runs2d||[];
     if(!runs.length){ p.innerHTML='<div class="hint">No takeoff yet. Detect duct, then hit Build takeoff (it builds the runs for you).</div>'; return; }
@@ -4235,13 +4244,25 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ selected.clear();
   var ss=document.getElementById('scaleSel'); if(ss) ss.onchange=function(){ scaleIPF=parseFloat(this.value)||0.125; scaleAuto=false; updateScaleUI(); }; var sa=document.getElementById('scaleAI'); if(sa) sa.addEventListener('click', readScaleAI); try{ updateScaleUI(); }catch(e){} })();
 
 (function(){ // collapsible, clearly-labeled sidebar sections — everything stays one click away
-  var collapseByDefault=['completed takeoff','classification','duct width filter','layers','selection','cleanup tools','ai scan'];
+  var collapseByDefault=['classification','duct width filter','layers','selection'];
+  var hideEntirely=['completed takeoff'];
+  var advanced=['cleanup tools','ai scan'];
+  var advSecs=[];
   document.querySelectorAll('aside .sec').forEach(function(sec){
     var h=sec.querySelector(':scope > h3'); if(!h) return;
     h.addEventListener('click', function(){ sec.classList.toggle('collapsed'); });
     var t=(h.textContent||'').toLowerCase();
+    if(hideEntirely.some(function(k){return t.indexOf(k)>=0;})){ sec.style.display='none'; return; }
+    if(advanced.some(function(k){return t.indexOf(k)>=0;})){ sec.style.display='none'; sec.classList.add('advSec'); advSecs.push(sec); return; }
     if(collapseByDefault.some(function(k){ return t.indexOf(k)>=0; })) sec.classList.add('collapsed');
   });
+  var aside=document.querySelector('aside');
+  if(aside && advSecs.length){
+    var tg=document.createElement('button'); tg.id='advToggle'; tg.textContent='Advanced tools \u25b8';
+    tg.style.cssText='width:100%;margin-top:10px;padding:9px;border:1px dashed #cbd3dd;border-radius:8px;background:#f5f7fa;color:#6b7482;font-weight:600;font-size:12px;cursor:pointer';
+    var shown=false; tg.onclick=function(){ shown=!shown; advSecs.forEach(function(s){ s.style.display=shown?'':'none'; }); tg.textContent='Advanced tools '+(shown?'\u25be':'\u25b8'); };
+    aside.appendChild(tg);
+  }
 })();
 
 (function(){ // move the floating canvas tools (brush / erase / tap) to bottom-right, collapsible behind a + button
@@ -4416,6 +4437,8 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   var tapBtn=document.getElementById('dtTapBtn'); if(tapBtn) tapBtn.onclick=function(){ window.__editMode=null; refl(); var real=document.getElementById('tapToolBtn'); if(real){ real.click(); status('Tap tool on — click the duct to drop taps (style/size/direction in its panel).'); } else status('Tap tool not available.'); };
   document.getElementById('dtOff').onclick=function(){ window.__editMode=null; window.__tapMain=null; refl(); status('Edit off — click a duct to select.'); };
   setInterval(refl,500);   // stay in sync if a left-panel edit button changes the mode
+  var _lastSel=null;
+  setInterval(function(){ var s=window.__selRunId; if(s && s!==_lastSel){ _lastSel=s; if(body.style.display==='none'){ body.style.display='block'; tog.textContent='Edit ‹'; } } if(!s) _lastSel=null; }, 400);   // clicking a run surfaces the edit tools
   function parseSize(v, forceRound){ v=String(v||'').trim(); var rr=forceRound||/[o\u00f8]/i.test(v)||/rd|round/i.test(v); var nums=v.match(/\d+(\.\d+)?/g); if(!nums||!nums.length) return null; var w=parseFloat(nums[0]); if(rr) return {w:w,h:w,round:true}; var h=nums[1]?parseFloat(nums[1]):w; return {w:w,h:h,round:false}; }
 
   function toSvg(e){ try{ var pt=overlay.createSVGPoint(); pt.x=e.clientX; pt.y=e.clientY; var m=overlay.getScreenCTM(); if(!m) return null; var l=pt.matrixTransform(m.inverse()); return [l.x,l.y]; }catch(_){ return null; } }
@@ -4503,6 +4526,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
         else if(it.k==='reducer'){ var rv=prompt('New size after the reducer (e.g. 12x8):',''); if(rv){ var m2=rv.match(/\d+(\.\d+)?/g); if(m2&&m2.length){ var nw=parseFloat(m2[0]), nh=m2[1]?parseFloat(m2[1]):nw; window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'reducer',dir:'end',size:{w:nw,h:nh,round:false}}); status('Reducer added \u2014 tap it to flip direction if needed.'); } } }
         else if(it.k==='elbow'){ window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'elbow90',dir:'R'}); }
         else if(it.k==='offset'){ var od2=prompt('Offset distance (in):','12'); if(od2!=null) window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'offset',offsetIn:(parseFloat(od2)||12)}); }
+        else if(it.k==='tap'){ var br=confirm('Build a straight branch of duct off this tap?'); var bl=24; if(br){ var lv=prompt('Branch length (in):','24'); bl=parseFloat(lv)||24; } window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'tap',branch:br,branchLenIn:bl}); }
         else { window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:it.k}); }
         try{ window.__renderPanel&&window.__renderPanel(); }catch(_){}
       }
