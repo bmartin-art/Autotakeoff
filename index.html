@@ -9,30 +9,32 @@
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   :root{
-    --bg:#0d1117; --panel:#141b24; --panel2:#1b2530; --line:#243140;
-    --ink:#e6edf3; --dim:#7d8da0; --accent:#2f6fed;
-    --duct:#16c66a; --maybe:#ffd23f; --not:#ff4d4d; --sel:#ffffff;
+    --bg:#eceff3; --panel:#ffffff; --panel2:#f3f5f8; --line:#dde2e9;
+    --ink:#232b36; --dim:#6b7482; --accent:#5b8def;
+    --duct:#22a95f; --maybe:#d9a406; --not:#e0575c; --sel:#5b8def;
+    --selbg:#e7eeff; --selbd:#a9c4ff;
     --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Roboto Mono",monospace;
-    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
   body{background:var(--bg);color:var(--ink);font-family:var(--sans);overflow:hidden;
-    background-image:radial-gradient(circle at 20% 0,rgba(47,111,237,.06),transparent 60%);}
+    background-image:radial-gradient(circle at 20% 0,rgba(91,141,239,.05),transparent 60%);}
   .app{display:grid;grid-template-columns:300px 1fr;grid-template-rows:48px 1fr;height:100vh}
   /* ── Top bar ── */
   header{grid-column:1/3;display:flex;align-items:center;gap:14px;padding:0 16px;
     background:var(--panel);border-bottom:1px solid var(--line)}
-  .logo{font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink)}
+  .logo{font-family:var(--sans);font-size:13px;font-weight:700;letter-spacing:.06em;color:var(--ink)}
   .logo b{color:var(--duct)}
   header .spacer{flex:1}
-  .btn{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
-    background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:6px;
-    padding:7px 12px;cursor:pointer;transition:border-color .15s,background .15s}
-  .btn:hover{border-color:var(--accent)}
-  .btn.go{background:var(--accent);border-color:var(--accent)}
-  .btn.go:hover{filter:brightness(1.1)}
-  .btn:disabled{opacity:.4;cursor:default}
+  .btn{font-family:var(--sans);font-size:12px;letter-spacing:0;text-transform:none;font-weight:600;
+    background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;
+    padding:8px 13px;cursor:pointer;transition:background .14s,border-color .14s,color .14s;box-shadow:0 1px 2px rgba(30,40,60,.04)}
+  .btn:hover{border-color:var(--selbd);background:var(--panel2)}
+  .btn.go{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.go:hover{filter:brightness(1.05)}
+  .btn:disabled{opacity:.45;cursor:default;box-shadow:none}
+  .btn.sel,.btn.active,.btn[aria-pressed="true"]{background:var(--selbg);border-color:var(--selbd);color:var(--accent)}
   .pagenav{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;color:var(--dim)}
   .pagenav input{width:42px;background:var(--bg);border:1px solid var(--line);color:var(--ink);
     border-radius:5px;padding:4px;text-align:center;font-family:var(--mono)}
@@ -64,9 +66,11 @@
   .btn.duct{border-color:var(--duct);color:var(--duct)}
   .btn.notduct{border-color:var(--not);color:var(--not)}
   .hint{font-size:11px;color:var(--dim);line-height:1.5;margin-top:8px}
+  .sec .hint{max-height:0;opacity:0;overflow:hidden;margin-top:0;transition:max-height .2s ease,opacity .2s ease,margin-top .2s ease;pointer-events:none}
+  .sec:hover .hint{max-height:260px;opacity:1;margin-top:8px}
   /* ── Stage ── */
   main{position:relative;overflow:auto;background:
-    repeating-conic-gradient(#0a0e13 0% 25%,#0c1218 0% 50%) 0/22px 22px}
+    repeating-conic-gradient(#e6eaf0 0% 25%,#eef1f5 0% 50%) 0/22px 22px}
   #stageWrap{position:relative;display:inline-block;margin:18px;transform-origin:top left}
   #pdfCanvas{display:block;box-shadow:0 0 0 1px var(--line),0 18px 50px rgba(0,0,0,.5);background:#fff}
   #overlay{position:absolute;inset:0;cursor:crosshair}
@@ -130,255 +134,255 @@
 </head>
 <body>
 <div class="app">
-  <header>
-    <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.6;font-weight:400">build t116 · Edit toolbar adds ⎇ Insert fitting (elbow/transition/offset, asks which end) and ⬍ Drag-end to set a run's length (grow/shrink either end); drag-resize width retained</span></div>
-    <label class="btn go" for="fileIn">Load PDF</label>
-    <input type="file" id="fileIn" accept="application/pdf">
-    <button class="btn" id="pagesBtn" disabled>Pages</button>
-    <div class="pagenav">
-      <button class="btn" id="prevPg" disabled>‹</button>
-      <span>pg</span><input id="pgIn" value="1" disabled>
-      <span id="pgTot">/ –</span>
-      <button class="btn" id="nextPg" disabled>›</button>
-    </div>
-    <span class="status" id="status">No file loaded</span>
-    <div class="spacer"></div>
-    <div class="zoom">
-      <button class="btn" id="zOut">–</button>
-      <span class="status" id="zLbl">100%</span>
-      <button class="btn" id="zIn">+</button>
-    </div>
-    <button class="btn" id="exportBtn" disabled>Export Duct JSON</button>
-  </header>
+ <header>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.21</span></div>
+   <label class="btn go" for="fileIn">Load PDF</label>
+   <input type="file" id="fileIn" accept="application/pdf">
+   <button class="btn" id="pagesBtn" disabled>Pages</button>
+   <div class="pagenav">
+     <button class="btn" id="prevPg" disabled>‹</button>
+     <span>pg</span><input id="pgIn" value="1" disabled>
+     <span id="pgTot">/ –</span>
+     <button class="btn" id="nextPg" disabled>›</button>
+   </div>
+   <span class="status" id="status">No file loaded</span>
+   <div class="spacer"></div>
+   <div class="zoom">
+     <button class="btn" id="zOut">–</button>
+     <span class="status" id="zLbl">100%</span>
+     <button class="btn" id="zIn">+</button>
+   </div>
+   <button class="btn" id="exportBtn" disabled>Export Duct JSON</button>
+ </header>
 
-  <aside>
-    <div class="sec" style="background:#0e1a24;border:1px solid #2a4256;border-radius:8px">
-      <h3>🛠 Takeoff Toolbox</h3>
-      <div class="row adv"><button class="btn" id="workSet">▢ Set work area</button><button class="btn" id="workClear">Clear area</button></div>
-      <div class="hint adv">Draw a box around the duct so the title block, notes, and legend are ignored.</div>
-      <div class="row" style="margin-top:6px;align-items:center"><span style="font-size:12px">Scale</span><select id="scaleSel" style="flex:1;margin-left:6px"><option data-l='1/16"' value="0.0625">1/16" = 1′-0″</option><option data-l='3/32"' value="0.09375">3/32" = 1′-0″</option><option data-l='1/8"' value="0.125">1/8" = 1′-0″</option><option data-l='3/16"' value="0.1875">3/16" = 1′-0″</option><option data-l='1/4"' value="0.25">1/4" = 1′-0″</option><option data-l='3/8"' value="0.375">3/8" = 1′-0″</option><option data-l='1/2"' value="0.5">1/2" = 1′-0″</option><option data-l='3/4"' value="0.75">3/4" = 1′-0″</option><option data-l='1"' value="1">1" = 1′-0″</option><option data-l='1-1/2"' value="1.5">1-1/2" = 1′-0″</option><option data-l='3"' value="3">3" = 1′-0″</option></select></div>
-      <div class="hint" id="scaleDet">Scale: auto-detecting…</div>
-      <button class="btn" id="scaleAI" style="font-size:11px;padding:3px 8px;margin-top:3px">🔍 Read scale (AI)</button>
-      <label class="adv" style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="aiFirst"> <b>AI-first</b> (single-layer) — don’t pre-green; let the AI promote the duct</label>
-      <div class="row" style="margin-top:7px"><button class="btn go" id="tbPick" style="width:100%;background:#3a2a0a;border-color:#a07a2b;color:#ffe6b0;font-weight:600">🎯 Pick a duct line (color + thickness)</button></div>
-      <div class="row" style="margin-top:7px"><button class="btn go" id="setupWiz" style="width:100%;background:#102a44;border-color:#2f6fb0;color:#cfe6ff;font-weight:700">⚙ Guided setup (recommended)</button></div>
-      <div class="row" style="margin-top:6px;gap:6px"><button class="btn" id="simRemove" style="flex:1;background:#2a1212;border-color:#a3402f;color:#ffd6cf">🔍 Flag similar to remove</button><button class="btn" id="simPromote" style="flex:1;background:#0e2a1c;border-color:#2b8a5a;color:#cdf6e1">🔍 Find similar duct</button></div>
-      <div class="hint" style="margin-top:3px">Click one object — geometry finds every match and lights up the real lines. <b>Flag similar</b>: click a non-duct thing → matches turn red → click any to keep → remove the rest. <b>Find similar duct</b>: click a missed elbow/run → matches turn green.</div>
-      <div class="hint adv" id="sampleInfo">Click a piece of duct on the print - it matches every line like it.</div>
-      <div class="adv" style="font-size:12px;margin-top:3px;opacity:.85">Color tol <input type="range" id="mTolD" min="0.05" max="0.7" step="0.02" value="0.30" style="width:90px;vertical-align:middle"> <span id="mTolDV">0.30</span> &nbsp; Thick tol <input type="range" id="mTolW" min="0" max="3" step="0.1" value="3" style="width:80px;vertical-align:middle"> <span id="mTolWV">off</span></div>
-      <div class="row adv" style="margin-top:7px"><button class="btn go" id="tbRunSel" style="width:100%;background:#10324f;border-color:#2b6aa0;color:#cfe7ff;font-weight:600">▶ Run line selection</button></div>
-      <div class="hint adv">Set work area, scale, line-weight and color filters first, then run line selection. (AI review is separate.)</div>
-      <div class="row adv" style="margin-top:7px"><button class="btn go" id="tbAi">AI take-off / review</button><button class="btn go" id="tbConfirm" style="background:#13351f;border-color:#2a6b40;color:#bdf5cf">✓ Confirm</button></div>
-      <div class="row" style="margin-top:6px"><button class="btn duct" id="tbLock" style="width:100%">▶ Yellow → Green &amp; lock in for this PDF</button></div>
-      <div class="row adv" style="margin-top:7px"><button class="btn go" id="exportTrace" style="width:100%;background:#0c3a1c;border-color:#2a8b4a;color:#bdf5cf;font-weight:600">📄 Export trace overlay (PDF)</button></div>
-      <div class="hint adv">Burns the current green tracing on top of a faded print and saves a high-res PDF — for spotting exactly which lines got missed.</div>
-      <div class="row" style="margin-top:6px"><button class="btn" id="exportLearn" style="flex:1">⬇ Export learning</button><button class="btn" id="importLearn" style="flex:1">⬆ Import</button></div>
-      <input type="file" id="importLearnFile" accept="application/json,.json" style="display:none">
-      <div class="row" style="margin-top:6px"><button class="btn go" id="saveTakeoff" style="flex:1;background:#10243a;border-color:#2b6aa0;color:#cfe7ff;font-weight:600">💾 Save takeoff</button><button class="btn" id="loadTakeoff" style="flex:1">📂 Load takeoff</button></div>
-      <input type="file" id="loadTakeoffFile" accept="application/json,.json" style="display:none">
-      <div class="hint">Save this print's duct selection to a file. Open the same PDF in any version later and Load it back to pick up where you left off.</div>
-      <div class="hint">Save the AI’s learning (examples + locks + completed takeoffs) to a file so it survives across days and devices. Import to restore or combine libraries on another computer.</div>
-      <div class="hint adv"><b>Line take-off:</b> Select / Paint below. <b>AI take-off:</b> turn on AI-first, then AI take-off/review. Use the work box + heavy-lines to strip clutter first.</div>
-    </div>
-    <div class="sec">
-      <h3>✓ Completed takeoffs</h3>
-      <div id="completedList"></div>
-      <div class="hint">Locking in a print saves a reference here (this browser): name, date, line count, sizes, and a thumbnail.</div>
-    </div>
-    <div class="sec">
-      <h3>Classification</h3>
-      <div class="legend-row">
-        <span class="swatch" style="background:var(--duct)"></span>
-        <label><input type="checkbox" id="showDuct" checked> Confirmed duct</label>
-        <span class="ct" id="ctDuct" style="color:var(--duct)">0</span>
-      </div>
-      <div class="legend-row">
-        <span class="swatch" style="background:var(--maybe)"></span>
-        <label><input type="checkbox" id="showMaybe" checked> Possible duct</label>
-        <span class="ct" id="ctMaybe" style="color:var(--maybe)">0</span>
-      </div>
-      <div class="legend-row">
-        <span class="swatch" style="background:var(--not)"></span>
-        <label><input type="checkbox" id="showNot"> Not duct</label>
-        <span class="ct" id="ctNot" style="color:var(--not)">0</span>
-      </div>
-      <label class="adv" style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="runsView"> <b>Runs view</b> — fade the print, light up confident duct</label>
-      <label class="adv" style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="shadeBoxes"> <b>Shade complete duct boxes</b> — lightly fill runs whose 4 walls are all found (gaps = a missed wall)</label>
-      <label style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="heavyOnly"> <b>Heavy lines only</b> — hide light background lineweight</label>
-      <div style="font-size:12px;margin-top:3px;opacity:.85">Line-weight cutoff <input type="range" id="lwThresh" min="0" max="3" step="0.05" value="0.5" style="width:120px;vertical-align:middle"> <span id="lwThreshV">0.50</span> pt <span id="lwCounts" style="opacity:.7"></span></div>
-      <label class="adv" style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="dropTagBoxes" checked> <b>Drop boxes around tags & round symbols</b> — strip the rectangles around size labels and diffuser/damper circles, in every mode</label>
-      <label style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="blackOnly"> <b>Black lines only</b> — hide gray background (duct is often pure black)</label>
-      <div style="font-size:12px;margin-top:3px;opacity:.85">Darkness cutoff <input type="range" id="blkThresh" min="0" max="1" step="0.02" value="0.45" style="width:120px;vertical-align:middle"> <span id="blkThreshV">0.45</span> <span id="blkCounts" style="opacity:.7"></span></div>
-      <div class="adv" style="font-size:12px;margin-top:3px;opacity:.85">Min length <input type="range" id="blkMinLen" min="0" max="60" step="2" value="10" style="width:120px;vertical-align:middle"> <span id="blkMinV">10</span> pt <span style="opacity:.6">(lower = grab shorter pieces)</span></div>
-      <label class="adv" style="display:block;margin-top:5px;font-size:12px"><input type="checkbox" id="strictBlack"> <b>True black only</b> — judge by the ink color, not the on-screen reading <span style="opacity:.7">(drops gray that reads as black; may drop a few faint walls — pick those back)</span></label>
-      <label style="display:block;margin-top:5px;font-size:12px;opacity:.85"><input type="checkbox" id="darkMap"> Show darkness map <span style="opacity:.7">(green = will trace · red = dark but under cutoff, drag Darkness cutoff down to grab · blue = light/background)</span></label>
-      <div class="row adv" style="margin-top:7px"><button class="btn go" id="traceAllDark" style="width:100%;background:#0c2a3a;border-color:#2b7aa0;color:#bfe6ff;font-weight:600">⬛ Trace all dark lines → duct</button></div>
-      <div class="hint">Sets the cutoff just above the light background and selects every line darker than it — so the dark lines on the map become the actual green selection. Then nudge the Darkness cutoff up if gray creeps in.</div>
-      <div id="shadePalette" style="display:none;margin-top:8px;padding:7px;border:1px solid #1d2b3a;border-radius:8px;background:#0a121b"></div>
-      <div id="colorPalette" style="display:none;margin-top:8px;padding:7px;border:1px solid #1d2b3a;border-radius:8px;background:#0a121b"></div>
-      <label style="display:block;margin-top:9px;font-size:13px;border-top:1px solid #234;padding-top:9px"><input type="checkbox" id="ductRunsOnly"> <b>Duct runs only</b> — black walls paired at duct width, long runs (best for dense prints)</label>
-      <div style="font-size:12px;margin-top:3px;opacity:.85">Min run length <input type="range" id="runMinLen" min="1.5" max="8" step="0.5" value="3" style="width:120px;vertical-align:middle"> <span id="runMinV">3</span> ft <span id="runCounts" style="opacity:.7"></span></div>
-    </div>
+ <aside>
+   <div class="sec" style="background:#f7f9fc;border:1px solid #e2e7ee;border-radius:10px">
+     <h3>Takeoff Toolbox</h3>
+     <div class="row adv"><button class="btn" id="workSet">▢ Set work area</button><button class="btn" id="workClear">Clear area</button></div>
+     <div class="hint adv">Draw a box around the duct so the title block, notes, and legend are ignored.</div>
+     <div class="row" style="margin-top:6px;align-items:center"><span style="font-size:12px">Scale</span><select id="scaleSel" style="flex:1;margin-left:6px"><option data-l='1/16"' value="0.0625">1/16" = 1′-0″</option><option data-l='3/32"' value="0.09375">3/32" = 1′-0″</option><option data-l='1/8"' value="0.125">1/8" = 1′-0″</option><option data-l='3/16"' value="0.1875">3/16" = 1′-0″</option><option data-l='1/4"' value="0.25">1/4" = 1′-0″</option><option data-l='3/8"' value="0.375">3/8" = 1′-0″</option><option data-l='1/2"' value="0.5">1/2" = 1′-0″</option><option data-l='3/4"' value="0.75">3/4" = 1′-0″</option><option data-l='1"' value="1">1" = 1′-0″</option><option data-l='1-1/2"' value="1.5">1-1/2" = 1′-0″</option><option data-l='3"' value="3">3" = 1′-0″</option></select></div>
+     <div class="hint" id="scaleDet">Scale: auto-detecting…</div>
+     <button class="btn" id="scaleAI" style="font-size:11px;padding:3px 8px;margin-top:3px">Read scale (AI)</button>
+     <label class="adv" style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="aiFirst"> <b>AI-first</b> (single-layer) — don’t pre-green; let the AI promote the duct</label>
+     <div class="row" style="margin-top:7px"><button class="btn go" id="tbPick" style="width:100%;background:#fbf4e3;border-color:#e6d3a3;color:#8a6a1a;font-weight:600">Pick a duct line (color + thickness)</button></div>
+     <div class="row" style="margin-top:7px"><button class="btn go" id="setupWiz" style="width:100%;background:#e9f1fb;border-color:#b6d2ef;color:#2f6fb0;font-weight:700">Guided setup (recommended)</button></div>
+     <div class="row" style="margin-top:6px;gap:6px"><button class="btn" id="simRemove" style="flex:1;background:#fdf0ee;border-color:#f0ccc4;color:#b0432f">Flag similar to remove</button><button class="btn" id="simPromote" style="flex:1;background:#e9f7ef;border-color:#b3e0c6;color:#218153">Find similar duct</button></div>
+     <div class="hint" style="margin-top:3px">Click one object — geometry finds every match and lights up the real lines. <b>Flag similar</b>: click a non-duct thing → matches turn red → click any to keep → remove the rest. <b>Find similar duct</b>: click a missed elbow/run → matches turn green.</div>
+     <div class="hint adv" id="sampleInfo">Click a piece of duct on the print - it matches every line like it.</div>
+     <div class="adv" style="font-size:12px;margin-top:3px;opacity:.85">Color tol <input type="range" id="mTolD" min="0.05" max="0.7" step="0.02" value="0.30" style="width:90px;vertical-align:middle"> <span id="mTolDV">0.30</span> &nbsp; Thick tol <input type="range" id="mTolW" min="0" max="3" step="0.1" value="3" style="width:80px;vertical-align:middle"> <span id="mTolWV">off</span></div>
+     <div class="row adv" style="margin-top:7px"><button class="btn go" id="tbRunSel" style="width:100%;background:#e9f1fb;border-color:#b6d2ef;color:#2b6aa0;font-weight:600">Run line selection</button></div>
+     <div class="hint adv">Set work area, scale, line-weight and color filters first, then run line selection. (AI review is separate.)</div>
+     <div class="row adv" style="margin-top:7px"><button class="btn go" id="tbAi">AI take-off / review</button><button class="btn go" id="tbConfirm" style="">✓ Confirm</button></div>
+     <div class="row" style="margin-top:6px"><button class="btn duct" id="tbLock" style="width:100%">Yellow → Green &amp; lock in for this PDF</button></div>
+     <div class="row adv" style="margin-top:7px"><button class="btn go" id="exportTrace" style="width:100%;background:#e9f7ef;border-color:#b3e0c6;color:#1f7a45;font-weight:600">Export trace overlay (PDF)</button></div>
+     <div class="hint adv">Burns the current green tracing on top of a faded print and saves a high-res PDF — for spotting exactly which lines got missed.</div>
+     <div class="row" style="margin-top:6px"><button class="btn" id="exportLearn" style="flex:1">⬇ Export learning</button><button class="btn" id="importLearn" style="flex:1">⬆ Import</button></div>
+     <input type="file" id="importLearnFile" accept="application/json,.json" style="display:none">
+     <div class="row" style="margin-top:6px"><button class="btn go" id="saveTakeoff" style="flex:1;background:#e9f1fb;border-color:#b6d2ef;color:#2b6aa0;font-weight:600">Save takeoff</button><button class="btn" id="loadTakeoff" style="flex:1">Load takeoff</button></div>
+     <input type="file" id="loadTakeoffFile" accept="application/json,.json" style="display:none">
+     <div class="hint">Save this print's duct selection to a file. Open the same PDF in any version later and Load it back to pick up where you left off.</div>
+     <div class="hint">Save the AI’s learning (examples + locks + completed takeoffs) to a file so it survives across days and devices. Import to restore or combine libraries on another computer.</div>
+     <div class="hint adv"><b>Line take-off:</b> Select / Paint below. <b>AI take-off:</b> turn on AI-first, then AI take-off/review. Use the work box + heavy-lines to strip clutter first.</div>
+   </div>
+   <div class="sec">
+     <h3>✓ Completed takeoffs</h3>
+     <div id="completedList"></div>
+     <div class="hint">Locking in a print saves a reference here (this browser): name, date, line count, sizes, and a thumbnail.</div>
+   </div>
+   <div class="sec">
+     <h3>Classification</h3>
+     <div class="legend-row">
+       <span class="swatch" style="background:var(--duct)"></span>
+       <label><input type="checkbox" id="showDuct" checked> Confirmed duct</label>
+       <span class="ct" id="ctDuct" style="color:var(--duct)">0</span>
+     </div>
+     <div class="legend-row">
+       <span class="swatch" style="background:var(--maybe)"></span>
+       <label><input type="checkbox" id="showMaybe" checked> Possible duct</label>
+       <span class="ct" id="ctMaybe" style="color:var(--maybe)">0</span>
+     </div>
+     <div class="legend-row">
+       <span class="swatch" style="background:var(--not)"></span>
+       <label><input type="checkbox" id="showNot"> Not duct</label>
+       <span class="ct" id="ctNot" style="color:var(--not)">0</span>
+     </div>
+     <label class="adv" style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="runsView"> <b>Runs view</b> — fade the print, light up confident duct</label>
+     <label class="adv" style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="shadeBoxes"> <b>Shade complete duct boxes</b> — lightly fill runs whose 4 walls are all found (gaps = a missed wall)</label>
+     <label style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="heavyOnly"> <b>Heavy lines only</b> — hide light background lineweight</label>
+     <div style="font-size:12px;margin-top:3px;opacity:.85">Line-weight cutoff <input type="range" id="lwThresh" min="0" max="3" step="0.05" value="0.5" style="width:120px;vertical-align:middle"> <span id="lwThreshV">0.50</span> pt <span id="lwCounts" style="opacity:.7"></span></div>
+     <label class="adv" style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="dropTagBoxes" checked> <b>Drop boxes around tags & round symbols</b> — strip the rectangles around size labels and diffuser/damper circles, in every mode</label>
+     <label style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="blackOnly"> <b>Black lines only</b> — hide gray background (duct is often pure black)</label>
+     <div style="font-size:12px;margin-top:3px;opacity:.85">Darkness cutoff <input type="range" id="blkThresh" min="0" max="1" step="0.02" value="0.45" style="width:120px;vertical-align:middle"> <span id="blkThreshV">0.45</span> <span id="blkCounts" style="opacity:.7"></span></div>
+     <div class="adv" style="font-size:12px;margin-top:3px;opacity:.85">Min length <input type="range" id="blkMinLen" min="0" max="60" step="2" value="10" style="width:120px;vertical-align:middle"> <span id="blkMinV">10</span> pt <span style="opacity:.6">(lower = grab shorter pieces)</span></div>
+     <label class="adv" style="display:block;margin-top:5px;font-size:12px"><input type="checkbox" id="strictBlack"> <b>True black only</b> — judge by the ink color, not the on-screen reading <span style="opacity:.7">(drops gray that reads as black; may drop a few faint walls — pick those back)</span></label>
+     <label style="display:block;margin-top:5px;font-size:12px;opacity:.85"><input type="checkbox" id="darkMap"> Show darkness map <span style="opacity:.7">(green = will trace · red = dark but under cutoff, drag Darkness cutoff down to grab · blue = light/background)</span></label>
+     <div class="row adv" style="margin-top:7px"><button class="btn go" id="traceAllDark" style="width:100%;background:#0c2a3a;border-color:#2b7aa0;color:#bfe6ff;font-weight:600">Trace all dark lines → duct</button></div>
+     <div class="hint">Sets the cutoff just above the light background and selects every line darker than it — so the dark lines on the map become the actual green selection. Then nudge the Darkness cutoff up if gray creeps in.</div>
+     <div id="shadePalette" style="display:none;margin-top:8px;padding:7px;border:1px solid #1d2b3a;border-radius:8px;background:#0a121b"></div>
+     <div id="colorPalette" style="display:none;margin-top:8px;padding:7px;border:1px solid #1d2b3a;border-radius:8px;background:#0a121b"></div>
+     <label style="display:block;margin-top:9px;font-size:13px;border-top:1px solid #234;padding-top:9px"><input type="checkbox" id="ductRunsOnly"> <b>Duct runs only</b> — black walls paired at duct width, long runs (best for dense prints)</label>
+     <div style="font-size:12px;margin-top:3px;opacity:.85">Min run length <input type="range" id="runMinLen" min="1.5" max="8" step="0.5" value="3" style="width:120px;vertical-align:middle"> <span id="runMinV">3</span> ft <span id="runCounts" style="opacity:.7"></span></div>
+   </div>
 
-    <div class="sec adv">
-      <h3>Duct width filter <span id="gapLbl" class="status"></span></h3>
-      <div class="slider">
-        <label><span>min gap</span><span id="minGapV">4 pt</span></label>
-        <input type="range" id="minGap" min="1" max="120" value="4">
-      </div>
-      <div class="slider">
-        <label><span>max gap</span><span id="maxGapV">110 pt</span></label>
-        <input type="range" id="maxGap" min="2" max="320" value="110">
-      </div>
-      <div class="hint">How far apart two parallel walls can be to read as one duct, in the drawing's real points (not pixels) — so zoom never changes it. Widen the max if a wide duct isn't catching.</div>
-    </div>
+   <div class="sec adv">
+     <h3>Duct width filter <span id="gapLbl" class="status"></span></h3>
+     <div class="slider">
+       <label><span>min gap</span><span id="minGapV">4 pt</span></label>
+       <input type="range" id="minGap" min="1" max="120" value="4">
+     </div>
+     <div class="slider">
+       <label><span>max gap</span><span id="maxGapV">110 pt</span></label>
+       <input type="range" id="maxGap" min="2" max="320" value="110">
+     </div>
+     <div class="hint">How far apart two parallel walls can be to read as one duct, in the drawing's real points (not pixels) — so zoom never changes it. Widen the max if a wide duct isn't catching.</div>
+   </div>
 
-    <div class="sec">
-      <h3><span id="layersToggle" style="cursor:pointer;user-select:none"><span id="layersCaret">▸</span> Layers</span> <span id="layerCount" class="status"></span>
-        <span><a class="mini" id="autoL">auto</a> · <a class="mini" id="isoL">isolate duct</a> · <a class="mini" id="showAllL">all</a> · <a class="mini" id="hideAllL">none</a></span></h3>
-      <div id="layerList" style="display:none"><div class="hint">Layers from the PDF appear here. Toggle the eye to isolate; tag a layer as DUCT to turn its lines green.</div></div>
-    </div>
+   <div class="sec">
+     <h3><span id="layersToggle" style="cursor:pointer;user-select:none"><span id="layersCaret">▸</span> Layers</span> <span id="layerCount" class="status"></span>
+       <span><a class="mini" id="autoL">auto</a> · <a class="mini" id="isoL">isolate duct</a> · <a class="mini" id="showAllL">all</a> · <a class="mini" id="hideAllL">none</a></span></h3>
+     <div id="layerList" style="display:none"><div class="hint">Layers from the PDF appear here. Toggle the eye to isolate; tag a layer as DUCT to turn its lines green.</div></div>
+   </div>
 
-    <div class="sec">
-      <h3>Selection</h3>
-      <div class="selbar">
-        <div class="modes">
-          <button class="mode active" data-m="select">Select</button>
-          <button class="mode" data-m="duct">Paint Duct</button>
-          <button class="mode" data-m="not">Paint Not</button>
-        </div>
-        <div class="cnt" id="selCnt">0 lines selected</div>
-        <div class="row">
-          <button class="btn duct" id="markDuct">✓ Duct</button>
-          <button class="btn notduct" id="markNot">✕ Not</button>
-        </div>
-        <div class="row">
-          <button class="btn" id="clearLock">Reset to auto</button>
-          <button class="btn" id="deselect">Deselect</button>
-        </div>
-        <div class="hint"><b>Select</b>: click/drag to pick lines, then ✓ Duct / ✕ Not. <b>Paint Duct / Paint Not</b>: click a line or drag a box to set it directly — no second step. Your choices lock and win over the auto guess.</div>
-      </div>
-    </div>
-    <div class="sec">
-      <h3>Cleanup tools</h3>
-      <div class="selbar">
-        <button class="btn" id="cleanNoise">⌫ Clear text &amp; symbols <span style="opacity:.6">(incl. round diffusers)</span></button>
-        <button class="btn adv" id="findDrops">⤫ Mark drops on duct</button>
-        <div class="row adv">
-          <button class="btn duct" id="promoteMaybe">Possible → duct</button>
-          <button class="btn notduct" id="clearMaybe">Clear possible</button>
-        </div>
-        <button class="btn adv" id="resetAll">Reset all marks</button>
-        <button class="btn" id="undoBtn">↶ Undo (Ctrl+Z)</button>
-        <button class="btn adv" id="forgetPrint">Forget this print</button>
-        <button class="btn adv" id="forgetLearn">🧠 Forget learning</button>
-        <div class="hint"><b>Clear text &amp; symbols</b> is an instant cleanup (not AI) — wipes leftover annotation/glyph noise, diffuser rings, and leader lines that got picked up. Often little is left because the "Drop boxes around tags &amp; round symbols" toggle already strips most of it live. <b>Mark drops</b> promotes the X / slash takeoff marks sitting on a duct (supply/return drops). The two <b>possible</b> buttons handle every yellow line at once. For symbol removal that learns from your prints, use <b>AI review</b>.</div>
-      </div>
-    </div>
+   <div class="sec">
+     <h3>Selection</h3>
+     <div class="selbar">
+       <div class="modes">
+         <button class="mode active" data-m="select">Select</button>
+         <button class="mode" data-m="duct">Paint Duct</button>
+         <button class="mode" data-m="not">Paint Not</button>
+       </div>
+       <div class="cnt" id="selCnt">0 lines selected</div>
+       <div class="row">
+         <button class="btn duct" id="markDuct">✓ Duct</button>
+         <button class="btn notduct" id="markNot">✕ Not</button>
+       </div>
+       <div class="row">
+         <button class="btn" id="clearLock">Reset to auto</button>
+         <button class="btn" id="deselect">Deselect</button>
+       </div>
+       <div class="hint"><b>Select</b>: click/drag to pick lines, then ✓ Duct / ✕ Not. <b>Paint Duct / Paint Not</b>: click a line or drag a box to set it directly — no second step. Your choices lock and win over the auto guess.</div>
+     </div>
+   </div>
+   <div class="sec">
+     <h3>Cleanup tools</h3>
+     <div class="selbar">
+       <button class="btn" id="cleanNoise">⌫ Clear text &amp; symbols <span style="opacity:.6">(incl. round diffusers)</span></button>
+       <button class="btn adv" id="findDrops">⤫ Mark drops on duct</button>
+       <div class="row adv">
+         <button class="btn duct" id="promoteMaybe">Possible → duct</button>
+         <button class="btn notduct" id="clearMaybe">Clear possible</button>
+       </div>
+       <button class="btn adv" id="resetAll">Reset all marks</button>
+       <button class="btn" id="undoBtn">↶ Undo (Ctrl+Z)</button>
+       <button class="btn adv" id="forgetPrint">Forget this print</button>
+       <button class="btn adv" id="forgetLearn">Forget learning</button>
+       <div class="hint"><b>Clear text &amp; symbols</b> is an instant cleanup (not AI) — wipes leftover annotation/glyph noise, diffuser rings, and leader lines that got picked up. Often little is left because the "Drop boxes around tags &amp; round symbols" toggle already strips most of it live. <b>Mark drops</b> promotes the X / slash takeoff marks sitting on a duct (supply/return drops). The two <b>possible</b> buttons handle every yellow line at once. For symbol removal that learns from your prints, use <b>AI review</b>.</div>
+     </div>
+   </div>
 
-    <div class="sec">
-      <h3>AI scan <span id="aiCount" class="status"></span></h3>
-      <div class="selbar">
-        <label class="hint adv" style="display:block;margin-bottom:6px">AI worker URL (root pass-through):</label>
-        <input id="aiWorker" class="adv" type="text" spellcheck="false" value="https://brookstone-ai-proxyc.bmartin-ed3.workers.dev"
+   <div class="sec">
+     <h3>AI scan <span id="aiCount" class="status"></span></h3>
+     <div class="selbar">
+       <label class="hint adv" style="display:block;margin-bottom:6px">AI worker URL (root pass-through):</label>
+       <input id="aiWorker" class="adv" type="text" spellcheck="false" value="https://brookstone-ai-proxyc.bmartin-ed3.workers.dev"
                style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #243140;border-radius:6px;padding:7px 8px;font-family:ui-monospace,monospace;font-size:12px;margin-bottom:8px">
-        <label class="hint" style="display:block;margin-bottom:4px">AI model <span style="opacity:.6">(per-run read + blob judge)</span></label>
-        <select id="aiModel" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #243140;border-radius:6px;padding:7px 8px;font-size:12px;margin-bottom:8px">
-          <option value="claude-haiku-4-5-20251001">Haiku 4.5 — cheapest (~$0.05/sheet)</option>
-          <option value="claude-sonnet-4-6" selected>Sonnet 4.6 — balanced (~$0.14/sheet)</option>
-          <option value="claude-opus-4-8">Opus 4.8 — most accurate (~$0.24/sheet)</option>
-        </select>
-        <button class="btn go" id="aiScan">AI review lines (duct + possible)</button>
-        <button class="btn" id="cleanThenAI" style="margin-top:4px">🧹 Clean text/symbols, then AI review</button>
-        <button class="btn go" id="confirmTk" style="background:#13351f;border-color:#2a6b40;color:#bdf5cf">✓ Looks right — teach AI from this whole print</button>
-        <label class="adv" style="display:block;font-size:12px;margin-top:5px">Max blobs to review <input type="number" id="aiCap" value="120" min="1" max="500" style="width:62px"></label>
-        <label style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="aiDeep" checked> Deep review — judge <b>every</b> green feature (use after marking furniture)</label>
-        <label class="adv" style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="aiRecheck"> <b>Re-check confirmed</b> — re-review the whole print, including locked/green duct</label>
-        <label style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="exOn" checked> Teach AI from my corrections <span id="exCount" style="opacity:.7"></span></label>
-        <button class="btn" id="teachPrint" style="margin-top:4px;background:#13243a;border-color:#2b6aa0;color:#cfe7ff">🎓 Teach AI from this print (it's correct)</button>
-        <button class="btn adv" id="exClear">Clear AI examples</button>
-        <button class="btn adv" id="aiUndo">↶ Undo AI review</button>
-        <button class="btn go" id="verifyTags" style="background:#10243a;border-color:#2b6aa0;color:#cfe7ff;margin-top:4px">✓ Verify duct against size tags</button>
-        <button class="btn go" id="aiFullTakeoff" style="background:#2a1a3a;border-color:#6a3fb8;color:#dcccff;margin-top:6px">🤖 Run full AI takeoff (whole sheet)</button>
-        <button class="btn go" id="aiSizeRuns" style="background:#1a2a3a;border-color:#3f8ab8;color:#cce6ff;margin-top:4px">🔎 Read sizes (per-run, tight crop)</button>
-        <button class="btn go" id="aiTileSweep" style="background:#2a1a33;border-color:#8a5fc8;color:#e8d8ff;margin-top:4px">🗺 Read tags (tile sweep · work area)</button>
-        <label style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="autoDimChk"> Auto-read dim text on PDF load <span style="opacity:.7">(off — picks up random text; use tile sweep instead)</span></label>
-        <button class="btn go" id="dimFind" style="background:#13351f;border-color:#2a6b40;color:#bdf5cf;margin-top:6px">📐 Find duct by dimension (tag-match)</button>
-        <button class="btn go" id="buildRuns" style="background:#1f1430;border-color:#7a4fd0;color:#e6d8ff;margin-top:6px">📊 Preview runs (optional — Build takeoff does this for you)</button>
-        <div class="row" style="margin-top:6px;display:flex;gap:6px">
-          <button class="btn go" id="itemsFromRunsBtn" style="flex:2;background:#0c2a1a;border-color:#2b9e5c;color:#bfffd2;font-weight:700">➕ Build takeoff (joints)</button>
-          <button class="btn adv" id="itemsClearBtn" style="flex:1;background:#3a2030;border-color:#7a3b4b;color:#fbb">Clear</button>
-        </div>
-        <button class="btn go" id="trackWalkBtn" style="background:#10202e;border-color:#3a86b8;color:#cfe9ff;margin-top:6px;font-weight:700">🚂 Build (track-walk · beta)</button>
-        <button class="btn go" id="aiAssignTest" style="background:#33231a;border-color:#b8763f;color:#ffe0c8;margin-top:6px;font-weight:700">🧪 AI: assign tags → ducts (test)</button>
-        <div class="hint" style="margin-top:2px">Experiment — after a build, sends the extracted centerlines + size tags + the full sheet image to the AI and asks only <b>which tag labels which duct</b>. Draws its picks on the plan (blue dot = tag → orange dot = chosen duct) and tables width-agreement. Changes no runs; open the downloaded file so the worker call isn't sandbox-blocked.</div>
-        <button class="btn go" id="aiCleanupRuns" style="background:#2a1420;border-color:#b83f6a;color:#ffd0e0;margin-top:6px;font-weight:700">🧹 AI cleanup: drop doubles + not-ductwork</button>
-        <div class="hint" style="margin-top:2px">After a build: draws every run numbered on the full sheet and asks the AI which are <b>duplicates</b> of another run and which sit on <b>non-ductwork</b> (text, walls, grilles, empty). Auto-removes what it flags (↶ undo appears). It can only pick from runs that exist — it never adds duct.</div>
-        <button class="btn go" id="aiFindMissing" style="background:#2a2410;border-color:#b8a03f;color:#fff0c0;margin-top:6px;font-weight:700">🔎 AI: find missing duct (second look)</button>
-        <div class="hint" style="margin-top:2px">Finds duct centerlines the builder <b>skipped</b> (often where the size isn't printed), shows them to the AI against the clean print, and flags the ones that are <b>real duct</b> (dashed yellow ! on the plan) so you can add them with the ➕ Tap / resize tools. Doesn't auto-build — it points, you place.</div>
-        <div class="row" style="margin-top:6px;display:flex;gap:6px">
-          <button class="btn" id="editDelBtn" style="flex:1;background:#2a1418;border-color:#7a3b4b;color:#fbb">🗑 Click-to-delete: OFF</button>
-          <button class="btn" id="editSizeBtn" style="flex:1;background:#14202a;border-color:#3b6a8a;color:#bdf">✎ Click-to-resize: OFF</button>
-        </div>
-        <button class="btn" id="editTapBtn" style="margin-top:6px;background:#1a2410;border-color:#5a7a3b;color:#cfeab0;width:100%">➕ Tap tool: OFF — click main run, then branch run</button>
-        <div class="hint" style="margin-top:2px">Turn one on, then click a duct on the plan: <b>delete</b> removes that run; <b>resize</b> lets you type the size (and offers a transition if it differs); <b>tap</b> connects two runs — click the main, then the branch.</div>
-        <div class="hint" style="margin-top:4px"><b>One click:</b> Build takeoff (re)builds the runs from your current duct selection and breaks each into 5′ joint pieces (round = 10′) — no need to hit Preview first. Click a joint to change its length (chain reflows), insert a reducer/tee/elbow (reducer resizes downstream), shift-click to multi-select, color/label runs. <b>Scan with YOLO first</b> and it will auto-split runs at detected fittings and drop in shape-correct fittings. Wheel = zoom to cursor.</div>
-        <div class="row" style="margin-top:6px;display:flex;gap:6px;align-items:center">
-          <button class="btn" id="yoloCleanBtn" style="flex:2;background:#1a2a0c;border-color:#7a9e2b;color:#e6ffbf">🧹 Clean with YOLO</button>
-          <span style="font-size:11px;opacity:.7">reach</span>
-          <input type="range" id="cleanReach" min="6" max="60" step="2" value="24" style="flex:1">
-          <span id="cleanReachV" style="font-size:11px;opacity:.7">24"</span>
-        </div>
-        <div class="hint" style="margin-top:2px">Flags takeoff runs that have <b>no YOLO fitting near them</b> (likely junk the geometry over-grabbed). Previews what it'd remove first — you confirm. "Reach" = how close a YOLO detection must be to count as supporting a run.</div>
-        <div id="itemPanelBody" style="margin-top:7px"></div>
-        <div style="margin-top:12px;border-top:1px solid #243;padding-top:10px">
-          <div style="font-weight:700;color:#bfe6ff;font-size:13px;margin-bottom:5px">🔎 YOLO fitting detection</div>
-          <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="yoloShowChk"> Show detection boxes on the print <span style="opacity:.6">(off — detections still feed the builder)</span></label>
-          <div class="row" style="display:flex;gap:6px;align-items:center">
-            <button class="btn" id="yoloLoadBtn" style="flex:1">Load best.onnx</button>
-            <span id="yoloStatus" style="font-size:11px;opacity:.7">no model</span>
-          </div>
-          <input type="file" id="yoloFile" accept=".onnx" style="display:none">
-          <button class="btn go" id="yoloTestBtn" style="width:100%;margin-top:6px;background:#0c1f3a;border-color:#2b6aa0;color:#bfe0ff" disabled>▸ Test detect (visible area)</button>
-          <button class="btn go" id="yoloScanBtn" style="width:100%;margin-top:6px;background:#0a2a1f;border-color:#2b9e7a;color:#bfffe6;font-weight:700" disabled>⬛ Scan whole sheet (tiled)</button>
-          <div class="hint" style="margin-top:4px">Stage 1: loads your model and runs it on the area you're currently viewing, so we confirm in-browser detection works before scanning the whole sheet. conf <input type="range" id="yoloConf" min="0.05" max="0.6" step="0.05" value="0.10" style="width:70px;vertical-align:middle"> <span id="yoloConfV">0.10</span> · detail <input type="range" id="yoloDetail" min="0.6" max="1.8" step="0.1" value="1.0" style="width:60px;vertical-align:middle"> <span id="yoloDetailV">1.0×</span></div>
-          <div id="yoloOut" style="margin-top:6px"></div>
-        </div>
-        <label style="display:block;font-size:12px;margin-top:4px"><input type="checkbox" id="runsTagOnly"> Runs only where a size tag matches the width <span style="opacity:.7">(hides empty pockets between ducts)</span></label>
-        <div id="aiOut"><div class="hint">The AI looks at a crop of each questionable blob on your actual sheet &mdash; the yellow "possible" lines <b>and</b> short green bits (dampers, handles, arrows that got swept into duct) &mdash; and judges each, boxing the feature in question so a damper sitting on a duct still gets called out. Flagged blobs auto-clear; hover a card to circle the spot, Undo to put it back. Run cleanup first so it only handles real questions.<br><br><b>Open the downloaded file</b> (not the in-Claude preview) so the call to your worker isn't sandbox-blocked.</div></div>
-      </div>
-    </div>
-  </aside>
+       <label class="hint" style="display:block;margin-bottom:4px">AI model <span style="opacity:.6">(per-run read + blob judge)</span></label>
+       <select id="aiModel" style="width:100%;background:#0d1117;color:#e6edf3;border:1px solid #243140;border-radius:6px;padding:7px 8px;font-size:12px;margin-bottom:8px">
+         <option value="claude-haiku-4-5-20251001">Haiku 4.5 — cheapest (~$0.05/sheet)</option>
+         <option value="claude-sonnet-4-6" selected>Sonnet 4.6 — balanced (~$0.14/sheet)</option>
+         <option value="claude-opus-4-8">Opus 4.8 — most accurate (~$0.24/sheet)</option>
+       </select>
+       <button class="btn go" id="aiScan">AI review lines (duct + possible)</button>
+       <button class="btn" id="cleanThenAI" style="margin-top:4px">Clean text/symbols, then AI review</button>
+       <button class="btn go" id="confirmTk" style="">✓ Looks right — teach AI from this whole print</button>
+       <label class="adv" style="display:block;font-size:12px;margin-top:5px">Max blobs to review <input type="number" id="aiCap" value="120" min="1" max="500" style="width:62px"></label>
+       <label style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="aiDeep" checked> Deep review — judge <b>every</b> green feature (use after marking furniture)</label>
+       <label class="adv" style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="aiRecheck"> <b>Re-check confirmed</b> — re-review the whole print, including locked/green duct</label>
+       <label style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="exOn" checked> Teach AI from my corrections <span id="exCount" style="opacity:.7"></span></label>
+       <button class="btn" id="teachPrint" style="margin-top:4px;background:#13243a;border-color:#2b6aa0;color:#cfe7ff">Teach AI from this print (it's correct)</button>
+       <button class="btn adv" id="exClear">Clear AI examples</button>
+       <button class="btn adv" id="aiUndo">↶ Undo AI review</button>
+       <button class="btn go" id="verifyTags" style="margin-top:4px">✓ Verify duct against size tags</button>
+       <button class="btn go" id="aiFullTakeoff" style="margin-top:6px">Run full AI takeoff (whole sheet)</button>
+       <button class="btn go" id="aiSizeRuns" style="margin-top:4px">Read sizes (per-run, tight crop)</button>
+       <button class="btn go" id="aiTileSweep" style="margin-top:4px">Read tags (tile sweep · work area)</button>
+       <label style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="autoDimChk"> Auto-read dim text on PDF load <span style="opacity:.7">(off — picks up random text; use tile sweep instead)</span></label>
+       <button class="btn go" id="dimFind" style="margin-top:6px">Find duct by dimension (tag-match)</button>
+       <button class="btn go" id="buildRuns" style="margin-top:6px">Preview runs (optional — Build takeoff does this for you)</button>
+       <div class="row" style="margin-top:6px;display:flex;gap:6px">
+         <button class="btn go" id="itemsFromRunsBtn" style="flex:2;background:#0c2a1a;border-color:#2b9e5c;color:#bfffd2;font-weight:700">Build takeoff (joints)</button>
+         <button class="btn adv" id="itemsClearBtn" style="flex:1;background:#3a2030;border-color:#7a3b4b;color:#fbb">Clear</button>
+       </div>
+       <button class="btn go" id="trackWalkBtn" style="margin-top:6px;font-weight:700">Build (track-walk · beta)</button>
+       <button class="btn go" id="aiAssignTest" style="margin-top:6px;font-weight:700">AI: assign tags → ducts (test)</button>
+       <div class="hint" style="margin-top:2px">Experiment — after a build, sends the extracted centerlines + size tags + the full sheet image to the AI and asks only <b>which tag labels which duct</b>. Draws its picks on the plan (blue dot = tag → orange dot = chosen duct) and tables width-agreement. Changes no runs; open the downloaded file so the worker call isn't sandbox-blocked.</div>
+       <button class="btn go" id="aiCleanupRuns" style="margin-top:6px;font-weight:700">AI cleanup: drop doubles + not-ductwork</button>
+       <div class="hint" style="margin-top:2px">After a build: draws every run numbered on the full sheet and asks the AI which are <b>duplicates</b> of another run and which sit on <b>non-ductwork</b> (text, walls, grilles, empty). Auto-removes what it flags (↶ undo appears). It can only pick from runs that exist — it never adds duct.</div>
+       <button class="btn go" id="aiFindMissing" style="margin-top:6px;font-weight:700">AI: find missing duct (second look)</button>
+       <div class="hint" style="margin-top:2px">Scans the <b>print</b> against your runs and flags spots that show ductwork with <b>no run</b> (dashed-yellow ! boxes on the plan) — even where the builder never made a candidate. Build them with the Edit tools. Points, doesn't auto-place.</div>
+       <div class="row" style="margin-top:6px;display:flex;gap:6px">
+         <button class="btn" id="editDelBtn" style="flex:1;background:#2a1418;border-color:#7a3b4b;color:#fbb">Click-to-delete: OFF</button>
+         <button class="btn" id="editSizeBtn" style="flex:1;background:#14202a;border-color:#3b6a8a;color:#bdf">✎ Click-to-resize: OFF</button>
+       </div>
+       <button class="btn" id="editTapBtn" style="margin-top:6px;background:#1a2410;border-color:#5a7a3b;color:#cfeab0;width:100%">Tap tool: OFF — click main run, then branch run</button>
+       <div class="hint" style="margin-top:2px">Turn one on, then click a duct on the plan: <b>delete</b> removes that run; <b>resize</b> lets you type the size (and offers a transition if it differs); <b>tap</b> connects two runs — click the main, then the branch.</div>
+       <div class="hint" style="margin-top:4px"><b>One click:</b> Build takeoff (re)builds the runs from your current duct selection and breaks each into 5′ joint pieces (round = 10′) — no need to hit Preview first. Click a joint to change its length (chain reflows), insert a reducer/tee/elbow (reducer resizes downstream), shift-click to multi-select, color/label runs. <b>Scan with YOLO first</b> and it will auto-split runs at detected fittings and drop in shape-correct fittings. Wheel = zoom to cursor.</div>
+       <div class="row" style="margin-top:6px;display:flex;gap:6px;align-items:center">
+         <button class="btn" id="yoloCleanBtn" style="flex:2;background:#1a2a0c;border-color:#7a9e2b;color:#e6ffbf">Clean with YOLO</button>
+         <span style="font-size:11px;opacity:.7">reach</span>
+         <input type="range" id="cleanReach" min="6" max="60" step="2" value="24" style="flex:1">
+         <span id="cleanReachV" style="font-size:11px;opacity:.7">24"</span>
+       </div>
+       <div class="hint" style="margin-top:2px">Flags takeoff runs that have <b>no YOLO fitting near them</b> (likely junk the geometry over-grabbed). Previews what it'd remove first — you confirm. "Reach" = how close a YOLO detection must be to count as supporting a run.</div>
+       <div id="itemPanelBody" style="margin-top:7px"></div>
+       <div style="margin-top:12px;border-top:1px solid #243;padding-top:10px">
+         <div style="font-weight:700;color:#bfe6ff;font-size:13px;margin-bottom:5px">YOLO fitting detection</div>
+         <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="yoloShowChk"> Show detection boxes on the print <span style="opacity:.6">(off — detections still feed the builder)</span></label>
+         <div class="row" style="display:flex;gap:6px;align-items:center">
+           <button class="btn" id="yoloLoadBtn" style="flex:1">Load best.onnx</button>
+           <span id="yoloStatus" style="font-size:11px;opacity:.7">no model</span>
+         </div>
+         <input type="file" id="yoloFile" accept=".onnx" style="display:none">
+         <button class="btn go" id="yoloTestBtn" style="width:100%;margin-top:6px;background:#0c1f3a;border-color:#2b6aa0;color:#bfe0ff" disabled>▸ Test detect (visible area)</button>
+         <button class="btn go" id="yoloScanBtn" style="width:100%;margin-top:6px;background:#0a2a1f;border-color:#2b9e7a;color:#bfffe6;font-weight:700" disabled>Scan whole sheet (tiled)</button>
+         <div class="hint" style="margin-top:4px">Stage 1: loads your model and runs it on the area you're currently viewing, so we confirm in-browser detection works before scanning the whole sheet. conf <input type="range" id="yoloConf" min="0.05" max="0.6" step="0.05" value="0.10" style="width:70px;vertical-align:middle"> <span id="yoloConfV">0.10</span> · detail <input type="range" id="yoloDetail" min="0.6" max="1.8" step="0.1" value="1.0" style="width:60px;vertical-align:middle"> <span id="yoloDetailV">1.0×</span></div>
+         <div id="yoloOut" style="margin-top:6px"></div>
+       </div>
+       <label style="display:block;font-size:12px;margin-top:4px"><input type="checkbox" id="runsTagOnly"> Runs only where a size tag matches the width <span style="opacity:.7">(hides empty pockets between ducts)</span></label>
+       <div id="aiOut"><div class="hint">The AI looks at a crop of each questionable blob on your actual sheet &mdash; the yellow "possible" lines <b>and</b> short green bits (dampers, handles, arrows that got swept into duct) &mdash; and judges each, boxing the feature in question so a damper sitting on a duct still gets called out. Flagged blobs auto-clear; hover a card to circle the spot, Undo to put it back. Run cleanup first so it only handles real questions.<br><br><b>Open the downloaded file</b> (not the in-Claude preview) so the call to your worker isn't sandbox-blocked.</div></div>
+     </div>
+   </div>
+ </aside>
 
-  <main id="main">
-    <div id="stageWrap">
-      <canvas id="pdfCanvas" width="100" height="100"></canvas>
-      <svg id="overlay" xmlns="http://www.w3.org/2000/svg">
-        <g id="lineLayer"></g>
-        <g id="itemLayer"></g>
-        <g id="yoloLayer"></g>
-        <g id="tapLayer"></g>
-        <rect id="selbox" x="0" y="0" width="0" height="0"></rect>
-      </svg>
-    </div>
-    <div id="drop"><div class="big">Drop a PDF or click “Load PDF”</div>
-      <div>Vector mechanical sheets work best — the tool reads the actual line geometry and PDF layers.</div></div>
-  </main>
+ <main id="main">
+   <div id="stageWrap">
+     <canvas id="pdfCanvas" width="100" height="100"></canvas>
+     <svg id="overlay" xmlns="http://www.w3.org/2000/svg">
+       <g id="lineLayer"></g>
+       <g id="itemLayer"></g>
+       <g id="yoloLayer"></g>
+       <g id="tapLayer"></g>
+       <rect id="selbox" x="0" y="0" width="0" height="0"></rect>
+     </svg>
+   </div>
+   <div id="drop"><div class="big">Drop a PDF or click “Load PDF”</div>
+     <div>Vector mechanical sheets work best — the tool reads the actual line geometry and PDF layers.</div></div>
+ </main>
 </div>
 
 <div id="pagePicker">
-  <div class="pp-head">
-    <div class="pp-title">Select the duct / mechanical pages</div>
-    <div class="pp-sub">Tap the sheets you want to work on — everything else is ignored, so the layer panel only shows what's on these pages. Sheets that look like mechanical (lots of duct sizes) are pre-selected for you; confirm or change them.</div>
-    <div class="pp-actions">
-      <button class="btn" id="ppAll">Select all</button>
-      <button class="btn" id="ppNone">Clear</button>
-      <span class="status" id="ppCount"></span>
-      <div class="spacer" style="flex:1"></div>
-      <button class="btn go" id="ppDone">Use selected pages</button>
-    </div>
-  </div>
-  <div class="pp-grid" id="ppGrid"></div>
+ <div class="pp-head">
+   <div class="pp-title">Select the duct / mechanical pages</div>
+   <div class="pp-sub">Tap the sheets you want to work on — everything else is ignored, so the layer panel only shows what's on these pages. Sheets that look like mechanical (lots of duct sizes) are pre-selected for you; confirm or change them.</div>
+   <div class="pp-actions">
+     <button class="btn" id="ppAll">Select all</button>
+     <button class="btn" id="ppNone">Clear</button>
+     <span class="status" id="ppCount"></span>
+     <div class="spacer" style="flex:1"></div>
+     <button class="btn go" id="ppDone">Use selected pages</button>
+   </div>
+ </div>
+ <div class="pp-grid" id="ppGrid"></div>
 </div>
 
 <script>
@@ -621,7 +625,7 @@ async function renderPage(){
   await sampleDarknessHiRes(page);    // (no-op when vector color is reliable; otherwise raster fallback)
   classify(); drawOverlay();
   try{ var __dm=document.getElementById('darkMap'); var __sp=document.getElementById('shadePalette'); if(__dm&&__dm.checked){ if(__sp){__sp.style.display='block';} buildShadePalette(); } buildColorPalette(); }catch(e){}
-  setStatus(segments.length+' segments · '+tags.length+' size tags · page '+pageNum + (ductRef?'':'   -   🎯 click a piece of duct to calibrate color + thickness'));
+  setStatus(segments.length+' segments · '+tags.length+' size tags · page '+pageNum + (ductRef?'':'   -   click a piece of duct to calibrate color + thickness'));
   try{ if(!window.__wizShown){ window.__wizShown=true; setTimeout(function(){ openWizard(); }, 350); } }catch(e){}
   if(!ductRef){ pickMode=true; try{ document.getElementById('overlay').style.cursor='crosshair'; }catch(e){} }
 }
@@ -1962,11 +1966,11 @@ function refreshSel(){
   // toolbar button
   var btn=document.createElement('button'); btn.id='tapToolBtn'; btn.title='Add taps: set style/size/direction, then click the duct';
   btn.textContent='\u2795 Tap';
-  btn.style.cssText='position:fixed;top:12px;right:118px;z-index:99999;height:44px;padding:0 12px;border-radius:10px;border:2px solid #b8862b;background:#13212e;color:#ffe6b0;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.4)';
+  btn.style.cssText='position:fixed;top:12px;right:118px;z-index:99999;height:44px;padding:0 12px;border-radius:10px;border:1px solid #dde2e9;background:#fff;color:#b06a00;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 3px 12px rgba(30,40,60,.12)';
   document.body.appendChild(btn);
   // config panel
   var pan=document.createElement('div'); pan.id='tapPanel';
-  pan.style.cssText='position:fixed;top:62px;right:14px;z-index:99999;display:none;width:216px;background:rgba(13,27,39,.97);color:#fff;border:1px solid #b8862b;border-radius:10px;padding:11px;font:12px system-ui,sans-serif;box-shadow:0 6px 22px rgba(0,0,0,.5)';
+  pan.style.cssText='position:fixed;top:62px;right:14px;z-index:99999;display:none;width:216px;background:#ffffff;color:#2b3441;border:1px solid #dde2e9;border-radius:11px;padding:12px;font:12px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;box-shadow:0 8px 24px rgba(30,40,60,.16)';
   function tb(g,v,lab,cur){ return '<button data-g="'+g+'" data-v="'+v+'" style="flex:1;padding:6px 4px;border-radius:6px;border:2px solid '+(cur===v?'#e07b00':'transparent')+';background:#0e1923;color:#fff;cursor:pointer;font-size:11px">'+lab+'</button>'; }
   function paint(){ pan.innerHTML=
     '<div style="font-weight:700;margin-bottom:8px">Tap setup</div>'+
@@ -2041,6 +2045,35 @@ function refreshSel(){
   function n2s(nx,ny){ if(!window.__nvt||!viewport) return null; var u=invApplyN(window.__nvt,nx,ny); return applyM(viewport.transform,u[0],u[1]); }
   window.__n2s=n2s;
   window.__renderPanel=function(){ try{ return renderPanel(); }catch(e){} };
+  // Insert a fitting INTO a straight piece at a click position (alongIn from the piece start).
+  // spec:{type:'elbow90'|'elbow45'|'transition'|'s2r'|'reducer'|'offset'|'cap', dir:'L'|'R'|'start'|'end', size:{w,h,round}}
+  window.__doInsert=function(runId, pieceIdx, alongIn, spec){
+    var run=findRun(runId); if(!run) return false; var pieces=run.pieces, p=pieces[pieceIdx];
+    if(!p||p.kind!=='straight'){ if(typeof setStatus==='function') setStatus('Pick a straight length of duct to insert into.'); return false; }
+    var L=p.lenIn||0, a=Math.max(0,Math.min(L, alongIn||0));
+    var w=p.widthIn, dep=(p.depthIn!=null?p.depthIn:null), rr=!!p.round, sz=p.size;
+    function mkS(len){ return {kind:'straight',lenIn:rnd(Math.max(0,len)),widthIn:w,depthIn:dep,size:sz,cid:rr?'spiral':'st',camduct:rr?'Spiral':'Straight Duct',round:rr}; }
+    var before=mkS(a), after=mkS(L-a), t=spec.type;
+    if(t==='cap'){ pieces.splice(pieceIdx, pieces.length-pieceIdx, before, {kind:'fitting',cid:'cap',camduct:'End Cap',round:rr,lenIn:0,widthIn:w,depthIn:dep,size:sz,_cap:true}); renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Capped the duct here.'); return true; }
+    var fit;
+    if(t==='elbow90'||t==='elbow45'){ var ang=(t==='elbow45'?Math.PI/4:Math.PI/2)*((spec.dir==='L')?1:-1);
+      fit={kind:'fitting',cid:(t==='elbow45'?'e45':'e90'),camduct:(t==='elbow45'?'45 Elbow':'90 Elbow'),round:rr,lenIn:0,turn:ang,widthIn:w,depthIn:dep,size:sz,_elbow:true}; }
+    else if(t==='offset'){ fit={kind:'fitting',cid:'offset',camduct:'Offset',round:rr,lenIn:12,widthIn:w,depthIn:dep,size:sz,_offset:true}; }
+    else if(t==='transition'||t==='reducer'||t==='s2r'){
+      var sp=spec.size||{}, nW=sp.w||w, nR=(t==='s2r')?true:!!sp.round, nD=nR?nW:(sp.h!=null?sp.h:dep), nS=nR?('\u00f8'+nW):(nW+'\u00d7'+(nD!=null?nD:'?'));
+      var cid=(t==='s2r')?'s2r':(nR?'reducer':'tr'), cn=(t==='s2r')?'Sq to Round':(nR?'Reducer':'Transition');
+      var toEnd=(spec.dir!=='start');
+      fit={kind:'fitting',cid:cid,camduct:cn,round:nR,lenIn:12,widthIn:nW,depthIn:nD,size:nS,inW:(toEnd?w:nW),outW:(toEnd?nW:w),outD:nD,_sizeStep:true,_newSide:(toEnd?'end':'start'),_newW:nW,_newD:nD,_newR:nR,_newS:nS};
+    } else { return false; }
+    var flen=fit.lenIn||0; if(flen>0){ if((after.lenIn||0)>=flen) after.lenIn=rnd(after.lenIn-flen); else if((before.lenIn||0)>=flen) before.lenIn=rnd(before.lenIn-flen); }
+    pieces.splice(pieceIdx,1,before,fit,after);
+    if(fit._sizeStep){ var toEnd2=(fit._newSide==='end');
+      if(toEnd2){ for(var k=pieceIdx+2;k<pieces.length;k++){ var q=pieces[k]; if(q.kind==='straight'){ q.widthIn=fit._newW; q.depthIn=fit._newD; q.round=fit._newR; q.size=fit._newS; q.cid=fit._newR?'spiral':'st'; q.camduct=fit._newR?'Spiral':'Straight Duct'; } } }
+      else { for(var k2=0;k2<pieceIdx+1;k2++){ var q2=pieces[k2]; if(q2.kind==='straight'){ q2.widthIn=fit._newW; q2.depthIn=fit._newD; q2.round=fit._newR; q2.size=fit._newS; q2.cid=fit._newR?'spiral':'st'; q2.camduct=fit._newR?'Spiral':'Straight Duct'; } } if(pieceIdx>=0){ run.widthIn=fit._newW; } }
+      try{ applyReducerDownstream(run); }catch(_){}
+    }
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Inserted '+fit.camduct+(fit._sizeStep?(' \u2192 '+fit._newS):'')+'.'); return true;
+  };
   function fmtFt(inch){ var f=Math.floor(inch/12), i=Math.round(inch-f*12); if(i>=12){f++;i-=12;} return (f>0?f+"'":'')+(i?i+'"':(f>0?'':'0"')); }
   function hexA(hex,a){ var h=(hex||'#15e06a').replace('#',''); if(h.length===3)h=h.split('').map(function(c){return c+c;}).join(''); var r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16); return 'rgba('+r+','+g+','+b+','+a+')'; }
   function vh(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
@@ -2611,6 +2644,15 @@ function refreshSel(){
             }
             setStatus('Type elbow, transition, or offset.'); return;
           }
+          if(m==='insert'){
+            var A=[(pts[0][0]+pts[3][0])/2,(pts[0][1]+pts[3][1])/2], B=[(pts[1][0]+pts[2][0])/2,(pts[1][1]+pts[2][1])/2];
+            var svg=document.getElementById('overlay'), loc=A;
+            try{ var spt=svg.createSVGPoint(); spt.x=e.clientX; spt.y=e.clientY; var l=spt.matrixTransform(svg.getScreenCTM().inverse()); loc=[l.x,l.y]; }catch(_){}
+            var ux=B[0]-A[0], uy=B[1]-A[1], LL=(ux*ux+uy*uy)||1; var frac=Math.max(0,Math.min(1,((loc[0]-A[0])*ux+(loc[1]-A[1])*uy)/LL));
+            var alongIn=frac*(p.lenIn||0);
+            if(window.__fitMenu) window.__fitMenu(run.id, i, alongIn, p.size||(p.widthIn+'\u00d7?'), e.clientX, e.clientY);
+            return;
+          }
           if(e.shiftKey){ if(sel.has(key))sel.delete(key); else sel.add(key); } else { sel.clear(); sel.add(key); }
           selRun=run.id; renderItems(); renderPanel(); };
         poly.addEventListener('mousedown',pcHit,true);
@@ -2659,7 +2701,7 @@ function refreshSel(){
   function renderPanel(){
     var p=document.getElementById('itemPanelBody'); if(!p) return;
     var runs=window.__runs2d||[];
-    if(!runs.length){ p.innerHTML='<div class="hint">No takeoff yet. Detect duct, then hit ➕ Build takeoff (it builds the runs for you).</div>'; return; }
+    if(!runs.length){ p.innerHTML='<div class="hint">No takeoff yet. Detect duct, then hit Build takeoff (it builds the runs for you).</div>'; return; }
     var totLF=0,totJ=0; runs.forEach(function(r){ r.pieces.forEach(function(pc){ if(pc.kind==='straight'){ totLF+=pc.lenIn/12; totJ++; } }); });
     var h='<div class="hint" style="margin-bottom:6px;color:#bfe6ff"><b>'+runs.length+'</b> runs \u00b7 <b>'+totJ+'</b> joints \u00b7 <b>'+Math.round(totLF)+' LF</b></div>';
     // multi-select action bar
@@ -2668,8 +2710,10 @@ function refreshSel(){
       +'<div style="display:flex;gap:5px;margin-bottom:5px">'+palette.map(function(c){return '<button onclick="__selColor(\''+c+'\')" style="width:20px;height:20px;border-radius:4px;border:1px solid #fff3;background:'+c+';cursor:pointer"></button>';}).join('')+'</div>'
       +'<div style="display:flex;gap:5px"><input id="selLabel" placeholder="label run" style="flex:1;padding:5px;border:1px solid #345;border-radius:5px;background:#0e1923;color:#fff"><button onclick="__selName()" style="padding:5px 9px;border:none;border-radius:5px;background:#15a;color:#fff;cursor:pointer">Set</button></div>'
       +'</div>'; }
+    if(!selRun){ h+='<div class="hint" style="opacity:.75">Click a duct run on the plan to view &amp; edit it here.</div>'; }
     runs.forEach(function(run){
-      var open=(selRun===run.id);
+      if(selRun!==run.id) return;                 // list stays clear until you click a run — then show just that one
+      var open=true;
       h+='<div class="aicard" style="border-color:'+run.color+'33">'
         +'<div class="h" style="cursor:pointer" onclick="__runOpen(\''+run.id+'\')"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+run.color+';margin-right:5px"></span>'+(run.label?vh(run.label)+' \u00b7 ':'')+run.axis+' run'+(run._flag==='mismatch'?' <span style="color:#e0a92a">\u26a0 size?</span>':run._flag==='1-wall'?' <span style="color:#e0a92a">\u26a0 1-wall</span>':'')+(run._needH?' <span style="color:#e0a92a" title="width from line scale; height unknown \u2014 no size tag on this run">\u26a0 H?</span>':'')+' \u00b7 '+run.pieces.length+' pc \u00b7 '+fmtFt(runLenIn(run))+'</div>';
       if(open){
@@ -3577,11 +3621,10 @@ function drawMissViz(items){
     var parent=layer.parentNode; var viz=document.getElementById('aiMissViz');
     if(!viz){ viz=document.createElementNS('http://www.w3.org/2000/svg','g'); viz.id='aiMissViz'; parent.appendChild(viz); }
     var frag='';
-    (items||[]).forEach(function(c){ var a=n2s(c.ax,c.ay), b=n2s(c.bx,c.by); if(!a||!b) return;
-      frag+='<line x1="'+a[0].toFixed(1)+'" y1="'+a[1].toFixed(1)+'" x2="'+b[0].toFixed(1)+'" y2="'+b[1].toFixed(1)+'" stroke="#ffd000" stroke-width="4" stroke-opacity="0.85" stroke-dasharray="7 5"/>';
-      var mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2;
-      frag+='<circle cx="'+mx.toFixed(1)+'" cy="'+my.toFixed(1)+'" r="7" fill="#ffd000" fill-opacity="0.9"/><text x="'+mx.toFixed(1)+'" y="'+(my+4).toFixed(1)+'" font-size="10" font-weight="700" text-anchor="middle" fill="#000">!</text>';
-    });
+    (items||[]).forEach(function(b){ var p0=n2s(b.x0,b.y0),p1=n2s(b.x1,b.y0),p2=n2s(b.x1,b.y1),p3=n2s(b.x0,b.y1); if(!p0||!p2) return;
+      frag+='<polygon points="'+[p0,p1,p2,p3].map(function(p){return p[0].toFixed(1)+','+p[1].toFixed(1);}).join(' ')+'" fill="rgba(255,208,0,0.13)" stroke="#ffd000" stroke-width="2.5" stroke-dasharray="7 5"/>';
+      var cx=(p0[0]+p2[0])/2, cy=(p0[1]+p2[1])/2;
+      frag+='<circle cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="8" fill="#ffd000"/><text x="'+cx.toFixed(1)+'" y="'+(cy+4).toFixed(1)+'" font-size="11" font-weight="800" text-anchor="middle" fill="#000">!</text>'; });
     viz.innerHTML=frag;
   }catch(e){ console.warn('miss viz failed',e); }
 }
@@ -3590,59 +3633,37 @@ async function aiFindMissing(){
   var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,'');
   if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
   if(!pdfDoc){ out.innerHTML='<div class="hint">Load a print first.</div>'; return; }
-  var R=window.__runs2d||[], SG=window.__sgRuns||[];
-  if(!SG.length){ out.innerHTML='<div class="hint">Build runs first (\uD83D\uDE82 track-walk) so there are candidate centerlines.</div>'; return; }
-  var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125); var poly=window.__runPoly;
+  var R=window.__runs2d||[], poly=window.__runPoly;
   var RP=R.map(function(r){ return poly?poly(r):[[r.start[0],r.start[1]],[r.end[0],r.end[1]]]; });
-  function spd(px,py,ax,ay,bx,by){ var dx=bx-ax,dy=by-ay,L2=dx*dx+dy*dy; if(L2===0) return Math.hypot(px-ax,py-ay); var t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/L2)); return Math.hypot(px-(ax+dx*t),py-(ay+dy*t)); }
-  function p2poly(px,py,pl){ var b=1e9; for(var i=0;i<pl.length-1;i++){ b=Math.min(b,spd(px,py,pl[i][0],pl[i][1],pl[i+1][0],pl[i+1][1])); } return b; }
-  var cand=[];                                                              // candidate centerlines with NO run built on them
-  SG.forEach(function(sg,i){ var c=sg.corners; if(!c||c.length<4) return;
-    var ax=(c[0][0]+c[3][0])/2, ay=(c[0][1]+c[3][1])/2, bx=(c[1][0]+c[2][0])/2, by=(c[1][1]+c[2][1])/2;
-    var L=Math.hypot(bx-ax,by-ay); if(L < ppi*48) return;                    // >=4ft
-    var n=Math.max(4,Math.min(16,Math.round(L/(ppi*12)))), on=0;
-    for(var k=0;k<=n;k++){ var t=k/n, px=ax+(bx-ax)*t, py=ay+(by-ay)*t, cov=false;
-      for(var j=0;j<RP.length;j++){ if(p2poly(px,py,RP[j]) <= R[j].widthIn/2*ppi+ppi*4){ cov=true; break; } }
-      if(cov) on++; }
-    if(on/(n+1) < 0.5){ var wpt=Math.hypot(c[0][0]-c[3][0],c[0][1]-c[3][1]); cand.push({id:cand.length, sg:i, ax:ax,ay:ay,bx:bx,by:by, wIn:Math.round(wpt/ppi), lenFt:Math.round(L/ppi/12)}); }
-  });
-  if(!cand.length){ out.innerHTML='<div class="hint" style="color:#bdf5cf">No uncovered duct candidates \u2014 every substantial centerline already has a run.</div>'; return; }
-  out.innerHTML='<div class="hint"><span class="spin"></span> found '+cand.length+' un-built centerlines \u2014 asking the AI which are real duct\u2026</div>';
-  var imgPrint=null, imgOv=null;
+  out.innerHTML='<div class="hint"><span class="spin"></span> scanning the print for ductwork that has no run\u2026</div>';
+  var imgPrint=null, imgRuns=null, pageW=0, pageH=0;
   try{
-    var page=await pdfDoc.getPage(pageNum); var vp1=page.getViewport({scale:1});
+    var page=await pdfDoc.getPage(pageNum); var vp1=page.getViewport({scale:1}); pageW=Math.round(vp1.width); pageH=Math.round(vp1.height);
     var S=Math.min(1, 2200/Math.max(vp1.width,vp1.height)); var vp=page.getViewport({scale:S}); var W=Math.ceil(vp.width),H=Math.ceil(vp.height);
     var pc=document.createElement('canvas'); pc.width=W; pc.height=H; var pcx=pc.getContext('2d');
     await withPageRender(function(){ return page.render({canvasContext:pcx, viewport:vp, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
     imgPrint=pc.toDataURL('image/jpeg',0.9).split(',')[1];
     var oc=document.createElement('canvas'); oc.width=W; oc.height=H; var ox=oc.getContext('2d');
-    ox.fillStyle='#ffffff'; ox.fillRect(0,0,W,H);
-    ox.strokeStyle='#16a34a'; ox.lineWidth=2;                               // existing runs = solid green
+    ox.fillStyle='#ffffff'; ox.fillRect(0,0,W,H); ox.strokeStyle='#16a34a'; ox.lineWidth=3;
     RP.forEach(function(pl){ ox.beginPath(); pl.forEach(function(p,k){ var x=p[0]*S,y=p[1]*S; if(k===0)ox.moveTo(x,y); else ox.lineTo(x,y); }); ox.stroke(); });
-    ox.strokeStyle='#ea580c'; ox.lineWidth=3; ox.setLineDash([7,5]);        // uncovered candidates = dashed orange, numbered
-    cand.forEach(function(c){ ox.beginPath(); ox.moveTo(c.ax*S,c.ay*S); ox.lineTo(c.bx*S,c.by*S); ox.stroke();
-      var mx=(c.ax+c.bx)/2*S, my=(c.ay+c.by)/2*S; ox.setLineDash([]); ox.font='bold 13px sans-serif'; ox.lineWidth=3; ox.strokeStyle='#fff'; ox.strokeText(String(c.id),mx+2,my-2); ox.fillStyle='#ea580c'; ox.fillText(String(c.id),mx+2,my-2); ox.setLineDash([7,5]); ox.strokeStyle='#ea580c'; });
-    ox.setLineDash([]);
-    imgOv=oc.toDataURL('image/jpeg',0.9).split(',')[1];
+    imgRuns=oc.toDataURL('image/jpeg',0.9).split(',')[1];
   }catch(e){ out.innerHTML='<div class="hint">Couldn\u2019t render the sheet: '+vhEsc(e.message||e)+'</div>'; return; }
-  var meta=cand.map(function(c){ return {id:c.id, wIn:c.wIn, lenFt:c.lenFt}; });
-  var prompt='You are checking an HVAC takeoff for MISSED duct. Two images, SAME frame. IMAGE 1 = clean printed plan. IMAGE 2 = green solid lines are duct runs the software already built; orange dashed NUMBERED lines are candidate centerlines where it built NO run. For each numbered orange candidate, look at that location in IMAGE 1 and decide: is there REAL ductwork there (a pair of parallel duct walls forming a duct) that was missed? Answer true only if you can see actual duct at that spot; answer false if the orange line is on text, a wall, a grille, dimension leaders, or empty space. Reply ONLY JSON: {"add":[{"id":<candidate number>,"isDuct":true|false,"conf":0..1,"why":"<=6 words"}]}. Candidate metadata (id,wIn,lenFt): '+JSON.stringify(meta);
+  var prompt='You are auditing an HVAC duct takeoff for MISSED duct. TWO images, SAME frame and scale. IMAGE 1 = the clean printed plan. IMAGE 2 = every duct RUN the software built, drawn as GREEN lines on white at the same positions. Find spots where IMAGE 1 clearly shows a DUCT (a pair of parallel duct walls running together) but IMAGE 2 has NO green line covering it. Ignore pipe, walls, grilles/diffusers, dimension leaders, and text. For each missed duct give a bounding box in PAGE POINTS \u2014 the page is '+pageW+' wide \u00d7 '+pageH+' tall, x increases right, y increases down, and the images show the full page. Reply ONLY JSON, no prose: {"missing":[{"x0":num,"y0":num,"x1":num,"y1":num,"approxWidthIn":num,"why":"<=6 words"}]}. Return {"missing":[]} if nothing is clearly missed.';
   try{
     var ctrl=new AbortController(), to=setTimeout(function(){ctrl.abort();}, 120000);
-    var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:3000,messages:[{role:'user',content:[{type:'text',text:'IMAGE 1 \u2014 clean print:'},{type:'image',source:{type:'base64',media_type:'image/jpeg',data:imgPrint}},{type:'text',text:'IMAGE 2 \u2014 built runs (green) + un-built candidates (orange dashed, numbered):'},{type:'image',source:{type:'base64',media_type:'image/jpeg',data:imgOv}},{type:'text',text:prompt}]}]})});
+    var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:3000,messages:[{role:'user',content:[{type:'text',text:'IMAGE 1 \u2014 clean print:'},{type:'image',source:{type:'base64',media_type:'image/jpeg',data:imgPrint}},{type:'text',text:'IMAGE 2 \u2014 runs the software built (green), same frame:'},{type:'image',source:{type:'base64',media_type:'image/jpeg',data:imgRuns}},{type:'text',text:prompt}]}]})});
     clearTimeout(to);
     if(!resp.ok){ var et=await resp.text(); out.innerHTML='<div class="hint">HTTP '+resp.status+': '+vhEsc(et.slice(0,240))+'</div>'; return; }
     var data=await resp.json(); if(data.error){ out.innerHTML='<div class="hint">AI error: '+vhEsc(JSON.stringify(data.error).slice(0,240))+'</div>'; return; }
     var txt=(data.content||[]).filter(function(z){return z.type==='text';}).map(function(z){return z.text;}).join('').replace(/```json|```/g,'').trim();
     var jm=txt.indexOf('{'); if(jm>0) txt=txt.slice(jm); var res=null; try{res=JSON.parse(txt);}catch(e){}
-    if(!res||!res.add){ window.__aiMissRaw=txt; out.innerHTML='<div class="hint">AI didn\u2019t return clean JSON (raw in window.__aiMissRaw).</div>'; return; }
-    var byId={}; cand.forEach(function(c){ byId[c.id]=c; });
-    var confirmed=res.add.filter(function(a){ return a.isDuct && (a.conf==null?0.5:a.conf)>=0.6 && byId[a.id]; }).map(function(a){ var c=byId[a.id]; c._why=a.why; c._conf=a.conf; return c; });
-    window.__aiMissing=confirmed;
-    drawMissViz(confirmed);
-    var h='<div class="hint" style="color:#ffe9b0"><b>Missing-duct second look:</b> '+cand.length+' un-built centerlines checked \u00b7 <b>'+confirmed.length+'</b> look like real duct (drawn dashed yellow with !)'+(data.usage?(' \u00b7 '+(data.usage.input_tokens||0)+'+'+(data.usage.output_tokens||0)+' tok'):'')+'. These are candidates to add \u2014 use the \u2795 Tap / resize tools to build them, or eyeball first.</div>';
-    h+='<div style="max-height:300px;overflow:auto;font-size:11px;font-family:ui-monospace,monospace;margin-top:4px"><table style="width:100%;border-collapse:collapse"><tr style="color:#9fb2c8"><th>cand</th><th>~w</th><th>len ft</th><th>duct?</th><th>conf</th><th style="text-align:left">why</th></tr>';
-    res.add.forEach(function(a){ var c=byId[a.id]; if(!c) return; h+='<tr style="border-top:1px solid #1e2a38'+(a.isDuct?'':';opacity:.45')+'"><td style="text-align:center">'+a.id+'</td><td style="text-align:center">'+c.wIn+'</td><td style="text-align:center">'+c.lenFt+'</td><td style="text-align:center;color:'+(a.isDuct?'#7ddb7d':'#888')+'">'+(a.isDuct?'yes':'no')+'</td><td style="text-align:center">'+(a.conf!=null?a.conf:'')+'</td><td>'+vhEsc(a.why||'')+'</td></tr>'; });
+    if(!res||!res.missing){ window.__aiMissRaw=txt; out.innerHTML='<div class="hint">AI didn\u2019t return clean JSON (raw in window.__aiMissRaw).</div>'; return; }
+    var boxes=res.missing.filter(function(b){ return b && b.x0!=null && b.x1!=null && b.y0!=null && b.y1!=null; });
+    window.__aiMissing=boxes; drawMissViz(boxes);
+    if(!boxes.length){ out.innerHTML='<div class="hint" style="color:#bdf5cf">AI found no clearly-missed duct \u2014 the runs cover what it can see.</div>'; return; }
+    var h='<div class="hint" style="color:#ffe9b0"><b>Missing-duct sweep:</b> AI flagged <b>'+boxes.length+'</b> spot(s) with duct on the print but no run (dashed-yellow ! boxes on the plan)'+(data.usage?(' \u00b7 '+(data.usage.input_tokens||0)+'+'+(data.usage.output_tokens||0)+' tok'):'')+'. Build them with the \ud83d\udee0 Edit tools (Drag-end / Insert fitting).</div>';
+    h+='<div style="max-height:280px;overflow:auto;font-size:11px;font-family:ui-monospace,monospace;margin-top:4px"><table style="width:100%;border-collapse:collapse"><tr style="color:#9fb2c8"><th>#</th><th>~w in</th><th style="text-align:left">why</th></tr>';
+    boxes.forEach(function(b,i){ h+='<tr style="border-top:1px solid #1e2a38"><td style="text-align:center">'+(i+1)+'</td><td style="text-align:center">'+(b.approxWidthIn!=null?b.approxWidthIn:'-')+'</td><td>'+vhEsc(b.why||'')+'</td></tr>'; });
     h+='</table></div>'; out.innerHTML=h;
   }catch(e){ out.innerHTML='<div class="hint">'+(e.name==='AbortError'?'Timed out \u2014 dense sheet; try again.':('Error: '+vhEsc(e.message||e)))+'</div>'; }
 }
@@ -3652,7 +3673,7 @@ async function aiAssignTagsTest(){
   if(!wurl){ out.innerHTML='<div class="hint">Set the AI worker URL first.</div>'; return; }
   if(!pdfDoc){ out.innerHTML='<div class="hint">Load a print first.</div>'; return; }
   var SG=window.__sgRuns||[], TG=(typeof tags!=='undefined'&&tags)?tags:[];
-  if(!SG.length){ out.innerHTML='<div class="hint">Build runs first (🚂 track-walk) so there are centerlines to assign to.</div>'; return; }
+  if(!SG.length){ out.innerHTML='<div class="hint">Build runs first (track-walk) so there are centerlines to assign to.</div>'; return; }
   var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
   var CL=[], clById={};
   SG.forEach(function(sg,i){ var c=sg.corners; if(!c||c.length<4) return;
@@ -4173,12 +4194,12 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ selected.clear();
   if(wc) wc.onclick=function(){ workArea=null; classify(); drawOverlay(); setStatus('Work area cleared.'); };
   if(ta) ta.onclick=function(){ var b=document.getElementById('aiScan'); if(b) b.click(); };
   if(tc) tc.onclick=function(){ confirmTakeoff(); };
-  var tl=document.getElementById('tbLock'); if(tl) tl.onclick=lockInTakeoff; var rs=document.getElementById('tbRunSel'); if(rs) rs.onclick=function(){ selectionDone=true; classify(); drawOverlay(); try{ setStatus('Line selection run \u2014 adjust filters to re-run live, or use AI review to refine.'); }catch(e){} }; var pk=document.getElementById('tbPick'); if(pk) pk.onclick=function(){ pickMode=true; try{document.getElementById('overlay').style.cursor='crosshair';}catch(e){} setStatus('🎯 Click a piece of duct on the print to set color + thickness.'); }; var mtd=document.getElementById('mTolD'), mtw=document.getElementById('mTolW'); function updTol(){ var a=document.getElementById('mTolDV'); if(a&&mtd)a.textContent=parseFloat(mtd.value).toFixed(2); var b2=document.getElementById('mTolWV'); if(b2&&mtw)b2.textContent=(parseFloat(mtw.value)>=3?'off':parseFloat(mtw.value).toFixed(1)); if(matchSample){ classify(); drawOverlay(); var bk=segments.filter(function(s){return s.cls==='duct';}).length; setStatus('Matched '+bk+' lines.'); } } if(mtd)mtd.addEventListener('input',updTol); if(mtw)mtw.addEventListener('input',updTol); var eb=document.getElementById('exportLearn'); if(eb) eb.onclick=exportLearning; var ib=document.getElementById('importLearn'), ifl=document.getElementById('importLearnFile'); if(ib&&ifl){ ib.onclick=function(){ ifl.click(); }; ifl.onchange=function(){ if(ifl.files&&ifl.files[0]) importLearning(ifl.files[0]); ifl.value=''; }; }
+  var tl=document.getElementById('tbLock'); if(tl) tl.onclick=lockInTakeoff; var rs=document.getElementById('tbRunSel'); if(rs) rs.onclick=function(){ selectionDone=true; classify(); drawOverlay(); try{ setStatus('Line selection run \u2014 adjust filters to re-run live, or use AI review to refine.'); }catch(e){} }; var pk=document.getElementById('tbPick'); if(pk) pk.onclick=function(){ pickMode=true; try{document.getElementById('overlay').style.cursor='crosshair';}catch(e){} setStatus('Click a piece of duct on the print to set color + thickness.'); }; var mtd=document.getElementById('mTolD'), mtw=document.getElementById('mTolW'); function updTol(){ var a=document.getElementById('mTolDV'); if(a&&mtd)a.textContent=parseFloat(mtd.value).toFixed(2); var b2=document.getElementById('mTolWV'); if(b2&&mtw)b2.textContent=(parseFloat(mtw.value)>=3?'off':parseFloat(mtw.value).toFixed(1)); if(matchSample){ classify(); drawOverlay(); var bk=segments.filter(function(s){return s.cls==='duct';}).length; setStatus('Matched '+bk+' lines.'); } } if(mtd)mtd.addEventListener('input',updTol); if(mtw)mtw.addEventListener('input',updTol); var eb=document.getElementById('exportLearn'); if(eb) eb.onclick=exportLearning; var ib=document.getElementById('importLearn'), ifl=document.getElementById('importLearnFile'); if(ib&&ifl){ ib.onclick=function(){ ifl.click(); }; ifl.onchange=function(){ if(ifl.files&&ifl.files[0]) importLearning(ifl.files[0]); ifl.value=''; }; }
   var stb=document.getElementById('saveTakeoff'); if(stb) stb.onclick=saveTakeoff; var ltb=document.getElementById('loadTakeoff'), ltf=document.getElementById('loadTakeoffFile'); if(ltb&&ltf){ ltb.onclick=function(){ ltf.click(); }; ltf.onchange=function(){ if(ltf.files&&ltf.files[0]) loadTakeoff(ltf.files[0]); ltf.value=''; }; }
   var ss=document.getElementById('scaleSel'); if(ss) ss.onchange=function(){ scaleIPF=parseFloat(this.value)||0.125; scaleAuto=false; updateScaleUI(); }; var sa=document.getElementById('scaleAI'); if(sa) sa.addEventListener('click', readScaleAI); try{ updateScaleUI(); }catch(e){} })();
 
 (function(){ // collapsible, clearly-labeled sidebar sections — everything stays one click away
-  var collapseByDefault=['completed takeoff','classification','duct width filter','layers','selection','cleanup tools'];
+  var collapseByDefault=['completed takeoff','classification','duct width filter','layers','selection','cleanup tools','ai scan'];
   document.querySelectorAll('aside .sec').forEach(function(sec){
     var h=sec.querySelector(':scope > h3'); if(!h) return;
     h.addEventListener('click', function(){ sec.classList.toggle('collapsed'); });
@@ -4327,19 +4348,20 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
 })();
 </script>
 
-<div id="dtBar" style="position:fixed;top:120px;right:0;z-index:9998;display:flex;flex-direction:column;align-items:flex-end;font-family:inherit;user-select:none">
-  <button id="dtBarToggle" title="Duct editing tools" style="background:#14202a;border:1px solid #3b6a8a;border-right:none;color:#bff;border-radius:8px 0 0 8px;padding:9px 11px;cursor:pointer;font-weight:800;font-size:13px;box-shadow:-2px 2px 8px rgba(0,0,0,.35)">🛠 Edit ▸</button>
-  <div id="dtBarBody" style="display:none;background:#0c141c;border:1px solid #2c4658;border-right:none;border-radius:10px 0 0 10px;padding:9px;margin-top:4px;box-shadow:-3px 3px 14px rgba(0,0,0,.45);width:198px">
-    <div style="font-size:10px;color:#8fb;opacity:.65;margin:0 0 7px 2px;letter-spacing:.4px">DUCT EDITING — pick a tool, then act on the plan</div>
-    <button class="dtTool" data-mode="dragsize" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#14202a;border:1px solid #3b6a8a;color:#bdf;border-radius:7px;padding:8px 9px;cursor:pointer;font-weight:700;font-size:12px">↔ Drag-resize width</button>
-    <button class="dtTool" data-mode="draglen" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#101f2a;border:1px solid #3a7f9a;color:#bfe;border-radius:7px;padding:8px 9px;cursor:pointer;font-weight:700;font-size:12px">⬍ Drag-end (length)</button>
-    <button class="dtTool" data-mode="tap" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#1a2410;border:1px solid #5a7a3b;color:#cfeab0;border-radius:7px;padding:8px 9px;cursor:pointer;font-weight:700;font-size:12px">➕ Tap off a side</button>
-    <button class="dtTool" data-mode="insertfit" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#241a2a;border:1px solid #7a5a9a;color:#e6d0ff;border-radius:7px;padding:8px 9px;cursor:pointer;font-weight:700;font-size:12px">⎇ Insert fitting (elbow/trans/offset)</button>
-    <button class="dtTool" data-mode="size" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#14202a;border:1px solid #3b6a8a;color:#bdf;border-radius:7px;padding:8px 9px;cursor:pointer;font-weight:700;font-size:12px">✎ Type a size</button>
-    <button class="dtTool" data-mode="delete" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#2a1414;border:1px solid #8a3b3b;color:#fbb;border-radius:7px;padding:8px 9px;cursor:pointer;font-weight:700;font-size:12px">🗑 Delete run</button>
-    <button id="dtOff" style="display:block;width:100%;text-align:center;background:#1b2530;border:1px solid #445;color:#9ab;border-radius:7px;padding:7px 9px;cursor:pointer;font-weight:700;font-size:12px">✓ Done / select</button>
-    <div id="dtHint" style="font-size:10.5px;color:#8fd0ff;margin-top:8px;min-height:15px;line-height:1.35"></div>
-  </div>
+<div id="dtBar" style="position:fixed;top:120px;right:0;z-index:9998;display:flex;flex-direction:column;align-items:flex-end;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;user-select:none">
+ <button id="dtBarToggle" title="Duct editing tools" style="background:#fff;border:1px solid #dde2e9;border-right:none;color:#3a4656;border-radius:9px 0 0 9px;padding:9px 12px;cursor:pointer;font-weight:700;font-size:13px;box-shadow:-2px 2px 10px rgba(30,40,60,.10)">Edit</button>
+ <div id="dtBarBody" style="display:none;background:#fff;border:1px solid #dde2e9;border-right:none;border-radius:11px 0 0 11px;padding:11px;margin-top:5px;box-shadow:-3px 3px 16px rgba(30,40,60,.14);width:204px">
+   <div style="font-size:10px;color:#8a93a1;margin:0 0 8px 2px;letter-spacing:.4px;text-transform:uppercase;font-weight:600">Duct editing</div>
+   <button class="dtTool" data-mode="dragsize" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-resize width</button>
+   <button class="dtTool" data-mode="draglen" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-end (length)</button>
+   <button class="dtTool" data-mode="move" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Move run</button>
+   <button id="dtTapBtn" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Tap off a side</button>
+   <button class="dtTool" data-mode="insert" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Insert fitting</button>
+   <button class="dtTool" data-mode="size" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Type a size</button>
+   <button class="dtTool" data-mode="delete" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#fdf2f2;border:1px solid #f2d4d4;color:#c0484d;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Delete run</button>
+   <button id="dtOff" style="display:block;width:100%;text-align:center;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">Done / select</button>
+   <div id="dtHint" style="font-size:10.5px;color:#5b8def;margin-top:8px;min-height:15px;line-height:1.35"></div>
+ </div>
 </div>
 <script>
 (function(){
@@ -4348,13 +4370,17 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   var tog=document.getElementById('dtBarToggle'), body=document.getElementById('dtBarBody'), hint=document.getElementById('dtHint');
   function ppiFn(){ return 6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125); }
   function status(s){ try{ if(typeof setStatus==='function') setStatus(s); }catch(_){} }
-  tog.onclick=function(){ var open=body.style.display!=='none'; body.style.display=open?'none':'block'; tog.textContent=open?'🛠 Edit ▸':'🛠 Edit ◂'; };
-  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',insertfit:'Click a run — choose elbow / transition / offset and which end.',tap:'Click the MAIN run, then the BRANCH run.',size:'Click a piece and type its size.',delete:'Click a run to delete it.'};
-  function refl(){ Array.prototype.forEach.call(document.querySelectorAll('.dtTool'),function(b){ var on=(b.getAttribute('data-mode')===window.__editMode); b.style.outline=on?'2px solid #7cf':'none'; b.style.boxShadow=on?'0 0 8px rgba(120,200,255,.5)':'none'; });
+  function openBar(){ if(body.style.display==='none'){ body.style.display='block'; tog.textContent='Edit ‹'; } }
+  tog.onclick=function(){ var open=body.style.display!=='none'; body.style.display=open?'none':'block'; tog.textContent=open?'Edit ›':'Edit ‹'; if(!open) status('Edit mode — click a duct to select, or pick a tool.'); };
+  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',move:'Drag anywhere on a run to move the whole run.',insert:'Click anywhere on a duct — pick a fitting from the list.',size:'Click a piece and type its size.',delete:'Click a run to delete it.'};
+  function refl(){ Array.prototype.forEach.call(document.querySelectorAll('.dtTool'),function(b){ var on=(b.getAttribute('data-mode')===window.__editMode), isDel=(b.getAttribute('data-mode')==='delete');
+      b.style.background=on?'#dbe7ff':(isDel?'#fdf2f2':'#f5f7fa'); b.style.borderColor=on?'#9dbcff':(isDel?'#f2d4d4':'#dde2e9'); b.style.color=on?'#3562c4':(isDel?'#c0484d':'#2b3441'); });
     if(hint) hint.textContent=window.__editMode?(HINTS[window.__editMode]||''):''; }
-  Array.prototype.forEach.call(document.querySelectorAll('.dtTool'),function(b){ b.onclick=function(){ var m=b.getAttribute('data-mode'); window.__editMode=(window.__editMode===m)?null:m; window.__tapMain=null; if(body.style.display==='none'){ body.style.display='block'; tog.textContent='🛠 Edit ◂'; } refl(); status(window.__editMode?(HINTS[window.__editMode]||''):'Edit off.'); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('.dtTool'),function(b){ b.onclick=function(){ var m=b.getAttribute('data-mode'); window.__editMode=(window.__editMode===m)?null:m; window.__tapMain=null; openBar(); refl(); status(window.__editMode?(HINTS[window.__editMode]||''):'Edit off.'); }; });
+  var tapBtn=document.getElementById('dtTapBtn'); if(tapBtn) tapBtn.onclick=function(){ window.__editMode=null; refl(); var real=document.getElementById('tapToolBtn'); if(real){ real.click(); status('Tap tool on — click the duct to drop taps (style/size/direction in its panel).'); } else status('Tap tool not available.'); };
   document.getElementById('dtOff').onclick=function(){ window.__editMode=null; window.__tapMain=null; refl(); status('Edit off — click a duct to select.'); };
   setInterval(refl,500);   // stay in sync if a left-panel edit button changes the mode
+  function parseSize(v, forceRound){ v=String(v||'').trim(); var rr=forceRound||/[o\u00f8]/i.test(v)||/rd|round/i.test(v); var nums=v.match(/\d+(\.\d+)?/g); if(!nums||!nums.length) return null; var w=parseFloat(nums[0]); if(rr) return {w:w,h:w,round:true}; var h=nums[1]?parseFloat(nums[1]):w; return {w:w,h:h,round:false}; }
 
   function toSvg(e){ try{ var pt=overlay.createSVGPoint(); pt.x=e.clientX; pt.y=e.clientY; var m=overlay.getScreenCTM(); if(!m) return null; var l=pt.matrixTransform(m.inverse()); return [l.x,l.y]; }catch(_){ return null; } }
   function n2s(nx,ny){ return window.__n2s?window.__n2s(nx,ny):null; }
@@ -4366,11 +4392,15 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
 
   var drag=null;
   overlay.addEventListener('mousedown', function(e){
-    var m=window.__editMode; if((m!=='dragsize'&&m!=='draglen')||e.button!==0) return;   // other modes -> let the piece handler (pcHit) run
+    var m=window.__editMode; if((m!=='dragsize'&&m!=='draglen'&&m!=='move')||e.button!==0) return;   // other modes -> let the piece handler (pcHit) run
     var sp=toSvg(e); if(!sp) return; var r=hitRun(sp); if(!r){ return; }
     e.stopPropagation(); e.preventDefault();
     var pin=pxPerIn(r)||1;
-    if(m==='dragsize'){
+    if(m==='move'){
+      var o=n2s(r.start[0],r.start[1]), ex=n2s(r.start[0]+1,r.start[1]), ey=n2s(r.start[0],r.start[1]+1);   // screen basis for nvt axes
+      var b1=[ex[0]-o[0],ex[1]-o[1]], b2=[ey[0]-o[0],ey[1]-o[1]], det=(b1[0]*b2[1]-b1[1]*b2[0])||1;
+      drag={mode:'move', r:r, sp0:sp, start0:[r.start[0],r.start[1]], inv:[[b2[1]/det,-b2[0]/det],[-b1[1]/det,b1[0]/det]]};
+    } else if(m==='dragsize'){
       var a=n2s(r.start[0],r.start[1]), pp=ppiFn(), b=n2s(r.start[0]+r.dir[0]*pp*12,r.start[1]+r.dir[1]*pp*12);
       var ux=b[0]-a[0], uy=b[1]-a[1], ul=Math.hypot(ux,uy)||1;
       drag={mode:'size', r:r, pin:pin, a:a, ux:ux/ul, uy:uy/ul, w:r.widthIn};
@@ -4400,15 +4430,95 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
       if(drag.r.pieces[drag.idx]) drag.r.pieces[drag.idx].lenIn=Math.round(lenIn);
       if(drag.dStart){ var pp=ppiFn(); drag.r.start=[drag.anchorN[0]-drag.r.dir[0]*lenIn*pp, drag.anchorN[1]-drag.r.dir[1]*lenIn*pp]; }
       if(hint) hint.textContent='length '+Math.round(lenIn)+'"'; reRun();
+    } else if(drag.mode==='move'){
+      var dvx=sp[0]-drag.sp0[0], dvy=sp[1]-drag.sp0[1];
+      var dnx=drag.inv[0][0]*dvx+drag.inv[0][1]*dvy, dny=drag.inv[1][0]*dvx+drag.inv[1][1]*dvy;
+      drag.r.start=[drag.start0[0]+dnx, drag.start0[1]+dny]; if(hint) hint.textContent='moving run'; reRun();
     }
   }, true);
 
   window.addEventListener('mouseup', function(){ if(!drag) return;
     try{ window.__renderPanel&&window.__renderPanel(); }catch(_){}
     if(drag.mode==='size') status('Drag-resized to '+drag.w+'" wide. (Height via a size tag or \u270e type-size.)');
-    else status('Set length to '+((drag.r.pieces[drag.idx]&&drag.r.pieces[drag.idx].lenIn)||'?')+'".');
+    else if(drag.mode==='len') status('Set length to '+((drag.r.pieces[drag.idx]&&drag.r.pieces[drag.idx].lenIn)||'?')+'".');
+    else status('Moved run.');
     drag=null;
   }, true);
+
+  // ---- fitting-picker popup (opened by the click dispatcher in 'insert' mode) ----
+  var menuEl=null;
+  function closeMenu(){ if(menuEl){ try{menuEl.remove();}catch(_){}} menuEl=null; }
+  document.addEventListener('mousedown', function(e){ if(menuEl && !menuEl.contains(e.target)) closeMenu(); }, true);
+  window.__fitMenu=function(runId, pieceIdx, alongIn, curSize, cx, cy){
+    closeMenu();
+    menuEl=document.createElement('div');
+    menuEl.style.cssText='position:fixed;z-index:99999;left:'+Math.max(6,Math.min(cx, window.innerWidth-228))+'px;top:'+Math.max(6,Math.min(cy, window.innerHeight-360))+'px;width:214px;background:#ffffff;border:1px solid #dde2e9;border-radius:11px;padding:11px;box-shadow:0 10px 30px rgba(30,40,60,.18);font:12px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#2b3441';
+    function ins(spec){ if(window.__doInsert) window.__doInsert(runId, pieceIdx, alongIn, spec); closeMenu(); }
+    function row(label,a){ return '<button class="fm" data-a="'+a+'" style="display:block;width:100%;text-align:left;margin-bottom:4px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:7px;padding:7px 9px;cursor:pointer;font-weight:600">'+label+'</button>'; }
+    menuEl.innerHTML='<div style="font-weight:800;margin-bottom:7px;color:#5b8def">Insert fitting <span style="opacity:.55;font-weight:400">('+curSize+')</span></div>'+
+      row('\u21b0 90\u00b0 Elbow (left)','e90L')+row('\u21b1 90\u00b0 Elbow (right)','e90R')+
+      row('\u21b0 45\u00b0 Elbow (left)','e45L')+row('\u21b1 45\u00b0 Elbow (right)','e45R')+
+      row('\u21e5 Transition (new size)','trans')+row('\u25d0 Square \u2192 Round','s2r')+row('\u21c9 Reducer','red')+
+      row('\u2307 Offset','offset')+row('\u22a3 End cap','cap')+
+      '<div id="fmForm"></div>'+
+      '<button id="fmCancel" style="width:100%;margin-top:6px;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:7px;padding:7px;cursor:pointer">Cancel</button>';
+    document.body.appendChild(menuEl);
+    ['mousedown','mouseup','wheel','click'].forEach(function(t){ menuEl.addEventListener(t,function(e){ e.stopPropagation(); },true); });
+    menuEl.querySelector('#fmCancel').onclick=closeMenu;
+    function sizeForm(kind){
+      var f=menuEl.querySelector('#fmForm'); var isRound=(kind==='s2r'); var dir='end';
+      f.innerHTML='<div style="border-top:1px solid #e3e8ef;padding-top:8px;margin-top:6px">'+
+        '<div style="font-size:10px;opacity:.7;margin-bottom:3px">New '+(isRound?'round \u00f8 (in)':'size (e.g. 12x8 or 10\u00f8)')+'</div>'+
+        '<input id="fmSize" placeholder="'+(isRound?'10':'12x8')+'" style="width:100%;box-sizing:border-box;padding:7px;border:1px solid #dde2e9;border-radius:7px;background:#f8fafc;color:#232b36;margin-bottom:6px">'+
+        '<div style="font-size:10px;opacity:.7;margin-bottom:3px">New size goes toward:</div>'+
+        '<div style="display:flex;gap:5px;margin-bottom:7px"><button class="fmdir" data-d="end" style="flex:1;padding:6px;border-radius:6px;border:2px solid #a9c4ff;background:#eef4ff;color:#3562c4;cursor:pointer">end \u2192</button><button class="fmdir" data-d="start" style="flex:1;padding:6px;border-radius:6px;border:2px solid #dde2e9;background:#f5f7fa;color:#2b3441;cursor:pointer">\u2190 start</button></div>'+
+        '<button id="fmGo" style="width:100%;background:#5b8def;border:none;color:#fff;font-weight:700;border-radius:7px;padding:8px;cursor:pointer">Insert here</button></div>';
+      Array.prototype.forEach.call(f.querySelectorAll('.fmdir'),function(b){ b.onclick=function(){ dir=b.getAttribute('data-d'); Array.prototype.forEach.call(f.querySelectorAll('.fmdir'),function(x){x.style.borderColor='transparent';}); b.style.borderColor='#6cf'; }; });
+      f.querySelector('#fmGo').onclick=function(){ var el=f.querySelector('#fmSize'), sz=parseSize(el.value, isRound); if(!sz){ el.style.borderColor='#e55'; el.focus(); return; } ins({type:(kind==='s2r'?'s2r':(kind==='red'?'reducer':'transition')), dir:dir, size:sz}); };
+      var si=f.querySelector('#fmSize'); if(si) si.focus();
+    }
+    Array.prototype.forEach.call(menuEl.querySelectorAll('.fm'),function(b){ b.onclick=function(){ var a=b.getAttribute('data-a');
+      if(a==='e90L') ins({type:'elbow90',dir:'L'}); else if(a==='e90R') ins({type:'elbow90',dir:'R'});
+      else if(a==='e45L') ins({type:'elbow45',dir:'L'}); else if(a==='e45R') ins({type:'elbow45',dir:'R'});
+      else if(a==='offset') ins({type:'offset'}); else if(a==='cap') ins({type:'cap'});
+      else sizeForm(a); }; });
+  };
+})();
+</script>
+<script>
+(function(){
+  function click(id){ var b=document.getElementById(id); if(b && !b.disabled){ b.click(); return true; } return false; }
+  function status(s){ try{ if(typeof setStatus==='function') setStatus(s); }catch(_){} }
+  function openEdit(){ var t=document.getElementById('dtBarToggle'), body=document.getElementById('dtBarBody'); if(t&&body&&body.style.display==='none') t.click(); }
+  var STEPS=[
+    {t:'Read size tags', run:function(){ if(!click('aiTileSweep')) status('Read-tags button unavailable.'); }, note:'Reading the size tags across your work area. When it finishes, check them and add any it missed, then Next.'},
+    {t:'Find fittings (YOLO)', run:function(){ if(!click('yoloScanBtn')) status('YOLO scan unavailable — load best.onnx first.'); }, note:'Scanning for elbows / tees / taps. Review with Clean with YOLO (fix or mark ones it missed), then Next.'},
+    {t:'Build runs + AI sweep', run:function(){ if(click('trackWalkBtn')) setTimeout(function(){ try{ if(typeof aiFindMissing==='function') aiFindMissing(); }catch(_){}} ,1200); }, note:'Building the duct runs, then sweeping the print for any duct with no run (yellow ! boxes).'},
+    {t:'Edit & finish', run:function(){ openEdit(); }, note:'Opening the Edit tools — drag-resize width, drag-end length, insert fittings, tap, move.'}
+  ];
+  var step=0;
+  var launch=document.createElement('button'); launch.id='wizLaunch'; launch.textContent='Guided Takeoff';
+  launch.style.cssText='background:#eaf6ef;border:1px solid #9fd8b8;color:#1f8f52;border-radius:8px;padding:7px 13px;font-weight:700;font-size:12px;cursor:pointer';
+  (document.querySelector('header')||document.body).appendChild(launch);
+  var pan=document.createElement('div'); pan.id='wizPanel';
+  pan.style.cssText='position:fixed;top:58px;left:316px;z-index:9999;display:none;width:256px;background:#ffffff;border:1px solid #dde2e9;border-radius:12px;padding:13px;box-shadow:0 10px 30px rgba(30,40,60,.20);font:12px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#2b3441';
+  document.body.appendChild(pan);
+  function goTo(i){ step=i; render(); if(step<STEPS.length){ STEPS[step].run(); status('Step '+(step+1)+' \u2014 '+STEPS[step].t); } }
+  function render(){
+    var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b style="color:#1f8f52">Guided Takeoff</b><button id="wizX" style="background:none;border:none;color:#9aa4b2;cursor:pointer;font-size:15px;line-height:1">\u2715</button></div>';
+    h+='<div style="font-size:10px;color:#8a93a1;margin-bottom:9px">Mark the duct green with the geometry tools first, then step through.</div>';
+    STEPS.forEach(function(s,i){ var st=(i<step)?'done':(i===step?'now':'todo');
+      h+='<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:7px;opacity:'+(st==='todo'?.5:1)+'"><div style="flex:none;width:19px;height:19px;border-radius:50%;text-align:center;line-height:19px;font-weight:800;font-size:10px;background:'+(st==='done'?'#22a95f':st==='now'?'#e79a2b':'#e3e8ef')+';color:'+(st==='todo'?'#8a93a1':'#fff')+'">'+(st==='done'?'\u2713':(i+1))+'</div><div style="flex:1"><div style="font-weight:700;color:'+(st==='now'?'#b06a00':'#3a4656')+'">'+s.t+'</div>'+(st==='now'?('<div style="font-size:10.5px;color:#5b8def;margin-top:2px;line-height:1.35">'+s.note+'</div>'):'')+'</div></div>'; });
+    if(step<STEPS.length) h+='<div style="display:flex;gap:6px;margin-top:9px"><button id="wizRerun" style="flex:none;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer" title="Run this step again">\u21bb</button><button id="wizNext" style="flex:1;background:#eaf6ef;border:1px solid #9fd8b8;color:#1f8f52;font-weight:700;border-radius:8px;padding:8px;cursor:pointer">'+(step===STEPS.length-1?'Finish':'Next \u25b8')+'</button></div>';
+    else h+='<div style="color:#1f8f52;font-weight:700;margin-top:9px">\u2713 Takeoff built \u2014 Edit tools are open.</div><button id="wizRestart" style="width:100%;margin-top:7px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:7px;cursor:pointer">\u21bb Start over</button>';
+    pan.innerHTML=h;
+    var x=pan.querySelector('#wizX'); if(x) x.onclick=function(){ pan.style.display='none'; launch.style.display='block'; };
+    var rr=pan.querySelector('#wizRerun'); if(rr) rr.onclick=function(){ STEPS[step].run(); status('Re-running step '+(step+1)); };
+    var nx=pan.querySelector('#wizNext'); if(nx) nx.onclick=function(){ goTo(step+1); };
+    var rs=pan.querySelector('#wizRestart'); if(rs) rs.onclick=function(){ goTo(0); };
+  }
+  launch.onclick=function(){ launch.style.display='none'; pan.style.display='block'; goTo(0); };
+  ['mousedown','mouseup','wheel','click'].forEach(function(t){ pan.addEventListener(t,function(e){ e.stopPropagation(); },true); launch.addEventListener(t,function(e){ e.stopPropagation(); },true); });
 })();
 </script>
 </body>
