@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.23</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.25</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2056,6 +2056,29 @@ function refreshSel(){
     }); });
     return (best && best.d<44)?best:null;
   };
+  window.__sizeStepHit=function(sx,sy){                    // nearest transition/reducer/s2r fitting to a point
+    var best=null;
+    (window.__runs2d||[]).forEach(function(run){ run.pieces.forEach(function(p,i){ if(p.kind!=='fitting'||!p._sizeStep) return;
+      var pts; try{ pts=piecePolyPts(run,i); }catch(_){ return; } if(!pts) return;
+      var cx=(pts[0][0]+pts[2][0])/2, cy=(pts[0][1]+pts[2][1])/2, d=Math.hypot(sx-cx,sy-cy);
+      if(!best||d<best.d) best={d:d, runId:run.id, pieceIdx:i};
+    }); });
+    return (best && best.d<26)?best:null;
+  };
+  window.__flipSizeStep=function(runId, pieceIdx){         // swap which side of a reducer/transition is the new size
+    var run=findRun(runId); if(!run) return false; var p=run.pieces[pieceIdx]; if(!p||!p._sizeStep) return false;
+    function grab(st){ return {widthIn:st.widthIn,depthIn:st.depthIn,round:st.round,size:st.size,cid:st.cid,camduct:st.camduct}; }
+    var A=null,B=null,i; for(i=pieceIdx-1;i>=0;i--){ if(run.pieces[i].kind==='straight'){ A=run.pieces[i]; break; } }
+    for(i=pieceIdx+1;i<run.pieces.length;i++){ if(run.pieces[i].kind==='straight'){ B=run.pieces[i]; break; } }
+    if(!A||!B) return false;
+    var aSz=grab(A), bSz=grab(B);
+    for(i=0;i<pieceIdx;i++){ if(run.pieces[i].kind==='straight') Object.assign(run.pieces[i],bSz); }      // swap the two size regions
+    for(i=pieceIdx+1;i<run.pieces.length;i++){ if(run.pieces[i].kind==='straight') Object.assign(run.pieces[i],aSz); }
+    var iw=p.inW; p.inW=p.outW; p.outW=iw; p._newSide=(p._newSide==='end'?'start':'end');
+    p.widthIn=aSz.widthIn; p.depthIn=aSz.depthIn; p.round=aSz.round; p.size=aSz.size;                     // fitting shows the downstream (after) size
+    run.widthIn=(run.pieces[0]&&run.pieces[0].widthIn)||run.widthIn;
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Flipped reducer/transition direction.'); return true;
+  };
   // Insert a fitting INTO a straight piece at a click position (alongIn from the piece start).
   // spec:{type:'elbow90'|'elbow45'|'transition'|'s2r'|'reducer'|'offset'|'cap', dir:'L'|'R'|'start'|'end', size:{w,h,round}}
   window.__doInsert=function(runId, pieceIdx, alongIn, spec){
@@ -2071,7 +2094,7 @@ function refreshSel(){
     var fit;
     if(t==='elbow90'||t==='elbow45'){ var ang=(t==='elbow45'?Math.PI/4:Math.PI/2)*((spec.dir==='L')?1:-1);
       fit={kind:'fitting',cid:(t==='elbow45'?'e45':'e90'),camduct:(t==='elbow45'?'45 Elbow':'90 Elbow'),round:rr,lenIn:0,turn:ang,widthIn:w,depthIn:dep,size:sz,_elbow:true}; }
-    else if(t==='offset'){ fit={kind:'fitting',cid:'offset',camduct:'Offset',round:rr,lenIn:12,widthIn:w,depthIn:dep,size:sz,_offset:true}; }
+    else if(t==='offset'){ fit={kind:'fitting',cid:'offset',camduct:'Offset',round:rr,lenIn:(spec.lenIn||12),widthIn:w,depthIn:dep,size:sz,_offset:true,offsetIn:(spec.offsetIn||12),offsetSide:(spec.offsetSide||1)}; }
     else if(t==='transition'||t==='reducer'||t==='s2r'){
       var sp=spec.size||{}, nW=sp.w||w, nR=(t==='s2r')?true:!!sp.round, nD=nR?nW:(sp.h!=null?sp.h:dep), nS=nR?('\u00f8'+nW):(nW+'\u00d7'+(nD!=null?nD:'?'));
       var cid=(t==='s2r')?'s2r':(nR?'reducer':'tr'), cn=(t==='s2r')?'Sq to Round':(nR?'Reducer':'Transition');
@@ -2519,6 +2542,9 @@ function refreshSel(){
       if(p.kind==='fitting' && p.turn){                    // elbow: bend at a point, then continue turned
         var a=p.turn, cu=Math.cos(a), su=Math.sin(a);
         var rx=ux*cu-uy*su, ry=ux*su+uy*cu; ux=rx; uy=ry;
+      } else if(p.kind==='fitting' && (p.cid==='offset'||p._offset)){   // offset: advance + step sideways, keep heading
+        var Lo=inToPt(p.lenIn||12), oi=inToPt(p.offsetIn||0)*(p.offsetSide||1);
+        x+=ux*Lo + (-uy)*oi; y+=uy*Lo + (ux)*oi;
       } else {
         var L=inToPt(p.lenIn||0); x+=ux*L; y+=uy*L;
       }
@@ -2565,6 +2591,11 @@ function refreshSel(){
       }
       var Ltr=Math.max(inToPt(8),(inHW+outHW)*0.7);   // legacy zero-length: centered overlay
       return [P(-Ltr/2,-inHW),P(Ltr/2,-outHW),P(Ltr/2,outHW),P(-Ltr/2,inHW)].map(function(q){return n2s(q[0],q[1]);});
+    }
+    // OFFSET — parallelogram jog: steps sideways by offsetIn over its length
+    if(p.kind==='fitting' && (p.cid==='offset'||p._offset)){
+      var Lo=inToPt(p.lenIn||12), off=inToPt(p.offsetIn||0)*(p.offsetSide||1);
+      return [P(0,-hw),P(Lo,-hw+off),P(Lo,hw+off),P(0,hw)].map(function(q){return n2s(q[0],q[1]);});
     }
     // STRAIGHT
     var b=inToPt(p.lenIn||0.1);
@@ -2671,14 +2702,7 @@ function refreshSel(){
         poly.addEventListener('mousedown',pcHit,true);
         lay.appendChild(poly);
         var cxm=(pts[0][0]+pts[2][0])/2, cym=(pts[0][1]+pts[2][1])/2;
-        if(p.kind!=='straight'){
-          // visible fitting marker — FIXED screen size, so zero-length fittings (elbow/tee/cap/offset) always show at the corner
-          var R=8, mk=document.createElementNS(ns,'path');
-          mk.setAttribute('d','M'+cxm+' '+(cym-R)+'L'+(cxm+R)+' '+cym+'L'+cxm+' '+(cym+R)+'L'+(cxm-R)+' '+cym+'Z');
-          mk.setAttribute('fill','#f59e0b'); mk.setAttribute('stroke','#7a3d00'); mk.setAttribute('stroke-width',on?'2.5':'1.5'); mk.style.cursor='pointer';
-          mk.addEventListener('mousedown',pcHit,true);
-          lay.appendChild(mk);
-        }
+        // (no dot marker — the shaped polygon above already draws the fitting: elbow / tap / transition / offset)
         var t=document.createElementNS(ns,'text'); t.setAttribute('x',cxm); t.setAttribute('y',p.kind==='straight'?cym:(cym-12));
         t.setAttribute('text-anchor','middle'); t.setAttribute('font-size','9'); t.setAttribute('font-weight','700');
         t.setAttribute('fill',p.kind==='straight'?'#063':'#7a3d00'); t.setAttribute('stroke','#eafff1'); t.setAttribute('stroke-width','2'); t.setAttribute('paint-order','stroke');
@@ -2740,7 +2764,7 @@ function refreshSel(){
           } else {
             h+='<span style="flex:1;font-size:11px;color:#f5b342">\u25c8 '+vh(pc.camduct||pc.cid)+(pc.outW?(' \u2192'+pc.outW+(pc.cid==='s2r'?'\u00f8':'x'+(pc.outD||pc.outW))):'')+'</span>';
           }
-          h+='<button onclick="__pcIns(\''+run.id+'\','+i+')" title="insert fitting after" style="border:none;background:#243;color:#9f9;border-radius:4px;cursor:pointer;padding:2px 5px">+</button>'
+          h+='<button onclick="__pcIns(\''+run.id+'\','+i+',event)" title="insert fitting after" style="border:none;background:#243;color:#9f9;border-radius:4px;cursor:pointer;padding:2px 5px">+</button>'
             +'<button onclick="__pcDel(\''+run.id+'\','+i+')" title="delete piece" style="border:none;background:#422;color:#f99;border-radius:4px;cursor:pointer;padding:2px 5px">\u00d7</button></div>';
         });
         h+='<div style="display:flex;gap:5px;margin-top:5px"><button onclick="__runAddJoint(\''+run.id+'\')" style="flex:1;padding:5px;border:1px solid #2b6;border-radius:5px;background:#0c2a1a;color:#bfd;cursor:pointer">+ joint</button><button onclick="__runDel(\''+run.id+'\')" style="flex:1;padding:5px;border:1px solid #533;border-radius:5px;background:#3a2030;color:#fbb;cursor:pointer">delete run</button></div>';
@@ -2759,13 +2783,11 @@ function refreshSel(){
   window.__runOpen=function(id){ selRun=(selRun===id?null:id); renderPanel(); };
   window.__pcLen=function(id,i,v){ var r=findRun(id); if(!r)return; r.pieces[i].lenIn=Math.max(0.5,parseFloat(v)||r.pieces[i].lenIn); renderItems(); renderPanel(); setStatus('Run now '+fmtFt(runLenIn(r))+'.'); };
   window.__pcDel=function(id,i){ var r=findRun(id); if(!r)return; r.pieces.splice(i,1); if(!r.pieces.length){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); selRun=null; } else applyReducerDownstream(r); sel.clear(); renderItems(); renderPanel(); };
-  window.__pcIns=function(id,i){ var r=findRun(id); if(!r)return;
-    var opts=FITTINGS.map(function(f){return f[0];}).join(', ');
-    var cid=prompt('Insert fitting after piece '+(i+1)+'  ('+FITTINGS.map(function(f){return f[0]+'='+f[1];}).join(' / ')+')','reducer'); if(!cid)return; cid=cid.trim();
-    var def=FITTINGS.find(function(f){return f[0]===cid;}); if(!def){ setStatus('Unknown fitting "'+cid+'".'); return; }
-    var fit={kind:'fitting',cid:cid,camduct:def[1],lenIn:FITLEN[cid]||6,widthIn:r.pieces[i]?r.pieces[i].widthIn:r.widthIn,depthIn:r.pieces[i]?r.pieces[i].depthIn:r.widthIn};
-    if(cid==='reducer'||cid==='s2r'||cid==='tr'){ var ow=prompt('Outlet width (in)','12'); fit.outW=parseFloat(ow)||12; if(cid!=='s2r'){ var od=prompt('Outlet depth (in)',String(fit.depthIn)); fit.outD=parseFloat(od)||fit.depthIn; } }
-    r.pieces.splice(i+1,0,fit); applyReducerDownstream(r); renderItems(); renderPanel(); setStatus('Inserted '+def[1]+'.'+( (cid==='reducer'||cid==='s2r'||cid==='tr')?' Downstream resized.':'')); };
+  window.__pcIns=function(id,i,ev){ var r=findRun(id); if(!r)return; var p=r.pieces[i]||{};
+    var alongIn=(p.kind==='straight')?(p.lenIn||0):0;                 // insert at the end of this piece
+    var sz=p.size||((p.widthIn||r.widthIn)+'\u00d7?');
+    var x=(ev&&ev.clientX)||220, y=(ev&&ev.clientY)||160;
+    if(window.__fitMenu) window.__fitMenu(id, i, alongIn, sz, x, y); else setStatus('Insert menu unavailable.'); };
   window.__runAddJoint=function(id){ var r=findRun(id); if(!r)return; var last=r.pieces[r.pieces.length-1]||{widthIn:r.widthIn,depthIn:r.widthIn,size:r.widthIn+'"'}; var rnd=!!last.round; r.pieces.push({kind:'straight',lenIn:(rnd?120:JOINT_DEFAULT),widthIn:last.widthIn,depthIn:last.depthIn,size:last.size,cid:(rnd?'spiral':'st'),camduct:(rnd?'Spiral':'Straight Duct'),round:rnd}); applyReducerDownstream(r); renderItems(); renderPanel(); };
   window.__runDel=function(id){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); if(selRun===id)selRun=null; sel.clear(); renderItems(); renderPanel(); };
   window.__selColor=function(c){ var ids=new Set(); sel.forEach(function(k){ ids.add(k.split(':')[0]); }); ids.forEach(function(id){ var r=findRun(id); if(r)r.color=c; }); renderItems(); renderPanel(); };
@@ -3081,6 +3103,7 @@ function refreshSel(){
     var x=r.start[0],y=r.start[1],ux=r.dir[0],uy=r.dir[1]; var pts=[[Math.round(x),Math.round(y)]];
     for(var i=0;i<r.pieces.length;i++){ var p=r.pieces[i];
       if(p.kind==='fitting'&&p.turn){ var a=p.turn,cu=Math.cos(a),su=Math.sin(a),rx=ux*cu-uy*su,ry=ux*su+uy*cu; ux=rx; uy=ry; }
+      else if(p.kind==='fitting'&&(p.cid==='offset'||p._offset)){ var Lo=inToPt(p.lenIn||12), oi=inToPt(p.offsetIn||0)*(p.offsetSide||1); x+=ux*Lo+(-uy)*oi; y+=uy*Lo+(ux)*oi; pts.push([Math.round(x),Math.round(y)]); }
       else { var L=inToPt(p.lenIn||0); x+=ux*L; y+=uy*L; pts.push([Math.round(x),Math.round(y)]); } }
     return pts;
   }
@@ -4404,7 +4427,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   function reRun(){ try{ window.__renderItems&&window.__renderItems(); }catch(_){} }
 
   // ---- radial press-and-drag fitting wheel (insert mode) ----
-  var WITEMS=[{k:'straight',t:'Straight'},{k:'tap',t:'Tap'},{k:'elbow',t:'Elbow'},{k:'offset',t:'Offset'},{k:'s2r',t:'Sq\u2192Rnd'}];
+  var WITEMS=[{k:'straight',t:'Straight'},{k:'tap',t:'Tap'},{k:'elbow',t:'Elbow'},{k:'offset',t:'Offset'},{k:'reducer',t:'Reducer'},{k:'s2r',t:'Sq\u2192Rnd'}];
   var wheel=null, wheelSel=-1;
   function showWheel(cx,cy){ closeWheel(); wheelSel=-1;
     wheel=document.createElement('div'); wheel.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;z-index:100000;pointer-events:none';
@@ -4422,7 +4445,10 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   var drag=null;
   overlay.addEventListener('mousedown', function(e){
     var m=window.__editMode; if(e.button!==0) return;
-    if(m==='insert'){ var s0=toSvg(e); var tgt=(s0&&window.__pieceHit)?window.__pieceHit(s0[0],s0[1]):null; if(!tgt) return; e.stopPropagation(); e.preventDefault(); drag={mode:'wheel', target:tgt, cx:e.clientX, cy:e.clientY}; showWheel(e.clientX,e.clientY); status('Drag to a fitting, then release.'); return; }
+    if(m==='insert'){ var s0=toSvg(e); if(!s0) return;
+      var fs=(window.__sizeStepHit)?window.__sizeStepHit(s0[0],s0[1]):null;
+      if(fs){ e.stopPropagation(); e.preventDefault(); if(window.__flipSizeStep) window.__flipSizeStep(fs.runId, fs.pieceIdx); try{window.__renderPanel&&window.__renderPanel();}catch(_){} return; }   // tap an existing reducer -> flip its direction
+      var tgt=(window.__pieceHit)?window.__pieceHit(s0[0],s0[1]):null; if(!tgt) return; e.stopPropagation(); e.preventDefault(); drag={mode:'wheel', target:tgt, cx:e.clientX, cy:e.clientY}; showWheel(e.clientX,e.clientY); status('Drag to a fitting, then release. (Tap a reducer to flip it.)'); return; }
     if(m!=='dragsize'&&m!=='draglen'&&m!=='move') return;   // other modes -> let the piece handler (pcHit) run
     var sp=toSvg(e); if(!sp) return; var r=hitRun(sp); if(!r){ return; }
     e.stopPropagation(); e.preventDefault();
@@ -4474,7 +4500,9 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     if(drag.mode==='wheel'){ var sel=wheelSel, tg=drag.target; closeWheel();
       if(sel>=0 && tg && window.__doInsert){ var it=WITEMS[sel];
         if(it.k==='s2r'){ var v=prompt('Round size \u00f8 (in):','10'); if(v){ var n=parseFloat(v)||10; window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'s2r',dir:'end',size:{w:n,h:n,round:true}}); } }
+        else if(it.k==='reducer'){ var rv=prompt('New size after the reducer (e.g. 12x8):',''); if(rv){ var m2=rv.match(/\d+(\.\d+)?/g); if(m2&&m2.length){ var nw=parseFloat(m2[0]), nh=m2[1]?parseFloat(m2[1]):nw; window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'reducer',dir:'end',size:{w:nw,h:nh,round:false}}); status('Reducer added \u2014 tap it to flip direction if needed.'); } } }
         else if(it.k==='elbow'){ window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'elbow90',dir:'R'}); }
+        else if(it.k==='offset'){ var od2=prompt('Offset distance (in):','12'); if(od2!=null) window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'offset',offsetIn:(parseFloat(od2)||12)}); }
         else { window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:it.k}); }
         try{ window.__renderPanel&&window.__renderPanel(); }catch(_){}
       }
@@ -4522,7 +4550,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     Array.prototype.forEach.call(menuEl.querySelectorAll('.fm'),function(b){ b.onclick=function(){ var a=b.getAttribute('data-a');
       if(a==='e90L') ins({type:'elbow90',dir:'L'}); else if(a==='e90R') ins({type:'elbow90',dir:'R'});
       else if(a==='e45L') ins({type:'elbow45',dir:'L'}); else if(a==='e45R') ins({type:'elbow45',dir:'R'});
-      else if(a==='offset') ins({type:'offset'}); else if(a==='cap') ins({type:'cap'});
+      else if(a==='offset'){ var od=prompt('Offset distance (in):','12'); if(od!=null) ins({type:'offset',offsetIn:(parseFloat(od)||12)}); } else if(a==='cap') ins({type:'cap'});
       else sizeForm(a); }; });
   };
 })();
