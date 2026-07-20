@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.32</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.35</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2046,6 +2046,7 @@ function refreshSel(){
   function invApplyN(m,X,Y){ var a=m[0],b=m[1],c=m[2],d=m[3],e=m[4],f=m[5],det=(a*d-b*c)||1; return [(d*(X-e)-c*(Y-f))/det,(-b*(X-e)+a*(Y-f))/det]; }
   function n2s(nx,ny){ if(!window.__nvt||!viewport) return null; var u=invApplyN(window.__nvt,nx,ny); return applyM(viewport.transform,u[0],u[1]); }
   window.__n2s=n2s;
+  window.__s2n=function(sx,sy){ if(!window.__nvt||!viewport) return null; var u=invApply(viewport.transform, sx, sy); var m=window.__nvt; return [m[0]*u[0]+m[2]*u[1]+m[4], m[1]*u[0]+m[3]*u[1]+m[5]]; };
   window.__renderPanel=function(){ try{ return renderPanel(); }catch(e){} };
   window.__pieceHit=function(sx,sy){                        // nearest STRAIGHT piece to a screen/SVG point -> {runId,pieceIdx,alongIn}
     var best=null;
@@ -2137,12 +2138,12 @@ function refreshSel(){
     var before=mkS(a), after=mkS(L-a), t=spec.type;
     if(t==='cap'){ pieces.splice(pieceIdx, pieces.length-pieceIdx, before, {kind:'fitting',cid:'cap',camduct:'End Cap',round:rr,lenIn:0,widthIn:w,depthIn:dep,size:sz,_cap:true}); renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Capped the duct here.'); return true; }
     if(t==='straight'){ var add={kind:'straight',lenIn:24,widthIn:w,depthIn:dep,size:sz,cid:rr?'spiral':'st',camduct:rr?'Spiral':'Straight Duct',round:rr}; pieces.splice(pieceIdx,1,before,add,after); renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Added 24" of straight \u2014 drag-end to adjust.'); return true; }
-    if(t==='tap'){ var bW=spec.branchW||Math.max(6,Math.round(w/2)), bSide=spec.branchSide||1;
-      var tap={kind:'fitting',cid:'stap',camduct:(spec.shopTap?'Shop Tap':'Tap'),round:false,lenIn:0,widthIn:w,depthIn:dep,size:sz,_tap:true,shopTap:!!spec.shopTap,branchSide:bSide,branchW:bW,branchLenIn:10,throatIn:10};
+    if(t==='tap'){ var bW=spec.branchW||Math.max(6,Math.round(w/2)), bSide=spec.branchSide||1, bRound=!!spec.branchRound, bD=(spec.branchD!=null?spec.branchD:(bRound?bW:null)), bSize=bRound?('\u00f8'+bW):(bW+'\u00d7'+(bD!=null?bD:'?'));
+      var tap={kind:'fitting',cid:'stap',camduct:(spec.shopTap?'Shop Tap':'Tap'),round:false,lenIn:0,widthIn:w,depthIn:dep,size:sz,_tap:true,shopTap:!!spec.shopTap,branchSide:bSide,branchW:bW,branchLenIn:10,throatIn:10,mainRound:(spec.mainRound!=null?!!spec.mainRound:rr),branchRound:bRound};
       pieces.splice(pieceIdx,1,before,tap,after);
       if(spec.branch){ var fr=runFrames(run), f=fr[pieceIdx+1]; if(f){ var hwB=inToPt(w/2);
-        window.__runs2d=window.__runs2d||[]; window.__runs2d.push({ id:'br'+Date.now().toString(36), start:[f.x+f.nx*bSide*hwB, f.y+f.ny*bSide*hwB], dir:[f.nx*bSide, f.ny*bSide], widthIn:bW, pieces:[{kind:'straight',lenIn:(spec.branchLenIn||24),widthIn:bW,depthIn:null,size:bW+'\u00d7?',cid:'st',camduct:'Straight Duct',round:false}], _branch:true }); } }
-      renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Added a tap'+(spec.branch?' + straight branch \u2014 drag its end to length':'')+'.'); return true; }
+        window.__runs2d=window.__runs2d||[]; window.__runs2d.push({ id:'br'+Date.now().toString(36), start:[f.x+f.nx*bSide*hwB, f.y+f.ny*bSide*hwB], dir:[f.nx*bSide, f.ny*bSide], widthIn:bW, pieces:[{kind:'straight',lenIn:(spec.branchLenIn||24),widthIn:bW,depthIn:bD,size:bSize,cid:bRound?'spiral':'st',camduct:bRound?'Spiral':'Straight Duct',round:bRound}], _branch:true }); } }
+      renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Added a tap'+(spec.branch?' + '+bSize+' branch \u2014 drag its end to length':'')+'.'); return true; }
     var fit;
     if(t==='elbow90'||t==='elbow45'){ var ang=(t==='elbow45'?Math.PI/4:Math.PI/2)*((spec.dir==='L')?1:-1);
       var er=(spec.round!=null?!!spec.round:rr);
@@ -2815,7 +2816,9 @@ function refreshSel(){
     if(sel.size){ h+='<div style="background:#10243a;border:1px solid #2b6;border-radius:7px;padding:7px;margin-bottom:7px">'
       +'<div style="font-size:11px;margin-bottom:5px">'+sel.size+' piece(s) selected</div>'
       +'<div style="display:flex;gap:5px;margin-bottom:5px">'+palette.map(function(c){return '<button onclick="__selColor(\''+c+'\')" style="width:20px;height:20px;border-radius:4px;border:1px solid #fff3;background:'+c+';cursor:pointer"></button>';}).join('')+'</div>'
-      +'<div style="display:flex;gap:5px"><input id="selLabel" placeholder="label run" style="flex:1;padding:5px;border:1px solid #345;border-radius:5px;background:#0e1923;color:#fff"><button onclick="__selName()" style="padding:5px 9px;border:none;border-radius:5px;background:#15a;color:#fff;cursor:pointer">Set</button></div>'
+      +'<div style="display:flex;gap:5px;margin-bottom:5px"><input id="selLabel" placeholder="label run" style="flex:1;padding:5px;border:1px solid #345;border-radius:5px;background:#0e1923;color:#fff"><button onclick="__selName()" style="padding:5px 9px;border:none;border-radius:5px;background:#15a;color:#fff;cursor:pointer">Set</button></div>'
+      +'<div style="display:flex;gap:5px"><input id="selSize" placeholder="new size e.g. 28x8 or 10\u00f8" style="flex:1;padding:5px;border:1px solid #345;border-radius:5px;background:#0e1923;color:#fff"><button onclick="__selSize()" style="padding:5px 9px;border:none;border-radius:5px;background:#1b8a4a;color:#fff;cursor:pointer;font-weight:600">Set size</button></div>'
+      +'<button onclick="__copyStamp()" style="width:100%;margin-top:5px;padding:6px;border:1px solid #7a5cc0;border-radius:5px;background:#2a2140;color:#d9c9ff;cursor:pointer;font-weight:600">\u29c9 Copy as stamp</button>'
       +'</div>'; }
     if(!selRun){ h+='<div class="hint" style="opacity:.75">Click a duct run on the plan to view &amp; edit it here.</div>'; }
     runs.forEach(function(run){
@@ -2827,7 +2830,8 @@ function refreshSel(){
         run.pieces.forEach(function(pc,i){
           var key=run.id+':'+i, on=sel.has(key);
           h+='<div style="display:flex;align-items:center;gap:5px;margin:3px 0;padding:4px;border-radius:5px;background:'+(on?'rgba(34,211,238,.12)':'#0e1722')+'">'
-            +'<span style="flex:0 0 18px;font-size:10px;opacity:.6">'+(i+1)+'</span>';
+            +'<input type="checkbox" '+(on?'checked':'')+' onclick="__pcSel(\''+run.id+'\','+i+')" title="select to bulk-change size" style="flex:0 0 auto;margin:0 1px;cursor:pointer">'
+            +'<span style="flex:0 0 16px;font-size:10px;opacity:.6">'+(i+1)+'</span>';
           if(pc.kind==='straight'){
             h+='<input type="number" step="0.5" value="'+pc.lenIn+'" onchange="__pcLen(\''+run.id+'\','+i+',this.value)" style="width:54px;padding:3px;border:1px solid #345;border-radius:4px;background:#0b1420;color:#fff"><span style="font-size:10px;opacity:.6">in</span>'
               +'<span style="flex:1;font-size:11px;color:'+(pc._scaled?'#f5b342':'#bfe6ff')+'" title="'+(pc._scaled?'scaled from the print \u2014 no size tag found':'read from a size tag')+'">'+vh(pc.size)+(pc._scaled?' ~':'')+'</span>';
@@ -2847,6 +2851,7 @@ function refreshSel(){
       h+='</div>'; }
     p.innerHTML=h;
     var sl=document.getElementById('selLabel'); if(sl) sl.onkeydown=function(e){ if(e.key==='Enter')window.__selName(); };
+    var ss=document.getElementById('selSize'); if(ss) ss.onkeydown=function(e){ if(e.key==='Enter')window.__selSize(); };
   }
   window.__renderItemPanel=renderPanel;
 
@@ -2862,6 +2867,33 @@ function refreshSel(){
   window.__runDel=function(id){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); if(selRun===id)selRun=null; sel.clear(); renderItems(); renderPanel(); };
   window.__selColor=function(c){ var ids=new Set(); sel.forEach(function(k){ ids.add(k.split(':')[0]); }); ids.forEach(function(id){ var r=findRun(id); if(r)r.color=c; }); renderItems(); renderPanel(); };
   window.__selName=function(){ var el=document.getElementById('selLabel'); if(!el)return; var nm=el.value; var ids=new Set(); sel.forEach(function(k){ ids.add(k.split(':')[0]); }); ids.forEach(function(id){ var r=findRun(id); if(r)r.label=nm; }); renderItems(); renderPanel(); setStatus('Labeled '+ids.size+' run(s).'); };
+  window.__pcSel=function(id,i){ var k=id+':'+i; if(sel.has(k)) sel.delete(k); else sel.add(k); renderPanel(); };
+  window.__selSize=function(){ var el=document.getElementById('selSize'); if(!el)return; var raw=String(el.value||'').trim();
+    var round=/[o\u00f8]/i.test(raw)||/rd|round/i.test(raw); var nums=raw.match(/\d+(\.\d+)?/g);
+    if(!nums||!nums.length){ el.style.borderColor='#e55'; el.focus(); return; }
+    var w=parseFloat(nums[0]), d=round?w:(nums[1]?parseFloat(nums[1]):w), sizeStr=round?('\u00f8'+w):(w+'\u00d7'+d);
+    window.__pushRunUndo&&window.__pushRunUndo();
+    var n=0; sel.forEach(function(k){ var pr=k.split(':'), r=findRun(pr[0]); if(!r)return; var pc=r.pieces[+pr[1]]; if(!pc)return;
+      if(pc.kind==='straight'){ pc.widthIn=w; pc.depthIn=d; pc.round=round; pc.size=sizeStr; pc.cid=round?'spiral':'st'; pc.camduct=round?'Spiral':'Straight Duct'; pc._scaled=false; n++; }
+      else { pc.widthIn=w; pc.depthIn=d; pc.round=round; if(pc._sizeStep){ pc._newW=w; pc._newD=d; pc._newR=round; pc._newS=sizeStr; pc.outW=w; pc.outD=d; } n++; } });
+    try{ var ids=new Set(); sel.forEach(function(k){ids.add(k.split(':')[0]);}); ids.forEach(function(id){ var r=findRun(id); if(r) applyReducerDownstream(r); }); }catch(_){}
+    renderItems(); renderPanel(); setStatus('Set '+n+' piece(s) to '+sizeStr+'.'); };
+  window.__stamp=null;
+  window.__copyStamp=function(){ if(!sel.size){ setStatus('Tick the pieces you want to copy first.'); return; }
+    // gather selected pieces in run+index order from the first run that has a selection
+    var byRun={}; sel.forEach(function(k){ var pr=k.split(':'); (byRun[pr[0]]=byRun[pr[0]]||[]).push(+pr[1]); });
+    var srcId=Object.keys(byRun)[0], src=findRun(srcId); if(!src){ setStatus('Could not read the selection.'); return; }
+    var idxs=byRun[srcId].sort(function(a,b){return a-b;});
+    var pcs=idxs.map(function(i){ return JSON.parse(JSON.stringify(src.pieces[i])); });
+    window.__stamp={ pieces:pcs, dir:[src.dir[0],src.dir[1]], widthIn:src.widthIn, color:src.color, axis:src.axis, label:src.label||'' };
+    setStatus('Copied '+pcs.length+' piece(s) to the stamp \u2014 pick the Stamp tool, then click to paste copies.');
+    try{ window.__editMode='stamp'; }catch(_){}
+  };
+  window.__pasteStamp=function(nx,ny){ var s=window.__stamp; if(!s){ setStatus('Nothing copied yet \u2014 select pieces and Copy as stamp.'); return false; }
+    window.__pushRunUndo&&window.__pushRunUndo();
+    window.__runs2d=window.__runs2d||[];
+    window.__runs2d.push({ id:'stmp'+Date.now().toString(36)+Math.floor(Math.random()*1e3), start:[nx,ny], dir:[s.dir[0],s.dir[1]], widthIn:s.widthIn, color:s.color||'#22a95f', axis:s.axis||'H', label:s.label||'', pieces:JSON.parse(JSON.stringify(s.pieces)), _stamped:true });
+    renderItems(); renderPanel(); setStatus('Stamped a copy \u2014 keep clicking to place more, or turn the tool off.'); return true; };
 
   function rnd(v){ return Math.round(v*10)/10; }   // module-scoped (runsFromPreview has its own local copy)
   // ===== TRACK-WALKER (beta) — separate builder. Walks each __sgRuns centerline (single-wall rescue
@@ -4506,7 +4538,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
    <button class="dtTool" data-mode="draglen" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-end (length)</button>
    <button class="dtTool" data-mode="move" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Move run</button>
     <button class="dtTool" data-mode="connect" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Connect 2 runs (elbow)</button>
-   <button id="dtTapBtn" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Tap off a side</button>
+    <button class="dtTool" data-mode="stamp" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f3effc;border:1px solid #cdbdf0;color:#5a3fa0;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">⧉ Stamp (paste copies)</button>
    <button class="dtTool" data-mode="insert" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Insert (hold &amp; drag)</button>
    <button class="dtTool" data-mode="size" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Type a size</button>
    <button class="dtTool" data-mode="delete" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#fdf2f2;border:1px solid #f2d4d4;color:#c0484d;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Delete run</button>
@@ -4523,7 +4555,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   function status(s){ try{ if(typeof setStatus==='function') setStatus(s); }catch(_){} }
   function openBar(){ if(body.style.display==='none'){ body.style.display='block'; tog.textContent='Edit ‹'; } }
   tog.onclick=function(){ var open=body.style.display!=='none'; body.style.display=open?'none':'block'; tog.textContent=open?'Edit ›':'Edit ‹'; if(!open) status('Edit mode — click a duct to select, or pick a tool.'); };
-  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',move:'Drag anywhere on a run to move the whole run.',connect:'Click near the END of one duct, then the END of another — joins them with a 90° elbow.',insert:'Press on a duct and drag to a fitting on the wheel, then release.',size:'Click a piece and type its size.',delete:'Click a run to delete it.'};
+  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',move:'Drag anywhere on a run to move the whole run.',connect:'Click near the END of one duct, then the END of another — joins them with a 90° elbow.',stamp:'Copy pieces first (tick them in the panel → Copy as stamp), then click on the plan to drop a copy. Keep clicking to place more.',insert:'Press on a duct and drag to a fitting on the wheel, then release.',size:'Click a piece and type its size.',delete:'Click a run to delete it.'};
   function refl(){ Array.prototype.forEach.call(document.querySelectorAll('.dtTool'),function(b){ var on=(b.getAttribute('data-mode')===window.__editMode), isDel=(b.getAttribute('data-mode')==='delete');
       b.style.background=on?'#dbe7ff':(isDel?'#fdf2f2':'#f5f7fa'); b.style.borderColor=on?'#9dbcff':(isDel?'#f2d4d4':'#dde2e9'); b.style.color=on?'#3562c4':(isDel?'#c0484d':'#2b3441'); });
     if(hint) hint.textContent=window.__editMode?(HINTS[window.__editMode]||''):''; }
@@ -4565,6 +4597,9 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   var drag=null;
   overlay.addEventListener('mousedown', function(e){
     var m=window.__editMode; if(e.button!==0) return;
+    if(m==='stamp'){ var sst=toSvg(e); if(!sst) return; e.stopPropagation(); e.preventDefault();
+      var nv=window.__s2n?window.__s2n(sst[0],sst[1]):null; if(!nv){ status('Could not map that point.'); return; }
+      if(window.__pasteStamp) window.__pasteStamp(nv[0],nv[1]); return; }
     if(m==='connect'){ var s1=toSvg(e); if(!s1) return; var rr=hitRun(s1); if(!rr) return; e.stopPropagation(); e.preventDefault();
       var pl=window.__runPoly(rr), n=pl.length, sS=n2s(pl[0][0],pl[0][1]), sE=n2s(pl[n-1][0],pl[n-1][1]);
       var end=(Math.hypot(s1[0]-sS[0],s1[1]-sS[1])<Math.hypot(s1[0]-sE[0],s1[1]-sE[1]))?'start':'finish';
@@ -4632,7 +4667,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
         else if(it.k==='reducer'){ transitionDialog(tg.runId,tg.pieceIdx,tg.alongIn,'',cxr,cyr,'rect'); }
         else if(it.k==='elbow'){ elbowDialog(tg.runId,tg.pieceIdx,tg.alongIn,cxr,cyr); }
         else if(it.k==='offset'){ var od2=prompt('Offset distance (in):','12'); if(od2!=null) window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'offset',offsetIn:(parseFloat(od2)||12)}); }
-        else if(it.k==='tap'){ var br=confirm('Build a straight branch of duct off this tap?'); var bl=24; if(br){ var lv=prompt('Branch length (in):','24'); bl=parseFloat(lv)||24; } window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'tap',branch:br,branchLenIn:bl}); }
+        else if(it.k==='tap'){ tapDialog(tg.runId,tg.pieceIdx,tg.alongIn,cxr,cyr); }
         else { window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:it.k}); }
         try{ window.__renderPanel&&window.__renderPanel(); }catch(_){}
       }
@@ -4664,7 +4699,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
       '<button id="tGo" style="width:100%;background:#5b8def;border:none;color:#fff;font-weight:700;border-radius:8px;padding:8px;cursor:pointer;margin-bottom:5px">Insert</button>'+
       '<button id="tCancel" style="width:100%;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:6px;cursor:pointer">Cancel</button>';
     document.body.appendChild(menuEl);
-    ['mousedown','mouseup','wheel','click'].forEach(function(t){ menuEl.addEventListener(t,function(e){e.stopPropagation();},true); });
+    ['mousedown','mouseup','wheel'].forEach(function(t){ menuEl.addEventListener(t,function(e){e.stopPropagation();},true); });
     function paint(){ Array.prototype.forEach.call(menuEl.querySelectorAll('.tShape'),function(b){ var on=b.getAttribute('data-v')===shape; b.style.borderColor=on?'#a9c4ff':'#dde2e9'; b.style.background=on?'#eef4ff':'#f5f7fa'; b.style.color=on?'#3562c4':'#2b3441'; });
       Array.prototype.forEach.call(menuEl.querySelectorAll('.tDir'),function(b){ var on=b.getAttribute('data-v')===dir; b.style.borderColor=on?'#a9c4ff':'#dde2e9'; b.style.background=on?'#eef4ff':'#f5f7fa'; b.style.color=on?'#3562c4':'#2b3441'; });
       var lbl=menuEl.querySelector('#tSizeLbl'), inp=menuEl.querySelector('#tSize'); if(shape==='round'){ lbl.textContent='New round \u00f8 (in)'; inp.placeholder='10'; } else { lbl.textContent='New size (e.g. 12x8)'; inp.placeholder='12x8'; } }
@@ -4689,7 +4724,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
       '<button id="eGo" style="width:100%;background:#5b8def;border:none;color:#fff;font-weight:700;border-radius:8px;padding:8px;cursor:pointer;margin-bottom:5px">Insert elbow</button>'+
       '<button id="eCancel" style="width:100%;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:6px;cursor:pointer">Cancel</button>';
     document.body.appendChild(menuEl);
-    ['mousedown','mouseup','wheel','click'].forEach(function(t){ menuEl.addEventListener(t,function(e){e.stopPropagation();},true); });
+    ['mousedown','mouseup','wheel'].forEach(function(t){ menuEl.addEventListener(t,function(e){e.stopPropagation();},true); });
     function paint(){ Array.prototype.forEach.call(menuEl.querySelectorAll('.eShape'),function(b){ var on=b.getAttribute('data-v')===shape; b.style.borderColor=on?'#a9c4ff':'#dde2e9'; b.style.background=on?'#eef4ff':'#f5f7fa'; b.style.color=on?'#3562c4':'#2b3441'; });
       Array.prototype.forEach.call(menuEl.querySelectorAll('.eDir'),function(b){ var on=b.getAttribute('data-v')===dirLR; b.style.borderColor=on?'#a9c4ff':'#dde2e9'; b.style.background=on?'#eef4ff':'#f5f7fa'; b.style.color=on?'#3562c4':'#2b3441'; }); }
     Array.prototype.forEach.call(menuEl.querySelectorAll('.eShape'),function(b){ b.onclick=function(){ shape=b.getAttribute('data-v'); paint(); }; });
@@ -4699,6 +4734,37 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     menuEl.querySelector('#eGo').onclick=function(){ if(window.__doInsert) window.__doInsert(runId,pieceIdx,alongIn,{type:'elbow90',dir:dirLR,round:(shape==='round')}); closeMenu(); };
   }
   window.__elbowDialog=elbowDialog;
+  function tapDialog(runId, pieceIdx, alongIn, cx, cy){
+    closeMenu();
+    var run=(window.__runs2d||[]).filter(function(r){return r.id===runId;})[0];
+    var mainRound = run && run.pieces && run.pieces[pieceIdx] ? !!run.pieces[pieceIdx].round : false;
+    menuEl=document.createElement('div');
+    menuEl.style.cssText='position:fixed;z-index:99999;left:'+Math.max(6,Math.min(cx||220, window.innerWidth-244))+'px;top:'+Math.max(6,Math.min(cy||160, window.innerHeight-300))+'px;width:230px;background:#fff;border:1px solid #dde2e9;border-radius:11px;padding:12px;box-shadow:0 10px 30px rgba(30,40,60,.20);font:12px -apple-system,system-ui,sans-serif;color:#2b3441';
+    var shape='round';
+    function seg(cls,val,label){ return '<button class="'+cls+'" data-v="'+val+'" style="flex:1;padding:6px;border-radius:7px;border:2px solid #dde2e9;background:#f5f7fa;color:#2b3441;cursor:pointer;font-weight:600">'+label+'</button>'; }
+    menuEl.innerHTML='<div style="font-weight:800;margin-bottom:2px;color:#5b8def">Tap off the duct</div>'+
+      '<div style="font-size:10px;color:#8a93a1;margin-bottom:8px">Tapping off a '+(mainRound?'round':'rectangular')+' main</div>'+
+      '<div style="font-size:10px;color:#8a93a1;margin-bottom:3px">Branch shape</div><div style="display:flex;gap:5px;margin-bottom:8px">'+seg('pShape','round','Round')+seg('pShape','rect','Rectangular')+'</div>'+
+      '<div style="font-size:10px;color:#8a93a1;margin-bottom:3px" id="pSizeLbl">Branch \u00f8 (in)</div>'+
+      '<input id="pSize" placeholder="8" style="width:100%;box-sizing:border-box;padding:7px;border:1px solid #dde2e9;border-radius:7px;background:#f8fafc;color:#232b36;margin-bottom:8px">'+
+      '<div style="font-size:10px;color:#8a93a1;margin-bottom:3px">Branch length (in)</div>'+
+      '<input id="pLen" value="24" style="width:100%;box-sizing:border-box;padding:7px;border:1px solid #dde2e9;border-radius:7px;background:#f8fafc;color:#232b36;margin-bottom:10px">'+
+      '<button id="pGo" style="width:100%;background:#5b8def;border:none;color:#fff;font-weight:700;border-radius:8px;padding:8px;cursor:pointer;margin-bottom:5px">Insert tap + branch</button>'+
+      '<button id="pCancel" style="width:100%;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:6px;cursor:pointer">Cancel</button>';
+    document.body.appendChild(menuEl);
+    ['mousedown','mouseup','wheel'].forEach(function(t){ menuEl.addEventListener(t,function(e){e.stopPropagation();},true); });
+    function paint(){ Array.prototype.forEach.call(menuEl.querySelectorAll('.pShape'),function(b){ var on=b.getAttribute('data-v')===shape; b.style.borderColor=on?'#a9c4ff':'#dde2e9'; b.style.background=on?'#eef4ff':'#f5f7fa'; b.style.color=on?'#3562c4':'#2b3441'; });
+      var lbl=menuEl.querySelector('#pSizeLbl'); lbl.textContent=(shape==='round')?'Branch \u00f8 (in)':'Branch size (e.g. 12x8)'; }
+    Array.prototype.forEach.call(menuEl.querySelectorAll('.pShape'),function(b){ b.onclick=function(){ shape=b.getAttribute('data-v'); paint(); }; });
+    paint();
+    menuEl.querySelector('#pCancel').onclick=closeMenu;
+    menuEl.querySelector('#pGo').onclick=function(){ var el=menuEl.querySelector('#pSize'), sz=parseSize(el.value, shape==='round'); if(!sz){ el.style.borderColor='#e55'; el.focus(); return; }
+      var len=parseFloat(menuEl.querySelector('#pLen').value)||24;
+      if(window.__doInsert) window.__doInsert(runId, pieceIdx, alongIn, {type:'tap', branch:true, branchW:sz.w, branchD:(sz.round?sz.w:sz.h), branchRound:!!sz.round, branchLenIn:len, mainRound:mainRound});
+      closeMenu(); status('Added tap + '+(sz.round?('\u00f8'+sz.w):(sz.w+'\u00d7'+sz.h))+' branch \u2014 drag its end to length.'); };
+    menuEl.querySelector('#pSize').focus();
+  }
+  window.__tapDialog=tapDialog;
   document.addEventListener('mousedown', function(e){ if(menuEl && !menuEl.contains(e.target)) closeMenu(); }, true);
   window.__fitMenu=function(runId, pieceIdx, alongIn, curSize, cx, cy){
     closeMenu();
@@ -4714,7 +4780,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
       '<div id="fmForm"></div>'+
       '<button id="fmCancel" style="width:100%;margin-top:6px;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:7px;padding:7px;cursor:pointer">Cancel</button>';
     document.body.appendChild(menuEl);
-    ['mousedown','mouseup','wheel','click'].forEach(function(t){ menuEl.addEventListener(t,function(e){ e.stopPropagation(); },true); });
+    ['mousedown','mouseup','wheel'].forEach(function(t){ menuEl.addEventListener(t,function(e){ e.stopPropagation(); },true); });
     menuEl.querySelector('#fmCancel').onclick=closeMenu;
     function sizeForm(kind){
       var f=menuEl.querySelector('#fmForm'); var isRound=(kind==='s2r'); var dir='end';
