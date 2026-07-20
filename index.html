@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.27</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.32</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -1952,7 +1952,7 @@ function refreshSel(){
 (function(){
   var ov=$('overlay'); if(!ov) return;
   window.__ductTaps = window.__ductTaps || [];
-  var on=false, style='stap', side='front', size=8, len=6, sqW=12, sqD=8, rnd=8;
+  var on=false, style='stap', side='front', size=8, len=6, sqW=12, sqD=8, rnd=8, mainShape='rect';
   function invApply(m,X,Y){ var a=m[0],b=m[1],c=m[2],d=m[3],e=m[4],f=m[5],det=(a*d-b*c)||1; return [(d*(X-e)-c*(Y-f))/det, (-b*(X-e)+a*(Y-f))/det]; }
   function arrow(s){ return s==='top'?'\u2191':s==='bottom'?'\u2193':s==='front'?'\u2190':'\u2192'; }
   function disp(tp){ if(!window.__nvt)return null; var u=invApply(window.__nvt,tp.nx,tp.ny); return applyM(viewport.transform,u[0],u[1]); }
@@ -1971,17 +1971,19 @@ function refreshSel(){
   // config panel
   var pan=document.createElement('div'); pan.id='tapPanel';
   pan.style.cssText='position:fixed;top:62px;right:14px;z-index:99999;display:none;width:216px;background:#ffffff;color:#2b3441;border:1px solid #dde2e9;border-radius:11px;padding:12px;font:12px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;box-shadow:0 8px 24px rgba(30,40,60,.16)';
-  function tb(g,v,lab,cur){ return '<button data-g="'+g+'" data-v="'+v+'" style="flex:1;padding:6px 4px;border-radius:6px;border:2px solid '+(cur===v?'#e07b00':'transparent')+';background:#0e1923;color:#fff;cursor:pointer;font-size:11px">'+lab+'</button>'; }
+  function tb(g,v,lab,cur){ return '<button data-g="'+g+'" data-v="'+v+'" style="flex:1;padding:6px 4px;border-radius:6px;border:2px solid '+(cur===v?'#a9c4ff':'#dde2e9')+';background:'+(cur===v?'#eef4ff':'#f5f7fa')+';color:'+(cur===v?'#3562c4':'#2b3441')+';cursor:pointer;font-size:11px;font-weight:600">'+lab+'</button>'; }
+  var INP='width:100%;padding:6px;border:1px solid #dde2e9;border-radius:6px;background:#f8fafc;color:#232b36';
   function paint(){ pan.innerHTML=
     '<div style="font-weight:700;margin-bottom:8px">Tap setup</div>'+
+    '<div style="font-size:10px;opacity:.7;margin-bottom:3px">Tap off a duct that is</div><div style="display:flex;gap:5px;margin-bottom:9px">'+tb('main','rect','Rectangular',mainShape)+tb('main','round','Round',mainShape)+'</div>'+
     '<div style="font-size:10px;opacity:.7;margin-bottom:3px">Style</div><div style="display:flex;gap:5px;margin-bottom:9px">'+tb('style','stap','Straight',style)+tb('style','shtap','Shoe',style)+tb('style','s2r','Sq\u2192Rd',style)+'</div>'+
     '<div style="font-size:10px;opacity:.7;margin-bottom:3px">Direction</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:9px">'+tb('side','top','\u2191 Up',side)+tb('side','bottom','\u2193 Down',side)+tb('side','front','\u2190 Left',side)+tb('side','back','\u2192 Right',side)+'</div>'+
     (style==='s2r'
-      ? '<div style="display:flex;gap:6px;margin-bottom:7px"><div style="flex:1"><div style="font-size:10px;opacity:.7">Sq W (in)</div><input id="tSqW" type="number" value="'+sqW+'" style="width:100%;padding:6px;border:1px solid #345;border-radius:6px;background:#0e1923;color:#fff"></div><div style="flex:1"><div style="font-size:10px;opacity:.7">Sq D (in)</div><input id="tSqD" type="number" value="'+sqD+'" style="width:100%;padding:6px;border:1px solid #345;border-radius:6px;background:#0e1923;color:#fff"></div></div>'
-        +'<div style="display:flex;gap:6px;margin-bottom:10px"><div style="flex:1"><div style="font-size:10px;opacity:.7">Round \u00f8 (in)</div><input id="tRnd" type="number" value="'+rnd+'" style="width:100%;padding:6px;border:1px solid #345;border-radius:6px;background:#0e1923;color:#fff"></div><div style="flex:1"><div style="font-size:10px;opacity:.7">Length (in)</div><input id="tapLn" type="number" value="'+len+'" style="width:100%;padding:6px;border:1px solid #345;border-radius:6px;background:#0e1923;color:#fff"></div></div>'
-      : '<div style="display:flex;gap:8px;margin-bottom:10px"><div style="flex:1"><div style="font-size:10px;opacity:.7">Size (in)</div><input id="tapSz" type="number" value="'+size+'" style="width:100%;padding:6px;border:1px solid #345;border-radius:6px;background:#0e1923;color:#fff"></div><div style="flex:1"><div style="font-size:10px;opacity:.7">Length (in)</div><input id="tapLn" type="number" value="'+len+'" style="width:100%;padding:6px;border:1px solid #345;border-radius:6px;background:#0e1923;color:#fff"></div></div>')+
-    '<div style="font-size:11px;color:#ffe6b0;margin-bottom:9px">Click the duct to drop taps. Click a tap again to remove it.</div>'+
-    '<div style="display:flex;gap:6px"><button id="tapClear" style="flex:1;padding:7px;border:1px solid #345;border-radius:7px;background:#3a2030;color:#fbb;cursor:pointer">Clear all</button><button id="tapDone" style="flex:1;padding:7px;border:none;border-radius:7px;background:#e07b00;color:#fff;font-weight:700;cursor:pointer">Done</button></div>';
+      ? '<div style="display:flex;gap:6px;margin-bottom:7px"><div style="flex:1"><div style="font-size:10px;opacity:.7">Sq W (in)</div><input id="tSqW" type="number" value="'+sqW+'" style="'+INP+'"></div><div style="flex:1"><div style="font-size:10px;opacity:.7">Sq D (in)</div><input id="tSqD" type="number" value="'+sqD+'" style="'+INP+'"></div></div>'
+        +'<div style="display:flex;gap:6px;margin-bottom:10px"><div style="flex:1"><div style="font-size:10px;opacity:.7">Round \u00f8 (in)</div><input id="tRnd" type="number" value="'+rnd+'" style="'+INP+'"></div><div style="flex:1"><div style="font-size:10px;opacity:.7">Length (in)</div><input id="tapLn" type="number" value="'+len+'" style="'+INP+'"></div></div>'
+      : '<div style="display:flex;gap:8px;margin-bottom:10px"><div style="flex:1"><div style="font-size:10px;opacity:.7">Size (in)</div><input id="tapSz" type="number" value="'+size+'" style="'+INP+'"></div><div style="flex:1"><div style="font-size:10px;opacity:.7">Length (in)</div><input id="tapLn" type="number" value="'+len+'" style="'+INP+'"></div></div>')+
+    '<div style="font-size:11px;color:#b06a00;margin-bottom:9px">Click the duct to drop taps. Click a tap again to remove it.</div>'+
+    '<div style="display:flex;gap:6px"><button id="tapClear" style="flex:1;padding:7px;border:1px solid #f2d4d4;border-radius:7px;background:#fdf2f2;color:#c0484d;cursor:pointer">Clear all</button><button id="tapDone" style="flex:1;padding:7px;border:none;border-radius:7px;background:#5b8def;color:#fff;font-weight:700;cursor:pointer">Done</button></div>';
     var eSz=pan.querySelector('#tapSz'); if(eSz)eSz.oninput=function(){ size=parseFloat(this.value)||8; };
     var eW=pan.querySelector('#tSqW'); if(eW)eW.oninput=function(){ sqW=parseFloat(this.value)||12; };
     var eD=pan.querySelector('#tSqD'); if(eD)eD.oninput=function(){ sqD=parseFloat(this.value)||8; };
@@ -1990,7 +1992,7 @@ function refreshSel(){
     pan.querySelector('#tapClear').onclick=function(){ (window.__ductTaps||[]).length=0; renderTaps(); if(typeof setStatus==='function')setStatus('Cleared all taps.'); };
     pan.querySelector('#tapDone').onclick=function(){ setOn(false); };
   }
-  pan.addEventListener('click',function(e){ var b=e.target.closest('button[data-g]'); if(!b)return; var g=b.getAttribute('data-g'), v=b.getAttribute('data-v'); if(g==='style')style=v; else if(g==='side')side=v; paint(); });
+  pan.addEventListener('click',function(e){ var b=e.target.closest('button[data-g]'); if(!b)return; var g=b.getAttribute('data-g'), v=b.getAttribute('data-v'); if(g==='style')style=v; else if(g==='side')side=v; else if(g==='main')mainShape=v; paint(); });
   ['mousedown','mouseup','touchstart','touchend','wheel'].forEach(function(t){ pan.addEventListener(t,function(e){e.stopPropagation();},true); btn.addEventListener(t,function(e){e.stopPropagation();},true); });
   document.body.appendChild(pan);
   function setOn(v){ on=v; if(v && window.__tools){ Object.keys(window.__tools).forEach(function(k){ if(k!=='tap') try{window.__tools[k]();}catch(e){} }); } btn.style.background=on?'#5a3a0a':'#13212e'; btn.style.borderColor=on?'#ffb24d':'#b8862b'; if(on)paint(); pan.style.display=on?'block':'none'; ov.style.cursor=on?'copy':'crosshair'; if(typeof setStatus==='function') setStatus(on?'Tap tool ON \u2014 click the duct to place taps.':'Tap tool off.'); }
@@ -2011,7 +2013,7 @@ function refreshSel(){
     var taps=window.__ductTaps; for(var i=0;i<taps.length;i++){ var p=disp(taps[i]); if(p){ var dr=Math.hypot(p[0]-vx,p[1]-vy)*(r.width/(viewport.width||1)); if(dr<10){ taps.splice(i,1); renderTaps(); if(typeof setStatus==='function')setStatus('Removed a tap ('+taps.length+' left).'); return; } } }
     if(!window.__nvt){ if(typeof setStatus==='function')setStatus('Load a print first.'); return; }
     var u=invVP(vx,vy); var nx=applyM(window.__nvt,u[0],u[1]);
-    var tap={nx:nx[0],ny:nx[1],style:style,len:len,side:side};
+    var tap={nx:nx[0],ny:nx[1],style:style,len:len,side:side,mainShape:mainShape};
     if(style==='s2r'){ tap.sqW=sqW; tap.sqD=sqD; tap.rnd=rnd; tap.size=rnd; } else { tap.size=size; }
     taps.push(tap); var cleared=0; try{ cleared=clearSymbolGreen(vx,vy,r.width); }catch(e){} renderTaps();
     if(typeof setStatus==='function') setStatus('Placed '+(style==='s2r'?(sqW+'x'+sqD+'\u2192'+rnd+'\u00f8'):(size+'\u00f8'))+' '+(style==='shtap'?'shoe':style==='s2r'?'sq-to-round':'straight')+' tap ('+side+')'+(cleared?' \u00b7 cleared '+cleared+' symbol line(s)':'')+'. '+taps.length+' total \u2014 build 3D to see them.'); }
@@ -2065,8 +2067,8 @@ function refreshSel(){
     }); });
     return (best && best.d<26)?best:null;
   };
-  window.__flipSizeStep=function(runId, pieceIdx){         // swap which side of a reducer/transition is the new size
-    var run=findRun(runId); if(!run) return false; var p=run.pieces[pieceIdx]; if(!p||!p._sizeStep) return false;
+  window.__flipSizeStep=function(runId, pieceIdx){         // swap which side of a reducer/transition is the new size    var run=findRun(runId); if(!run) return false; var p=run.pieces[pieceIdx]; if(!p||!p._sizeStep) return false;
+    window.__pushRunUndo&&window.__pushRunUndo();
     function grab(st){ return {widthIn:st.widthIn,depthIn:st.depthIn,round:st.round,size:st.size,cid:st.cid,camduct:st.camduct}; }
     var A=null,B=null,i; for(i=pieceIdx-1;i>=0;i--){ if(run.pieces[i].kind==='straight'){ A=run.pieces[i]; break; } }
     for(i=pieceIdx+1;i<run.pieces.length;i++){ if(run.pieces[i].kind==='straight'){ B=run.pieces[i]; break; } }
@@ -2079,11 +2081,56 @@ function refreshSel(){
     run.widthIn=(run.pieces[0]&&run.pieces[0].widthIn)||run.widthIn;
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Flipped reducer/transition direction.'); return true;
   };
+  window.__connectElbow=function(idA, endA, idB, endB, round){    // join two runs at the corner where their axes meet
+    var A=findRun(idA), B=findRun(idB); if(!A||!B||A===B) return false;
+    window.__pushRunUndo&&window.__pushRunUndo();
+    function endInfo(run,end){ var pl=window.__runPoly(run), n=pl.length;
+      if(end==='start') return {p:pl[0], out:[pl[0][0]-(pl[1]||pl[0])[0], pl[0][1]-(pl[1]||pl[0])[1]]};
+      return {p:pl[n-1], out:[pl[n-1][0]-(pl[n-2]||pl[0])[0], pl[n-1][1]-(pl[n-2]||pl[0])[1]]}; }
+    function nrm(d){ var l=Math.hypot(d[0],d[1])||1; return [d[0]/l,d[1]/l]; }
+    function lineX(p1,d1,p2,d2){ var den=d1[0]*d2[1]-d1[1]*d2[0]; if(Math.abs(den)<1e-6) return null; var t=((p2[0]-p1[0])*d2[1]-(p2[1]-p1[1])*d2[0])/den; return [p1[0]+d1[0]*t,p1[1]+d1[1]*t]; }
+    var ea=endInfo(A,endA), eb=endInfo(B,endB), ad=nrm(ea.out), bd=nrm(eb.out);
+    var corner=lineX(ea.p, ad, eb.p, bd); if(!corner){ if(typeof setStatus==='function')setStatus('Those two runs are parallel \u2014 can\u2019t elbow them.'); return false; }
+    function extendTo(run,end,target){ var pl=window.__runPoly(run), n=pl.length, i;
+      if(end==='start'){ var nx=pl[1]||pl[n-1], L=Math.hypot(nx[0]-target[0],nx[1]-target[1]); run.start=[target[0],target[1]];
+        var dl=Math.hypot(nx[0]-target[0],nx[1]-target[1])||1; run.dir=[(nx[0]-target[0])/dl,(nx[1]-target[1])/dl];
+        for(i=0;i<run.pieces.length;i++){ if(run.pieces[i].kind==='straight'){ run.pieces[i].lenIn=Math.max(1,Math.round(L/ppi)); break; } } }
+      else { var an=pl[n-2]||pl[0], L2=Math.hypot(target[0]-an[0],target[1]-an[1]);
+        for(i=run.pieces.length-1;i>=0;i--){ if(run.pieces[i].kind==='straight'){ run.pieces[i].lenIn=Math.max(1,Math.round(L2/ppi)); break; } } } }
+    extendTo(A,endA,corner); extendTo(B,endB,corner);
+    var u=ad, v=[-bd[0],-bd[1]];                                  // A heads into corner along ad; leaving toward B is -bd
+    var turn=Math.atan2(u[0]*v[1]-u[1]*v[0], u[0]*v[0]+u[1]*v[1]);
+    var w=A.widthIn, dep=(A.pieces[0]&&A.pieces[0].depthIn)||null;
+    var elb={kind:'fitting',cid:'e90',camduct:(round?'90 Elbow (round)':'90 Elbow'),round:!!round,lenIn:0,turn:turn,widthIn:w,depthIn:dep,size:(round?('\u00f8'+w):(w+'\u00d7'+(dep!=null?dep:'?'))),_elbow:true};
+    if(endA==='start') A.pieces.unshift(elb); else A.pieces.push(elb);
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Connected the two runs with a 90\u00b0 elbow.'); return true;
+  };
+  window.__ductDirAt=function(nx,ny,radIn){    // dominant raw-PDF duct-line directions near a point (strongest first)
+    if(typeof segments==='undefined'||!segments||nx==null) return [];
+    var rad=inToPt(radIn||30), bins={};
+    for(var i=0;i<segments.length;i++){ var s=segments[i]; if(!s||s.cls!=='duct'||s.nx1==null) continue;
+      var mx=(s.nx1+s.nx2)/2, my=(s.ny1+s.ny2)/2; if(Math.hypot(mx-nx,my-ny)>rad) continue;
+      var dx=s.nx2-s.nx1, dy=s.ny2-s.ny1, L=Math.hypot(dx,dy); if(L<1e-4) continue;
+      var ang=Math.atan2(dy,dx); if(ang<0) ang+=Math.PI;                 // undirected 0..\u03c0
+      var key=Math.round(ang/(Math.PI/18)); (bins[key]=bins[key]||{w:0,s:0}); bins[key].w+=L; bins[key].s+=ang*L; }
+    var arr=Object.keys(bins).map(function(k){ var b=bins[k], a=b.s/b.w; return {ang:a,w:b.w,dir:[Math.cos(a),Math.sin(a)]}; });
+    arr.sort(function(p,q){return q.w-p.w;}); return arr;
+  };
+  // ---- RUN UNDO: snapshot window.__runs2d before any destructive edit so a mis-delete/move is recoverable ----
+  window.__runSnap=window.__runSnap||[];
+  window.__pushRunUndo=function(){ try{ window.__runSnap.push(JSON.stringify(window.__runs2d||[])); if(window.__runSnap.length>40) window.__runSnap.shift(); if(typeof refreshUndoBtn==='function') refreshUndoBtn(); }catch(e){} };
+  window.__undoRun=function(){ if(!window.__runSnap||!window.__runSnap.length){ if(typeof setStatus==='function')setStatus('Nothing to undo.'); return false; }
+    try{ window.__runs2d=JSON.parse(window.__runSnap.pop()); }catch(e){ return false; }
+    try{ if(typeof sel!=='undefined'&&sel.clear) sel.clear(); }catch(_){ } try{ window.__selRunId=null; }catch(_){ }
+    try{ renderItems(); }catch(_){ try{window.__renderItems&&window.__renderItems();}catch(__){} }
+    try{ renderPanel(); }catch(_){ try{window.__renderPanel&&window.__renderPanel();}catch(__){} }
+    if(typeof setStatus==='function') setStatus('Undid last change \u2014 '+window.__runSnap.length+' more.'); return true; };
   // Insert a fitting INTO a straight piece at a click position (alongIn from the piece start).
   // spec:{type:'elbow90'|'elbow45'|'transition'|'s2r'|'reducer'|'offset'|'cap', dir:'L'|'R'|'start'|'end', size:{w,h,round}}
   window.__doInsert=function(runId, pieceIdx, alongIn, spec){
     var run=findRun(runId); if(!run) return false; var pieces=run.pieces, p=pieces[pieceIdx];
     if(!p||p.kind!=='straight'){ if(typeof setStatus==='function') setStatus('Pick a straight length of duct to insert into.'); return false; }
+    window.__pushRunUndo&&window.__pushRunUndo();
     var L=p.lenIn||0, a=Math.max(0,Math.min(L, alongIn||0));
     var w=p.widthIn, dep=(p.depthIn!=null?p.depthIn:null), rr=!!p.round, sz=p.size;
     function mkS(len){ return {kind:'straight',lenIn:rnd(Math.max(0,len)),widthIn:w,depthIn:dep,size:sz,cid:rr?'spiral':'st',camduct:rr?'Spiral':'Straight Duct',round:rr}; }
@@ -2098,7 +2145,8 @@ function refreshSel(){
       renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Added a tap'+(spec.branch?' + straight branch \u2014 drag its end to length':'')+'.'); return true; }
     var fit;
     if(t==='elbow90'||t==='elbow45'){ var ang=(t==='elbow45'?Math.PI/4:Math.PI/2)*((spec.dir==='L')?1:-1);
-      fit={kind:'fitting',cid:(t==='elbow45'?'e45':'e90'),camduct:(t==='elbow45'?'45 Elbow':'90 Elbow'),round:rr,lenIn:0,turn:ang,widthIn:w,depthIn:dep,size:sz,_elbow:true}; }
+      var er=(spec.round!=null?!!spec.round:rr);
+      fit={kind:'fitting',cid:(t==='elbow45'?'e45':'e90'),camduct:(t==='elbow45'?'45 Elbow':'90 Elbow')+(er?' (round)':''),round:er,lenIn:0,turn:ang,widthIn:w,depthIn:dep,size:(er?('\u00f8'+w):sz),_elbow:true}; }
     else if(t==='offset'){ fit={kind:'fitting',cid:'offset',camduct:'Offset',round:rr,lenIn:(spec.lenIn||12),widthIn:w,depthIn:dep,size:sz,_offset:true,offsetIn:(spec.offsetIn||12),offsetSide:(spec.offsetSide||1)}; }
     else if(t==='transition'||t==='reducer'||t==='s2r'){
       var sp=spec.size||{}, nW=sp.w||w, nR=(t==='s2r')?true:!!sp.round, nD=nR?nW:(sp.h!=null?sp.h:dep), nS=nR?('\u00f8'+nW):(nW+'\u00d7'+(nD!=null?nD:'?'));
@@ -2296,14 +2344,24 @@ function refreshSel(){
         else { name=target; }   // transition/reducer/s2r from a fine model fall through as-is
       }
       var fitLenIn = (target==='e90'||target==='sqt'||target==='ec'||target==='reo')?0:(target==='__size__'?12:6);
+      // ELBOW TURN from raw PDF lines: pick the duct direction near the detection that is most
+      // perpendicular to the run heading, and turn toward whichever side it lies on.
+      var turnV=0;
+      if(target==='e90'){
+        var inc=(run.dir&&Math.hypot(run.dir[0],run.dir[1])>1e-6)?run.dir:[1,0];
+        var dirs=(window.__ductDirAt?window.__ductDirAt(d.nx,d.ny,30):[]), out=null, bestPerp=0.6;
+        dirs.forEach(function(dd){ var dot=Math.abs(inc[0]*dd.dir[0]+inc[1]*dd.dir[1]); if(dot<bestPerp){ bestPerp=dot; out=dd.dir; } });
+        if(out) turnV=((inc[0]*out[1]-inc[1]*out[0])>=0?1:-1)*Math.PI/2;
+      }
       // split the straight piece at 'into'
+      var mkFit=function(){ var o={kind:'fitting',cid:cid,camduct:name,round:isRound,lenIn:fitLenIn,widthIn:piece.widthIn,depthIn:piece.depthIn,fromYolo:true,score:d.score}; if(target==='e90'&&turnV){ o.turn=turnV; o._elbow=true; } return o; };
       var newPieces=[];
       if(piece.kind==='straight' && into>2 && into<piece.lenIn-2){
         var a=Object.assign({},piece); a.lenIn=Math.round(into*10)/10;
         var b=Object.assign({},piece); b.lenIn=Math.round((piece.lenIn-into)*10)/10;
-        newPieces=[a,{kind:'fitting',cid:cid,camduct:name,round:isRound,lenIn:fitLenIn,widthIn:piece.widthIn,depthIn:piece.depthIn,fromYolo:true,score:d.score},b];
+        newPieces=[a,mkFit(),b];
       } else {
-        newPieces=[{kind:'fitting',cid:cid,camduct:name,round:isRound,lenIn:fitLenIn,widthIn:piece.widthIn,depthIn:piece.depthIn,fromYolo:true,score:d.score}];
+        newPieces=[mkFit()];
       }
       run.pieces.splice.apply(run.pieces,[idx, (piece.kind==='straight'&&into>2&&into<piece.lenIn-2)?1:0].concat(newPieces));
       placed++;
@@ -2575,8 +2633,11 @@ function refreshSel(){
       var otOut=[f.x+noutx*outer*hw, f.y+nouty*outer*hw];          // outgoing outer wall point
       var otIn =[f.x+noutx*inner*hw, f.y+nouty*inner*hw];          // outgoing inner wall point
       var heel  =lx(inOut,[f.ux,f.uy], otOut,[oux,ouy]);           // outer walls intersect -> heel (mitered)
-      var throat=lx(inIn ,[f.ux,f.uy], otIn ,[oux,ouy]);           // inner walls intersect -> throat
-      return [inOut, heel, otOut, otIn, throat, inIn].map(function(q){return n2s(q[0],q[1]);});
+      var throat=lx(inIn ,[f.ux,f.uy], otIn ,[oux,ouy]);           // inner walls intersect -> sharp throat
+      var TH=inToPt(6);                                            // 6" throat: chamfer the inside corner 6" back along each inner wall
+      function back(from,toward,d){ var vx=toward[0]-from[0], vy=toward[1]-from[1], l=Math.hypot(vx,vy)||1; return [from[0]+vx/l*d, from[1]+vy/l*d]; }
+      var thA=back(throat, inIn, TH), thB=back(throat, otIn, TH);   // throat corners on the incoming/outgoing inner walls
+      return [inOut, heel, otOut, thB, thA, inIn].map(function(q){return n2s(q[0],q[1]);});
     }
     // TAP — a short straight branch stub off the trunk wall (unless it's a shop tap collar)
     if(p.kind==='fitting' && p._tap && !p.shopTap){
@@ -2635,7 +2696,7 @@ function refreshSel(){
         poly.setAttribute('fill',fill); poly.setAttribute('stroke',stroke); poly.setAttribute('stroke-width',on?'3':'1.5'); poly.style.cursor='pointer';
         var pcHit=function(e){ e.stopPropagation();
           var m=window.__editMode;
-          if(m==='delete'){ window.__runs2d=(window.__runs2d||[]).filter(function(r){return r.id!==run.id;}); sel.clear(); selRun=null; renderItems(); renderPanel(); setStatus('Deleted run.'); return; }
+          if(m==='delete'){ window.__pushRunUndo&&window.__pushRunUndo(); window.__runs2d=(window.__runs2d||[]).filter(function(r){return r.id!==run.id;}); sel.clear(); selRun=null; renderItems(); renderPanel(); setStatus('Deleted run. (Undo with the Undo button or Ctrl+Z.)'); return; }
           if(m==='size'){ var v=prompt('Size for this piece (e.g. 20x8 or 12\u00f8):', p.size||''); if(v==null||!v.trim()) return;
             var pd=parseTagDims(v); if(!pd){ setStatus('Couldn\u2019t read \u201c'+v+'\u201d as a size \u2014 try like 20x8 or 12\u00f8.'); return; }
             var nW=pd.w, nD=pd.round?pd.w:pd.h, nR=!!pd.round, nS=pd.round?('\u00f8'+pd.w):(pd.w+'\u00d7'+pd.h);
@@ -2791,7 +2852,7 @@ function refreshSel(){
 
   window.__runOpen=function(id){ selRun=(selRun===id?null:id); renderPanel(); };
   window.__pcLen=function(id,i,v){ var r=findRun(id); if(!r)return; r.pieces[i].lenIn=Math.max(0.5,parseFloat(v)||r.pieces[i].lenIn); renderItems(); renderPanel(); setStatus('Run now '+fmtFt(runLenIn(r))+'.'); };
-  window.__pcDel=function(id,i){ var r=findRun(id); if(!r)return; r.pieces.splice(i,1); if(!r.pieces.length){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); selRun=null; } else applyReducerDownstream(r); sel.clear(); renderItems(); renderPanel(); };
+  window.__pcDel=function(id,i){ var r=findRun(id); if(!r)return; window.__pushRunUndo&&window.__pushRunUndo(); r.pieces.splice(i,1); if(!r.pieces.length){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); selRun=null; } else applyReducerDownstream(r); sel.clear(); renderItems(); renderPanel(); };
   window.__pcIns=function(id,i,ev){ var r=findRun(id); if(!r)return; var p=r.pieces[i]||{};
     var alongIn=(p.kind==='straight')?(p.lenIn||0):0;                 // insert at the end of this piece
     var sz=p.size||((p.widthIn||r.widthIn)+'\u00d7?');
@@ -3155,6 +3216,22 @@ function refreshSel(){
   function setY(msg){ var s=$('yoloStatus'); if(s)s.textContent=msg; }
   // redraw stored detections through the current transform (so boxes stick on zoom/pan)
   function n2sY(nx,ny){ if(!window.__nvt||!viewport) return null; var m=window.__nvt,a=m[0],b=m[1],c=m[2],d=m[3],e=m[4],f=m[5],det=(a*d-b*c)||1; var u=[(d*(nx-e)-c*(ny-f))/det,(-b*(nx-e)+a*(ny-f))/det]; return applyM(viewport.transform,u[0],u[1]); }
+  var YSWAP=['elbow','tap','tee','transition','reducer','sq2round','offset','cap'];
+  function openYoloMenu(d, cx, cy){
+    var old=document.getElementById('yoloTagMenu'); if(old) old.remove();
+    var m=document.createElement('div'); m.id='yoloTagMenu';
+    m.style.cssText='position:fixed;z-index:100000;left:'+Math.max(6,Math.min(cx,window.innerWidth-190))+'px;top:'+Math.max(6,Math.min(cy,window.innerHeight-300))+'px;width:176px;background:#fff;border:1px solid #dde2e9;border-radius:10px;padding:9px;box-shadow:0 10px 28px rgba(30,40,60,.2);font:12px -apple-system,system-ui,sans-serif;color:#2b3441';
+    var h='<div style="font-weight:800;margin-bottom:6px;color:#5b8def">Detection: '+(d.cls||'?')+'</div>'+
+      '<div style="font-size:10px;color:#8a93a1;margin-bottom:4px">Swap to</div>';
+    YSWAP.forEach(function(c){ h+='<button class="ys" data-c="'+c+'" style="display:block;width:100%;text-align:left;margin-bottom:3px;background:'+(c===d.cls?'#eef4ff':'#f5f7fa')+';border:1px solid '+(c===d.cls?'#a9c4ff':'#dde2e9')+';color:#2b3441;border-radius:6px;padding:5px 8px;cursor:pointer">'+c+'</button>'; });
+    h+='<button id="ysDel" style="width:100%;margin-top:5px;background:#fdf2f2;border:1px solid #f2d4d4;color:#c0484d;border-radius:6px;padding:6px;cursor:pointer;font-weight:600">Delete detection</button>';
+    m.innerHTML=h; document.body.appendChild(m);
+    ['mousedown','mouseup','click','wheel'].forEach(function(t){ m.addEventListener(t,function(e){e.stopPropagation();},true); });
+    function close(){ try{m.remove();}catch(_){} document.removeEventListener('mousedown',close,true); }
+    setTimeout(function(){ document.addEventListener('mousedown',close,true); },0);
+    Array.prototype.forEach.call(m.querySelectorAll('.ys'),function(b){ b.onclick=function(){ d.cls=b.getAttribute('data-c'); d.clsIdx=-1; close(); renderYolo(); if(typeof setStatus==='function')setStatus('Detection changed to '+d.cls+'. Re-run build to apply.'); }; });
+    m.querySelector('#ysDel').onclick=function(){ window.__yoloDets=(window.__yoloDets||[]).filter(function(x){return x!==d;}); close(); renderYolo(); if(typeof setStatus==='function')setStatus('Detection deleted.'); };
+  }
   function renderYolo(){
     var lay=$('yoloLayer'); if(!lay) return; lay.innerHTML='';
     if(!window.__yoloVisible) return;
@@ -3163,8 +3240,12 @@ function refreshSel(){
       var x=Math.min(p0[0],p1[0]), y=Math.min(p0[1],p1[1]), w=Math.abs(p1[0]-p0[0]), h=Math.abs(p1[1]-p0[1]);
       var col=colorFor(d.clsIdx);
       var rc=document.createElementNS(ns,'rect'); rc.setAttribute('x',x); rc.setAttribute('y',y); rc.setAttribute('width',w); rc.setAttribute('height',h);
-      rc.setAttribute('fill','none'); rc.setAttribute('stroke',col); rc.setAttribute('stroke-width','2.5'); lay.appendChild(rc);
-      var tt=document.createElementNS(ns,'text'); tt.setAttribute('x',x); tt.setAttribute('y',y-3); tt.setAttribute('font-size','11'); tt.setAttribute('font-weight','700'); tt.setAttribute('fill',col); tt.setAttribute('stroke','#0a0f16'); tt.setAttribute('stroke-width','2.5'); tt.setAttribute('paint-order','stroke'); tt.textContent=d.cls; lay.appendChild(tt);
+      rc.setAttribute('fill','rgba(91,141,239,0.04)'); rc.setAttribute('stroke',col); rc.setAttribute('stroke-width','2.5'); rc.style.cursor='pointer';
+      rc.addEventListener('click',function(e){ e.stopPropagation(); openYoloMenu(d, e.clientX, e.clientY); });
+      lay.appendChild(rc);
+      var tt=document.createElementNS(ns,'text'); tt.setAttribute('x',x); tt.setAttribute('y',y-3); tt.setAttribute('font-size','11'); tt.setAttribute('font-weight','700'); tt.setAttribute('fill',col); tt.setAttribute('stroke','#fff'); tt.setAttribute('stroke-width','2.5'); tt.setAttribute('paint-order','stroke'); tt.style.cursor='pointer'; tt.textContent=d.cls;
+      tt.addEventListener('click',function(e){ e.stopPropagation(); openYoloMenu(d, e.clientX, e.clientY); });
+      lay.appendChild(tt);
     });
   }
   window.__renderYolo=renderYolo;
@@ -3173,6 +3254,17 @@ function refreshSel(){
   // ---- load model ----
   $('yoloLoadBtn') && ($('yoloLoadBtn').onclick=function(){ $('yoloFile').click(); });
   $('yoloShowChk') && ($('yoloShowChk').onchange=function(){ window.__yoloVisible=this.checked; try{renderYolo();}catch(e){} });
+  // First-run nudge: prompt to load the fitting model if none is loaded yet
+  setTimeout(function(){ try{
+    if(session) return;
+    if(localStorage.getItem('yoloPromptSeen')) return;
+    var b=document.createElement('div');
+    b.style.cssText='position:fixed;left:50%;top:66px;transform:translateX(-50%);z-index:100001;background:#fff;border:1px solid #b6d2ef;border-radius:12px;padding:14px 16px;box-shadow:0 12px 34px rgba(30,40,60,.22);font:13px -apple-system,system-ui,sans-serif;color:#2b3441;max-width:390px;text-align:center';
+    b.innerHTML='<div style="font-weight:800;margin-bottom:6px;color:#2f6fb0">Load your fitting model</div><div style="font-size:12px;color:#5b6674;margin-bottom:10px">Add your YOLO model (<b>best.onnx</b>) so the takeoff can auto-detect elbows, taps and tees on the print.</div><div style="display:flex;gap:8px;justify-content:center"><button id="ynpLoad" style="background:#5b8def;border:none;color:#fff;font-weight:700;border-radius:8px;padding:8px 16px;cursor:pointer">Load best.onnx</button><button id="ynpLater" style="background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:8px 14px;cursor:pointer">Later</button></div>';
+    document.body.appendChild(b);
+    b.querySelector('#ynpLoad').onclick=function(){ try{localStorage.setItem('yoloPromptSeen','1');}catch(_){} b.remove(); var f=document.getElementById('yoloFile'); if(f) f.click(); };
+    b.querySelector('#ynpLater').onclick=function(){ try{localStorage.setItem('yoloPromptSeen','1');}catch(_){} b.remove(); };
+  }catch(e){} }, 1600);
   $('yoloFile') && ($('yoloFile').onchange=async function(e){
     var f=e.target.files[0]; if(!f) return; setY('loading…');
     if(!window.ort){ setY('onnxruntime not loaded'); setStatus('onnxruntime-web did not load (CDN/network).'); return; }
@@ -4210,7 +4302,7 @@ window.aiApply=(ci,restore)=>{   // restore=true -> put back to GREEN; null -> d
   try{ if(c){ addExample(c.idxs, restore===true?'duct':'not'); } }catch(e){}
 };
 var APP_VERSION='6.9w · runs: tag-gated pairing'; (function(){try{var v=document.createElement('div'); v.textContent='build '+APP_VERSION; v.style.cssText='position:fixed;bottom:4px;right:6px;font:11px ui-monospace,monospace;color:#6aa;opacity:.7;z-index:99999;pointer-events:none;background:rgba(8,16,24,.6);padding:1px 5px;border-radius:4px';document.body.appendChild(v);}catch(e){}})();
-document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ selected.clear(); refreshSel(); } if((e.ctrlKey||e.metaKey)&&String(e.key).toLowerCase()==='z'){ e.preventDefault(); undo(); } });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ selected.clear(); refreshSel(); } if((e.ctrlKey||e.metaKey)&&String(e.key).toLowerCase()==='z'){ e.preventDefault(); if(window.__runSnap&&window.__runSnap.length){ window.__undoRun&&window.__undoRun(); if(window.refreshUndoBtn) window.refreshUndoBtn(); } else { undo(); } } });
 
 // ---- filters / sliders ----
 ['showDuct','showMaybe','showNot','runsView'].forEach(id=>{var el=document.getElementById(id); if(el) el.addEventListener('change',drawOverlay);});
@@ -4409,9 +4501,11 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
  <button id="dtBarToggle" title="Duct editing tools" style="background:#fff;border:1px solid #dde2e9;border-right:none;color:#3a4656;border-radius:9px 0 0 9px;padding:9px 12px;cursor:pointer;font-weight:700;font-size:13px;box-shadow:-2px 2px 10px rgba(30,40,60,.10)">Edit</button>
  <div id="dtBarBody" style="display:none;background:#fff;border:1px solid #dde2e9;border-right:none;border-radius:11px 0 0 11px;padding:11px;margin-top:5px;box-shadow:-3px 3px 16px rgba(30,40,60,.14);width:204px">
    <div style="font-size:10px;color:#8a93a1;margin:0 0 8px 2px;letter-spacing:.4px;text-transform:uppercase;font-weight:600">Duct editing</div>
+   <button id="dtUndo" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#fff4e6;border:1px solid #ffd9a8;color:#b5641a;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:700;font-size:12px">↶ Undo last change</button>
    <button class="dtTool" data-mode="dragsize" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-resize width</button>
    <button class="dtTool" data-mode="draglen" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-end (length)</button>
    <button class="dtTool" data-mode="move" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Move run</button>
+    <button class="dtTool" data-mode="connect" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Connect 2 runs (elbow)</button>
    <button id="dtTapBtn" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Tap off a side</button>
    <button class="dtTool" data-mode="insert" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Insert (hold &amp; drag)</button>
    <button class="dtTool" data-mode="size" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Type a size</button>
@@ -4429,11 +4523,14 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   function status(s){ try{ if(typeof setStatus==='function') setStatus(s); }catch(_){} }
   function openBar(){ if(body.style.display==='none'){ body.style.display='block'; tog.textContent='Edit ‹'; } }
   tog.onclick=function(){ var open=body.style.display!=='none'; body.style.display=open?'none':'block'; tog.textContent=open?'Edit ›':'Edit ‹'; if(!open) status('Edit mode — click a duct to select, or pick a tool.'); };
-  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',move:'Drag anywhere on a run to move the whole run.',insert:'Press on a duct and drag to a fitting on the wheel, then release.',size:'Click a piece and type its size.',delete:'Click a run to delete it.'};
+  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',move:'Drag anywhere on a run to move the whole run.',connect:'Click near the END of one duct, then the END of another — joins them with a 90° elbow.',insert:'Press on a duct and drag to a fitting on the wheel, then release.',size:'Click a piece and type its size.',delete:'Click a run to delete it.'};
   function refl(){ Array.prototype.forEach.call(document.querySelectorAll('.dtTool'),function(b){ var on=(b.getAttribute('data-mode')===window.__editMode), isDel=(b.getAttribute('data-mode')==='delete');
       b.style.background=on?'#dbe7ff':(isDel?'#fdf2f2':'#f5f7fa'); b.style.borderColor=on?'#9dbcff':(isDel?'#f2d4d4':'#dde2e9'); b.style.color=on?'#3562c4':(isDel?'#c0484d':'#2b3441'); });
     if(hint) hint.textContent=window.__editMode?(HINTS[window.__editMode]||''):''; }
   Array.prototype.forEach.call(document.querySelectorAll('.dtTool'),function(b){ b.onclick=function(){ var m=b.getAttribute('data-mode'); window.__editMode=(window.__editMode===m)?null:m; window.__tapMain=null; openBar(); refl(); status(window.__editMode?(HINTS[window.__editMode]||''):'Edit off.'); }; });
+  window.refreshUndoBtn=function(){ var u=document.getElementById('dtUndo'); if(!u) return; var n=(window.__runSnap||[]).length; u.textContent=n?('\u21b6 Undo last change ('+n+')'):'\u21b6 Undo last change'; u.style.opacity=n?'1':'.5'; u.style.cursor=n?'pointer':'default'; };
+  var undoBtn=document.getElementById('dtUndo'); if(undoBtn) undoBtn.onclick=function(){ if(window.__undoRun&&window.__undoRun()){ if(window.refreshUndoBtn) window.refreshUndoBtn(); } };
+  setInterval(function(){ if(window.refreshUndoBtn) window.refreshUndoBtn(); },700);
   var tapBtn=document.getElementById('dtTapBtn'); if(tapBtn) tapBtn.onclick=function(){ window.__editMode=null; refl(); var real=document.getElementById('tapToolBtn'); if(real){ real.click(); status('Tap tool on — click the duct to drop taps (style/size/direction in its panel).'); } else status('Tap tool not available.'); };
   document.getElementById('dtOff').onclick=function(){ window.__editMode=null; window.__tapMain=null; refl(); status('Edit off — click a duct to select.'); };
   setInterval(refl,500);   // stay in sync if a left-panel edit button changes the mode
@@ -4468,6 +4565,12 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   var drag=null;
   overlay.addEventListener('mousedown', function(e){
     var m=window.__editMode; if(e.button!==0) return;
+    if(m==='connect'){ var s1=toSvg(e); if(!s1) return; var rr=hitRun(s1); if(!rr) return; e.stopPropagation(); e.preventDefault();
+      var pl=window.__runPoly(rr), n=pl.length, sS=n2s(pl[0][0],pl[0][1]), sE=n2s(pl[n-1][0],pl[n-1][1]);
+      var end=(Math.hypot(s1[0]-sS[0],s1[1]-sS[1])<Math.hypot(s1[0]-sE[0],s1[1]-sE[1]))?'start':'finish';
+      if(!window.__connA){ window.__connA={runId:rr.id,end:end}; status('First duct picked \u2014 now click the second duct to connect.'); }
+      else { if(rr.id!==window.__connA.runId && window.__connectElbow) window.__connectElbow(window.__connA.runId, window.__connA.end, rr.id, end, false); window.__connA=null; try{window.__renderPanel&&window.__renderPanel();}catch(_){} }
+      return; }
     if(m==='insert'){ var s0=toSvg(e); if(!s0) return;
       var fs=(window.__sizeStepHit)?window.__sizeStepHit(s0[0],s0[1]):null;
       if(fs){ e.stopPropagation(); e.preventDefault(); if(window.__flipSizeStep) window.__flipSizeStep(fs.runId, fs.pieceIdx); try{window.__renderPanel&&window.__renderPanel();}catch(_){} return; }   // tap an existing reducer -> flip its direction
@@ -4477,14 +4580,17 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     e.stopPropagation(); e.preventDefault();
     var pin=pxPerIn(r)||1;
     if(m==='move'){
+      window.__pushRunUndo&&window.__pushRunUndo();
       var o=n2s(r.start[0],r.start[1]), ex=n2s(r.start[0]+1,r.start[1]), ey=n2s(r.start[0],r.start[1]+1);   // screen basis for nvt axes
       var b1=[ex[0]-o[0],ex[1]-o[1]], b2=[ey[0]-o[0],ey[1]-o[1]], det=(b1[0]*b2[1]-b1[1]*b2[0])||1;
       drag={mode:'move', r:r, sp0:sp, start0:[r.start[0],r.start[1]], inv:[[b2[1]/det,-b2[0]/det],[-b1[1]/det,b1[0]/det]]};
     } else if(m==='dragsize'){
+      window.__pushRunUndo&&window.__pushRunUndo();
       var a=n2s(r.start[0],r.start[1]), pp=ppiFn(), b=n2s(r.start[0]+r.dir[0]*pp*12,r.start[1]+r.dir[1]*pp*12);
       var ux=b[0]-a[0], uy=b[1]-a[1], ul=Math.hypot(ux,uy)||1;
       drag={mode:'size', r:r, pin:pin, a:a, ux:ux/ul, uy:uy/ul, w:r.widthIn};
     } else {
+      window.__pushRunUndo&&window.__pushRunUndo();
       var pl=window.__runPoly(r), n=pl.length;
       var sS=n2s(pl[0][0],pl[0][1]), sE=n2s(pl[n-1][0],pl[n-1][1]);
       var dStart=(Math.hypot(sp[0]-sS[0],sp[1]-sS[1]) < Math.hypot(sp[0]-sE[0],sp[1]-sE[1]));
@@ -4520,11 +4626,11 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   }, true);
 
   window.addEventListener('mouseup', function(){ if(!drag) return;
-    if(drag.mode==='wheel'){ var sel=wheelSel, tg=drag.target; closeWheel();
+    if(drag.mode==='wheel'){ var sel=wheelSel, tg=drag.target, cxr=drag.cx, cyr=drag.cy; closeWheel();
       if(sel>=0 && tg && window.__doInsert){ var it=WITEMS[sel];
-        if(it.k==='s2r'){ var v=prompt('Round size \u00f8 (in):','10'); if(v){ var n=parseFloat(v)||10; window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'s2r',dir:'end',size:{w:n,h:n,round:true}}); } }
-        else if(it.k==='reducer'){ var rv=prompt('New size after the reducer (e.g. 12x8):',''); if(rv){ var m2=rv.match(/\d+(\.\d+)?/g); if(m2&&m2.length){ var nw=parseFloat(m2[0]), nh=m2[1]?parseFloat(m2[1]):nw; window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'reducer',dir:'end',size:{w:nw,h:nh,round:false}}); status('Reducer added \u2014 tap it to flip direction if needed.'); } } }
-        else if(it.k==='elbow'){ window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'elbow90',dir:'R'}); }
+        if(it.k==='s2r'){ transitionDialog(tg.runId,tg.pieceIdx,tg.alongIn,'',cxr,cyr,'round'); }
+        else if(it.k==='reducer'){ transitionDialog(tg.runId,tg.pieceIdx,tg.alongIn,'',cxr,cyr,'rect'); }
+        else if(it.k==='elbow'){ elbowDialog(tg.runId,tg.pieceIdx,tg.alongIn,cxr,cyr); }
         else if(it.k==='offset'){ var od2=prompt('Offset distance (in):','12'); if(od2!=null) window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'offset',offsetIn:(parseFloat(od2)||12)}); }
         else if(it.k==='tap'){ var br=confirm('Build a straight branch of duct off this tap?'); var bl=24; if(br){ var lv=prompt('Branch length (in):','24'); bl=parseFloat(lv)||24; } window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'tap',branch:br,branchLenIn:bl}); }
         else { window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:it.k}); }
@@ -4542,6 +4648,57 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   // ---- fitting-picker popup (opened by the click dispatcher in 'insert' mode) ----
   var menuEl=null;
   function closeMenu(){ if(menuEl){ try{menuEl.remove();}catch(_){}} menuEl=null; }
+  function transitionDialog(runId, pieceIdx, alongIn, curSize, cx, cy, defShape){
+    closeMenu();
+    menuEl=document.createElement('div');
+    menuEl.style.cssText='position:fixed;z-index:99999;left:'+Math.max(6,Math.min(cx||220, window.innerWidth-244))+'px;top:'+Math.max(6,Math.min(cy||160, window.innerHeight-290))+'px;width:230px;background:#fff;border:1px solid #dde2e9;border-radius:11px;padding:12px;box-shadow:0 10px 30px rgba(30,40,60,.20);font:12px -apple-system,system-ui,sans-serif;color:#2b3441';
+    var shape=defShape||'rect', dir='end';
+    function seg(cls,val,label){ return '<button class="'+cls+'" data-v="'+val+'" style="flex:1;padding:6px;border-radius:7px;border:2px solid #dde2e9;background:#f5f7fa;color:#2b3441;cursor:pointer;font-weight:600">'+label+'</button>'; }
+    menuEl.innerHTML='<div style="font-weight:800;margin-bottom:8px;color:#5b8def">Transition / Reducer</div>'+
+      '<div style="font-size:10px;color:#8a93a1;margin-bottom:3px">Outlet shape</div>'+
+      '<div style="display:flex;gap:5px;margin-bottom:8px">'+seg('tShape','rect','Rectangular')+seg('tShape','round','Round')+'</div>'+
+      '<div style="font-size:10px;color:#8a93a1;margin-bottom:3px" id="tSizeLbl">New size (e.g. 12x8)</div>'+
+      '<input id="tSize" style="width:100%;box-sizing:border-box;padding:7px;border:1px solid #dde2e9;border-radius:7px;background:#f8fafc;color:#232b36;margin-bottom:8px">'+
+      '<div style="font-size:10px;color:#8a93a1;margin-bottom:3px">New size goes toward</div>'+
+      '<div style="display:flex;gap:5px;margin-bottom:10px">'+seg('tDir','end','end \u2192')+seg('tDir','start','\u2190 start')+'</div>'+
+      '<button id="tGo" style="width:100%;background:#5b8def;border:none;color:#fff;font-weight:700;border-radius:8px;padding:8px;cursor:pointer;margin-bottom:5px">Insert</button>'+
+      '<button id="tCancel" style="width:100%;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:6px;cursor:pointer">Cancel</button>';
+    document.body.appendChild(menuEl);
+    ['mousedown','mouseup','wheel','click'].forEach(function(t){ menuEl.addEventListener(t,function(e){e.stopPropagation();},true); });
+    function paint(){ Array.prototype.forEach.call(menuEl.querySelectorAll('.tShape'),function(b){ var on=b.getAttribute('data-v')===shape; b.style.borderColor=on?'#a9c4ff':'#dde2e9'; b.style.background=on?'#eef4ff':'#f5f7fa'; b.style.color=on?'#3562c4':'#2b3441'; });
+      Array.prototype.forEach.call(menuEl.querySelectorAll('.tDir'),function(b){ var on=b.getAttribute('data-v')===dir; b.style.borderColor=on?'#a9c4ff':'#dde2e9'; b.style.background=on?'#eef4ff':'#f5f7fa'; b.style.color=on?'#3562c4':'#2b3441'; });
+      var lbl=menuEl.querySelector('#tSizeLbl'), inp=menuEl.querySelector('#tSize'); if(shape==='round'){ lbl.textContent='New round \u00f8 (in)'; inp.placeholder='10'; } else { lbl.textContent='New size (e.g. 12x8)'; inp.placeholder='12x8'; } }
+    Array.prototype.forEach.call(menuEl.querySelectorAll('.tShape'),function(b){ b.onclick=function(){ shape=b.getAttribute('data-v'); paint(); }; });
+    Array.prototype.forEach.call(menuEl.querySelectorAll('.tDir'),function(b){ b.onclick=function(){ dir=b.getAttribute('data-v'); paint(); }; });
+    paint();
+    menuEl.querySelector('#tCancel').onclick=closeMenu;
+    menuEl.querySelector('#tGo').onclick=function(){ var el=menuEl.querySelector('#tSize'), sz=parseSize(el.value, shape==='round'); if(!sz){ el.style.borderColor='#e55'; el.focus(); return; }
+      if(window.__doInsert) window.__doInsert(runId, pieceIdx, alongIn, {type:'reducer', dir:dir, size:sz}); closeMenu(); status('Inserted transition \u2014 tap it to flip direction if needed.'); };
+    menuEl.querySelector('#tSize').focus();
+  }
+  window.__transitionDialog=transitionDialog;
+  function elbowDialog(runId, pieceIdx, alongIn, cx, cy){
+    closeMenu();
+    menuEl=document.createElement('div');
+    menuEl.style.cssText='position:fixed;z-index:99999;left:'+Math.max(6,Math.min(cx||220, window.innerWidth-234))+'px;top:'+Math.max(6,Math.min(cy||160, window.innerHeight-220))+'px;width:220px;background:#fff;border:1px solid #dde2e9;border-radius:11px;padding:12px;box-shadow:0 10px 30px rgba(30,40,60,.20);font:12px -apple-system,system-ui,sans-serif;color:#2b3441';
+    var shape='rect', dirLR='R';
+    function seg(cls,val,label){ return '<button class="'+cls+'" data-v="'+val+'" style="flex:1;padding:6px;border-radius:7px;border:2px solid #dde2e9;background:#f5f7fa;color:#2b3441;cursor:pointer;font-weight:600">'+label+'</button>'; }
+    menuEl.innerHTML='<div style="font-weight:800;margin-bottom:8px;color:#5b8def">90\u00b0 Elbow</div>'+
+      '<div style="font-size:10px;color:#8a93a1;margin-bottom:3px">Shape</div><div style="display:flex;gap:5px;margin-bottom:8px">'+seg('eShape','rect','Rectangular')+seg('eShape','round','Round')+'</div>'+
+      '<div style="font-size:10px;color:#8a93a1;margin-bottom:3px">Turn</div><div style="display:flex;gap:5px;margin-bottom:10px">'+seg('eDir','L','\u21b0 Left')+seg('eDir','R','\u21b1 Right')+'</div>'+
+      '<button id="eGo" style="width:100%;background:#5b8def;border:none;color:#fff;font-weight:700;border-radius:8px;padding:8px;cursor:pointer;margin-bottom:5px">Insert elbow</button>'+
+      '<button id="eCancel" style="width:100%;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:6px;cursor:pointer">Cancel</button>';
+    document.body.appendChild(menuEl);
+    ['mousedown','mouseup','wheel','click'].forEach(function(t){ menuEl.addEventListener(t,function(e){e.stopPropagation();},true); });
+    function paint(){ Array.prototype.forEach.call(menuEl.querySelectorAll('.eShape'),function(b){ var on=b.getAttribute('data-v')===shape; b.style.borderColor=on?'#a9c4ff':'#dde2e9'; b.style.background=on?'#eef4ff':'#f5f7fa'; b.style.color=on?'#3562c4':'#2b3441'; });
+      Array.prototype.forEach.call(menuEl.querySelectorAll('.eDir'),function(b){ var on=b.getAttribute('data-v')===dirLR; b.style.borderColor=on?'#a9c4ff':'#dde2e9'; b.style.background=on?'#eef4ff':'#f5f7fa'; b.style.color=on?'#3562c4':'#2b3441'; }); }
+    Array.prototype.forEach.call(menuEl.querySelectorAll('.eShape'),function(b){ b.onclick=function(){ shape=b.getAttribute('data-v'); paint(); }; });
+    Array.prototype.forEach.call(menuEl.querySelectorAll('.eDir'),function(b){ b.onclick=function(){ dirLR=b.getAttribute('data-v'); paint(); }; });
+    paint();
+    menuEl.querySelector('#eCancel').onclick=closeMenu;
+    menuEl.querySelector('#eGo').onclick=function(){ if(window.__doInsert) window.__doInsert(runId,pieceIdx,alongIn,{type:'elbow90',dir:dirLR,round:(shape==='round')}); closeMenu(); };
+  }
+  window.__elbowDialog=elbowDialog;
   document.addEventListener('mousedown', function(e){ if(menuEl && !menuEl.contains(e.target)) closeMenu(); }, true);
   window.__fitMenu=function(runId, pieceIdx, alongIn, curSize, cx, cy){
     closeMenu();
@@ -4575,7 +4732,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
       if(a==='e90L') ins({type:'elbow90',dir:'L'}); else if(a==='e90R') ins({type:'elbow90',dir:'R'});
       else if(a==='e45L') ins({type:'elbow45',dir:'L'}); else if(a==='e45R') ins({type:'elbow45',dir:'R'});
       else if(a==='offset'){ var od=prompt('Offset distance (in):','12'); if(od!=null) ins({type:'offset',offsetIn:(parseFloat(od)||12)}); } else if(a==='cap') ins({type:'cap'});
-      else sizeForm(a); }; });
+      else transitionDialog(runId,pieceIdx,alongIn,curSize,cx,cy,(a==='s2r'?'round':'rect')); }; });
   };
 })();
 </script>
