@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.42</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.44</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -338,6 +338,7 @@
        <div style="margin-top:12px;border-top:1px solid #243;padding-top:10px">
          <div style="font-weight:700;color:#bfe6ff;font-size:13px;margin-bottom:5px">YOLO fitting detection</div>
          <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="yoloShowChk"> Show detection boxes on the print <span style="opacity:.6">(off — detections still feed the builder)</span></label>
+         <div style="font-size:12px;color:#9fb2c8;margin-bottom:6px">Use fittings scoring ≥ <input type="range" id="yoloUseMin" min="0.05" max="0.6" step="0.01" value="0.10" style="width:96px;vertical-align:middle"> <span id="yoloUseMinV" style="font-family:ui-monospace,monospace">0.10</span><div class="hint" style="margin-top:2px">Lower = surface more fittings (incl. low-confidence taps) — you can delete false ones. Filters the boxes and what Build uses. Re-build to apply to the takeoff.</div></div>
          <div class="row" style="display:flex;gap:6px;align-items:center">
            <button class="btn" id="yoloLoadBtn" style="flex:1">Load best.onnx</button>
            <span id="yoloStatus" style="font-size:11px;opacity:.7">no model</span>
@@ -2171,13 +2172,29 @@ function refreshSel(){
   window.__ductDirAt=function(nx,ny,radIn){    // dominant raw-PDF duct-line directions near a point (strongest first)
     if(typeof segments==='undefined'||!segments||nx==null) return [];
     var rad=inToPt(radIn||30), bins={};
-    for(var i=0;i<segments.length;i++){ var s=segments[i]; if(!s||s.cls!=='duct'||s.nx1==null) continue;
-      var mx=(s.nx1+s.nx2)/2, my=(s.ny1+s.ny2)/2; if(Math.hypot(mx-nx,my-ny)>rad) continue;
-      var dx=s.nx2-s.nx1, dy=s.ny2-s.ny1, L=Math.hypot(dx,dy); if(L<1e-4) continue;
+    for(var i=0;i<segments.length;i++){ var s=segments[i]; if(!s||s.cls!=='duct'||s.x1==null) continue;
+      var mx=(s.x1+s.x2)/2, my=(s.y1+s.y2)/2; if(Math.hypot(mx-nx,my-ny)>rad) continue;
+      var dx=s.x2-s.x1, dy=s.y2-s.y1, L=Math.hypot(dx,dy); if(L<1e-4) continue;
       var ang=Math.atan2(dy,dx); if(ang<0) ang+=Math.PI;                 // undirected 0..\u03c0
       var key=Math.round(ang/(Math.PI/18)); (bins[key]=bins[key]||{w:0,s:0}); bins[key].w+=L; bins[key].s+=ang*L; }
     var arr=Object.keys(bins).map(function(k){ var b=bins[k], a=b.s/b.w; return {ang:a,w:b.w,dir:[Math.cos(a),Math.sin(a)]}; });
     arr.sort(function(p,q){return q.w-p.w;}); return arr;
+  };
+  window.__repairElbowTurns=function(){    // give every flat (turn=0) elbow a real 90° turn inferred from the green trace
+    var runs=window.__runs2d||[], fixed=0;
+    runs.forEach(function(run){
+      for(var i=0;i<run.pieces.length;i++){ var p=run.pieces[i];
+        if(p.kind!=='fitting' || !(p.cid==='e90'||p.cid==='e45'||p._elbow)) continue;
+        if(p.turn && Math.abs(p.turn)>0.08) continue;                    // already bent
+        var fr=runFrames(run), f=fr[i]; if(!f) continue;                 // fresh frames (accounts for earlier fixes)
+        var inc=[f.ux,f.uy], dirs=window.__ductDirAt(f.x,f.y,22), out=null, bestPerp=0.55;
+        dirs.forEach(function(dd){ var dot=Math.abs(inc[0]*dd.dir[0]+inc[1]*dd.dir[1]); if(dot<bestPerp){ bestPerp=dot; out=dd.dir; } });
+        if(out){ var cr=inc[0]*out[1]-inc[1]*out[0]; p.turn=(cr>=0?1:-1)*(p.cid==='e45'?Math.PI/4:Math.PI/2); p._elbow=true; if(!p.camduct)p.camduct=(p.cid==='e45'?'45 Elbow':'90 Elbow'); fixed++; }
+      }
+    });
+    if(fixed){ try{renderItems();}catch(_){} try{renderPanel();}catch(_){} }
+    if(typeof setStatus==='function') setStatus(fixed?('Straightened '+fixed+' elbow'+(fixed>1?'s':'')+' from the trace.'):'No flat elbows to fix (all already bent).');
+    return fixed;
   };
   // ---- RUN UNDO: snapshot window.__runs2d before any destructive edit so a mis-delete/move is recoverable ----
   window.__runSnap=window.__runSnap||[];
@@ -2340,8 +2357,9 @@ function refreshSel(){
     var nFit = integrateYoloFittings();
     var nCarry = 0;   // DISABLED: a no-tag run keeps its OWN green-line width (was inheriting a nearby tagged run's size, overriding the measured gap). Height stays unknown — set via ✎ resize.
     var nDrop = dropUnsupportedRuns();
+    var nElb = 0; try{ nElb=window.__repairElbowTurns?window.__repairElbowTurns():0; }catch(e){}
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nCarry?(' \u00b7 '+nCarry+' inherited size'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.'); try{ __ductDiag('joints'); }catch(e){}
+    setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nElb?(' \u00b7 '+nElb+' elbow(s) turned'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.'); try{ __ductDiag('joints'); }catch(e){}
   }
   window.__runsFromPreview=runsFromPreview;
 
@@ -3324,7 +3342,7 @@ function refreshSel(){
     function close(){ try{m.remove();}catch(_){} document.removeEventListener('mousedown',close,true); }
     setTimeout(function(){ document.addEventListener('mousedown',close,true); },0);
     Array.prototype.forEach.call(m.querySelectorAll('.ys'),function(b){ b.onclick=function(){ d.cls=b.getAttribute('data-c'); d.clsIdx=-1; close(); renderYolo(); if(typeof setStatus==='function')setStatus('Detection changed to '+d.cls+'. Re-run build to apply.'); }; });
-    m.querySelector('#ysDel').onclick=function(){ window.__yoloDets=(window.__yoloDets||[]).filter(function(x){return x!==d;}); close(); renderYolo(); if(typeof setStatus==='function')setStatus('Detection deleted.'); };
+    m.querySelector('#ysDel').onclick=function(){ window.__yoloDets=(window.__yoloDets||[]).filter(function(x){return x!==d;}); if(window.__yoloAll) window.__yoloAll=window.__yoloAll.filter(function(x){return x!==d;}); close(); renderYolo(); if(typeof setStatus==='function')setStatus('Detection deleted.'); };
   }
   function renderYolo(){
     var lay=$('yoloLayer'); if(!lay) return; lay.innerHTML='';
@@ -3348,6 +3366,11 @@ function refreshSel(){
   // ---- load model ----
   $('yoloLoadBtn') && ($('yoloLoadBtn').onclick=function(){ $('yoloFile').click(); });
   $('yoloShowChk') && ($('yoloShowChk').onchange=function(){ window.__yoloVisible=this.checked; try{renderYolo();}catch(e){} });
+  window.__yoloMinScore=0.10;
+  window.__applyYoloFilter=function(){ var all=window.__yoloAll||window.__yoloDets||[]; if(!window.__yoloAll) window.__yoloAll=all.slice();
+    window.__yoloDets=(window.__yoloAll||[]).filter(function(d){ return (d.score==null?1:d.score) >= (window.__yoloMinScore||0); });
+    try{renderYolo();}catch(e){} };
+  $('yoloUseMin') && ($('yoloUseMin').oninput=function(){ window.__yoloMinScore=parseFloat(this.value)||0; var v=$('yoloUseMinV'); if(v)v.textContent=(window.__yoloMinScore).toFixed(2); window.__applyYoloFilter(); if(typeof setStatus==='function'){ var n=(window.__yoloDets||[]).length, tot=(window.__yoloAll||[]).length; setStatus('Showing '+n+' of '+tot+' detections (score \u2265 '+window.__yoloMinScore.toFixed(2)+'). Re-build to apply to the takeoff.'); } });
   // First-run nudge: prompt to load the fitting model if none is loaded yet
   setTimeout(function(){ try{
     if(session) return;
@@ -3573,7 +3596,8 @@ function refreshSel(){
         return n0-window.__yoloDets.length;
       })();
       if(nXC) console.log('[takeoff] cross-check dropped '+nXC+' false sizechange (sat on a size tag)');
-      renderYolo();
+      window.__yoloAll=(window.__yoloDets||[]).slice();     // master list; __yoloDets becomes the score-filtered view
+      if(window.__applyYoloFilter) window.__applyYoloFilter(); else renderYolo();
       var summary=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a];}).map(function(k){return counts[k]+' '+k;}).join(', ');
       // per-index breakdown — exposes any class-order mismatch (index N -> name)
       var byIdx={}; kept.forEach(function(d){ byIdx[d.cls]=(byIdx[d.cls]||0)+1; });
@@ -4596,6 +4620,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
  <div id="dtBarBody" style="display:none;background:#fff;border:1px solid #dde2e9;border-right:none;border-radius:11px 0 0 11px;padding:11px;margin-top:5px;box-shadow:-3px 3px 16px rgba(30,40,60,.14);width:204px">
    <div style="font-size:10px;color:#8a93a1;margin:0 0 8px 2px;letter-spacing:.4px;text-transform:uppercase;font-weight:600">Duct editing</div>
    <button id="dtUndo" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#fff4e6;border:1px solid #ffd9a8;color:#b5641a;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:700;font-size:12px">↶ Undo last change</button>
+   <button id="dtFixElbows" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#eafaf0;border:1px solid #a9e0c0;color:#1b7a45;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">↰ Straighten elbows from trace</button>
    <button class="dtTool" data-mode="dragsize" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-resize width</button>
    <button class="dtTool" data-mode="draglen" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-end (length)</button>
    <button class="dtTool" data-mode="move" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Move run</button>
@@ -4624,6 +4649,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   Array.prototype.forEach.call(document.querySelectorAll('.dtTool'),function(b){ b.onclick=function(){ var m=b.getAttribute('data-mode'); window.__editMode=(window.__editMode===m)?null:m; window.__tapMain=null; openBar(); refl(); status(window.__editMode?(HINTS[window.__editMode]||''):'Edit off.'); }; });
   window.refreshUndoBtn=function(){ var u=document.getElementById('dtUndo'); if(!u) return; var n=(window.__runSnap||[]).length; u.textContent=n?('\u21b6 Undo last change ('+n+')'):'\u21b6 Undo last change'; u.style.opacity=n?'1':'.5'; u.style.cursor=n?'pointer':'default'; };
   var undoBtn=document.getElementById('dtUndo'); if(undoBtn) undoBtn.onclick=function(){ if(window.__undoRun&&window.__undoRun()){ if(window.refreshUndoBtn) window.refreshUndoBtn(); } };
+  var fixElb=document.getElementById('dtFixElbows'); if(fixElb) fixElb.onclick=function(){ try{ window.__repairElbowTurns&&window.__repairElbowTurns(); }catch(e){} };
   setInterval(function(){ if(window.refreshUndoBtn) window.refreshUndoBtn(); },700);
   var tapBtn=document.getElementById('dtTapBtn'); if(tapBtn) tapBtn.onclick=function(){ window.__editMode=null; refl(); var real=document.getElementById('tapToolBtn'); if(real){ real.click(); status('Tap tool on — click the duct to drop taps (style/size/direction in its panel).'); } else status('Tap tool not available.'); };
   document.getElementById('dtOff').onclick=function(){ window.__editMode=null; window.__tapMain=null; refl(); status('Edit off — click a duct to select.'); };
