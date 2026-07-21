@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.39</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.42</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2124,7 +2124,49 @@ function refreshSel(){
       if(endA==='start') A.pieces.unshift(step); else A.pieces.push(step);
       try{ if(typeof applyReducerDownstream==='function') applyReducerDownstream(A); }catch(_){}
     }
-    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Connected with a 90\u00b0 elbow'+stepMsg+'.'); return true;
+    // connected pair should read as ONE run: give both the same color (+ shared label if one has none)
+    var shared=A.color||B.color; if(!shared){ try{ shared=(typeof palette!=='undefined'&&palette.length)?palette[(window.__runs2d||[]).length%palette.length]:'#5b8def'; }catch(_){ shared='#5b8def'; } }
+    A.color=shared; B.color=shared;
+    if(A.label&&!B.label) B.label=A.label; else if(B.label&&!A.label) A.label=B.label;
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Connected with a 90\u00b0 elbow'+stepMsg+' \u2014 both now one color.'); return true;
+  };
+  window.__connectTap=function(idA, endA, idB, endB){    // tap the branch run into the side of the trunk run
+    var A=findRun(idA), B=findRun(idB); if(!A||!B||A===B) return false;
+    var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
+    function endPt(run,end){ var pl=window.__runPoly(run),n=pl.length; return end==='start'?pl[0]:pl[n-1]; }
+    function nrm(d){ var l=Math.hypot(d[0],d[1])||1; return [d[0]/l,d[1]/l]; }
+    function segDist(p,a,b){ var vx=b[0]-a[0],vy=b[1]-a[1],wx=p[0]-a[0],wy=p[1]-a[1],c1=vx*wx+vy*wy,c2=vx*vx+vy*vy,t=c2?Math.max(0,Math.min(1,c1/c2)):0,px=a[0]+vx*t,py=a[1]+vy*t; return Math.hypot(p[0]-px,p[1]-py); }
+    function distPtRun(pt,run){ var pl=window.__runPoly(run),best=1e18,i; for(i=0;i<pl.length-1;i++) best=Math.min(best,segDist(pt,pl[i],pl[i+1])); return best; }
+    // decide which is the branch (its clicked end lands on the other's body) and which is the trunk
+    var eaP=endPt(A,endA), ebP=endPt(B,endB);
+    var branch,trunk,brEnd;
+    if(distPtRun(ebP,A) <= distPtRun(eaP,B)){ branch=B; brEnd=endB; trunk=A; } else { branch=A; brEnd=endA; trunk=B; }
+    window.__pushRunUndo&&window.__pushRunUndo();
+    // project branch end (screen frame) onto each straight piece of the trunk -> nearest piece + alongIn
+    var bp=endPt(branch,brEnd), bpS=window.__n2s(bp[0],bp[1]); if(!bpS){ return false; }
+    var bestI=-1,bestT=0,bestD=1e18,bestP=null;
+    for(var i=0;i<trunk.pieces.length;i++){ if(trunk.pieces[i].kind!=='straight') continue;
+      var q; try{ q=piecePolyPts(trunk,i); }catch(_){ continue; } if(!q) continue;
+      var AA=[(q[0][0]+q[3][0])/2,(q[0][1]+q[3][1])/2], BB=[(q[1][0]+q[2][0])/2,(q[1][1]+q[2][1])/2];
+      var vx=BB[0]-AA[0],vy=BB[1]-AA[1],c2=vx*vx+vy*vy,t=c2?Math.max(0,Math.min(1,((bpS[0]-AA[0])*vx+(bpS[1]-AA[1])*vy)/c2)):0;
+      var px=AA[0]+vx*t,py=AA[1]+vy*t,dd=Math.hypot(bpS[0]-px,bpS[1]-py);
+      if(dd<bestD){ bestD=dd; bestI=i; bestT=t; bestP=[px,py]; } }
+    if(bestI<0){ return false; }
+    var alongIn=Math.max(1, bestT*(trunk.pieces[bestI].lenIn||0));
+    var bRound=!!(branch.pieces[0]&&branch.pieces[0].round), tRound=!!(trunk.pieces[0]&&trunk.pieces[0].round);
+    // extend the branch's clicked end to reach the trunk centerline point (direction-preserving)
+    var Ppage=window.__s2n?window.__s2n(bestP[0],bestP[1]):null;
+    if(Ppage){ var pl2=window.__runPoly(branch), n2=pl2.length;
+      var out = brEnd==='start' ? [pl2[0][0]-(pl2[1]||pl2[0])[0], pl2[0][1]-(pl2[1]||pl2[0])[1]] : [pl2[n2-1][0]-(pl2[n2-2]||pl2[0])[0], pl2[n2-1][1]-(pl2[n2-2]||pl2[0])[1]];
+      var a=nrm(out), ep=(brEnd==='start'?pl2[0]:pl2[n2-1]);
+      var tt=(Ppage[0]-ep[0])*a[0]+(Ppage[1]-ep[1])*a[1], dIn=tt/ppi, k;
+      if(brEnd==='start'){ branch.start=[branch.start[0]+a[0]*tt, branch.start[1]+a[1]*tt];
+        for(k=0;k<branch.pieces.length;k++){ if(branch.pieces[k].kind==='straight'){ branch.pieces[k].lenIn=Math.max(1,branch.pieces[k].lenIn+dIn); break; } } }
+      else { for(k=branch.pieces.length-1;k>=0;k--){ if(branch.pieces[k].kind==='straight'){ branch.pieces[k].lenIn=Math.max(1,branch.pieces[k].lenIn+dIn); break; } } } }
+    // insert a tap into the trunk at that point (no new branch run - the branch already exists)
+    if(window.__doInsert) window.__doInsert(trunk.id, bestI, alongIn, {type:'tap', branch:false, branchW:branch.widthIn, branchRound:bRound, mainRound:tRound});
+    var shared=trunk.color||branch.color||'#5b8def'; trunk.color=shared; branch.color=shared;
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Tapped the branch into the trunk \u2014 both now one color.'); return true;
   };
   window.__ductDirAt=function(nx,ny,radIn){    // dominant raw-PDF duct-line directions near a point (strongest first)
     if(typeof segments==='undefined'||!segments||nx==null) return [];
@@ -4485,7 +4527,7 @@ $('exportBtn').onclick=()=>{
       widthIn:r.widthIn,lenPt:round(Lpt),start:[round(r.start[0]),round(r.start[1])],end:[round(end[0]),round(end[1])],dir:[r4(r.dir[0]),r4(r.dir[1])],
       tagIdx:r.tagIdx||[],nPieces:(r.pieces||[]).length,
       poly:(window.__runPoly?window.__runPoly(r):[[round(r.start[0]),round(r.start[1])],[round(end[0]),round(end[1])]]),
-      pieces:(r.pieces||[]).map(p=>({kind:p.kind,cid:p.cid,size:p.size,lenIn:p.lenIn,widthIn:p.widthIn,round:!!p.round}))};
+      pieces:(r.pieces||[]).map(p=>({kind:p.kind,cid:p.cid,camduct:p.camduct,size:p.size,lenIn:p.lenIn,widthIn:p.widthIn,depthIn:p.depthIn,round:!!p.round,turn:(p.turn!=null?p.turn:null),sizeStep:!!p._sizeStep}))};
   });
   const clOut=(window.__sgRuns||[]).map(r=>{ const c=r.corners; if(!c||c.length<4) return null;
     const gapPt=Math.hypot(c[0][0]-c[3][0], c[0][1]-c[3][1]);                 // perpendicular gap between the two green walls
@@ -4575,7 +4617,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   function status(s){ try{ if(typeof setStatus==='function') setStatus(s); }catch(_){} }
   function openBar(){ if(body.style.display==='none'){ body.style.display='block'; tog.textContent='Edit ‹'; } }
   tog.onclick=function(){ var open=body.style.display!=='none'; body.style.display=open?'none':'block'; tog.textContent=open?'Edit ›':'Edit ‹'; if(!open) status('Edit mode — click a duct to select, or pick a tool.'); };
-  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',move:'Drag anywhere on a run to move the whole run.',connect:'Click near the END of one duct, then the END of another — adds a 90° elbow, and a reducer/transition if their sizes differ.',stamp:'Copy pieces first (tick them in the panel → Copy as stamp), then click on the plan to drop a copy. Keep clicking to place more.',insert:'Press on a duct and drag to a fitting on the wheel, then release.',size:'Click a piece and type its size.',delete:'Click a run to delete it.'};
+  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',move:'Drag anywhere on a run to move the whole run.',connect:'Click one duct, then another — then choose Elbow (corner) or Tap (into the side).',stamp:'Copy pieces first (tick them in the panel → Copy as stamp), then click on the plan to drop a copy. Keep clicking to place more.',insert:'Press on a duct and drag to a fitting on the wheel, then release.',size:'Click a piece and type its size.',delete:'Click a run to delete it.'};
   function refl(){ Array.prototype.forEach.call(document.querySelectorAll('.dtTool'),function(b){ var on=(b.getAttribute('data-mode')===window.__editMode), isDel=(b.getAttribute('data-mode')==='delete');
       b.style.background=on?'#dbe7ff':(isDel?'#fdf2f2':'#f5f7fa'); b.style.borderColor=on?'#9dbcff':(isDel?'#f2d4d4':'#dde2e9'); b.style.color=on?'#3562c4':(isDel?'#c0484d':'#2b3441'); });
     if(hint) hint.textContent=window.__editMode?(HINTS[window.__editMode]||''):''; }
@@ -4623,14 +4665,24 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     if(m==='connect'){ var s1=toSvg(e); if(!s1) return; var rr=hitRun(s1); if(!rr) return; e.stopPropagation(); e.preventDefault();
       var pl=window.__runPoly(rr), n=pl.length, sS=n2s(pl[0][0],pl[0][1]), sE=n2s(pl[n-1][0],pl[n-1][1]);
       var end=(Math.hypot(s1[0]-sS[0],s1[1]-sS[1])<Math.hypot(s1[0]-sE[0],s1[1]-sE[1]))?'start':'finish';
-      if(!window.__connA){ window.__connA={runId:rr.id,end:end}; status('First duct picked \u2014 now click the second duct to connect.'); }
+      if(!window.__connA){ window.__connA={runId:rr.id,end:end}; status('First duct picked \u2014 now click the second duct.'); }
       else { var cA=window.__connA;
-        if(rr.id===cA.runId){ status('That\u2019s the same run \u2014 click the other duct.'); return; }   // keep waiting, don't jam
-        window.__connA=null;                                                                              // reset BEFORE the call so we never get stuck
-        try{ var ok=window.__connectElbow?window.__connectElbow(cA.runId, cA.end, rr.id, end, false):null;
-             if(ok===false) status('Couldn\u2019t connect those \u2014 they look parallel or the ends face away. Try the ends nearest the corner.'); }
-        catch(err){ status('Connect error: '+((err&&err.message)||err)); }
-        try{window.__renderPanel&&window.__renderPanel();}catch(_){} }
+        if(rr.id===cA.runId){ status('That\u2019s the same run \u2014 click the other duct.'); return; }
+        var cB={runId:rr.id,end:end}; window.__connA=null;
+        var old=document.getElementById('connPick'); if(old) old.remove();
+        var mnu=document.createElement('div'); mnu.id='connPick';
+        mnu.style.cssText='position:fixed;z-index:100000;left:'+Math.min(e.clientX,window.innerWidth-180)+'px;top:'+Math.min(e.clientY,window.innerHeight-140)+'px;width:172px;background:#fff;border:1px solid #dde2e9;border-radius:11px;padding:10px;box-shadow:0 10px 28px rgba(30,40,60,.2);font:12px -apple-system,system-ui,sans-serif;color:#2b3441';
+        mnu.innerHTML='<div style="font-weight:800;margin-bottom:7px;color:#5b8def">Connect how?</div>'
+          +'<button id="cpElbow" style="width:100%;margin-bottom:5px;background:#eef4ff;border:1px solid #a9c4ff;color:#3562c4;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">↰ Elbow (corner)</button>'
+          +'<button id="cpTap" style="width:100%;margin-bottom:5px;background:#f3effc;border:1px solid #cdbdf0;color:#5a3fa0;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">⌐ Tap (into side)</button>'
+          +'<button id="cpCancel" style="width:100%;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:6px;cursor:pointer">Cancel</button>';
+        document.body.appendChild(mnu);
+        ['mousedown','mouseup','wheel'].forEach(function(t){ mnu.addEventListener(t,function(ev){ev.stopPropagation();},true); });
+        function done(fn,label){ try{ var ok=fn?fn(cA.runId,cA.end,cB.runId,cB.end):null; if(ok===false) status('Couldn\u2019t '+label+' those two \u2014 try the other ends.'); }catch(err){ status('Connect error: '+((err&&err.message)||err)); } try{window.__renderPanel&&window.__renderPanel();}catch(_){} try{mnu.remove();}catch(_){} }
+        mnu.querySelector('#cpElbow').onclick=function(){ done(window.__connectElbow,'elbow'); };
+        mnu.querySelector('#cpTap').onclick=function(){ done(window.__connectTap,'tap'); };
+        mnu.querySelector('#cpCancel').onclick=function(){ try{mnu.remove();}catch(_){} status('Connect cancelled.'); };
+      }
       return; }
     if(m==='insert'){ var s0=toSvg(e); if(!s0) return;
       var fs=(window.__sizeStepHit)?window.__sizeStepHit(s0[0],s0[1]):null;
