@@ -1,6 +1,6 @@
 // Brookstone 2D Takeoff — service worker
 // Bump VERSION whenever you deploy a new index.html.
-const VERSION = 'v1.52';
+const VERSION = 'v1.57';
 const CACHE = 'brookstone-takeoff-' + VERSION;
 
 // Core files to cache for offline use. Keep this to files that live in your repo.
