@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.44</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.45</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2590,11 +2590,14 @@ function refreshSel(){
     var joinIds={}; (window.__elbowJoins||[]).forEach(function(j){ joinIds[j.trunkId]=1; joinIds[j.branchId]=1; });
     function ends(r){ var e=runEnd(r); return [[r.start[0],r.start[1]],[e.x,e.y]]; }
     var sup={};
+    // every real duct size present on the sheet (from the size tags) — a run whose measured width
+    // matches one of these is genuine green duct even if no tag is directly indexed to it.
+    var tagWidths=[]; try{ for(var _t=0;_t<tags.length;_t++){ var _tg=tags[_t]; if(!_tg||_tg.nx==null) continue; var _pd=parseTagDims(_tg.text); if(_pd){ tagWidths.push(_pd.w); if(!_pd.round) tagWidths.push(_pd.h); } } }catch(_){}
+    function widthMatchesTag(wIn){ if(wIn==null) return false; for(var i=0;i<tagWidths.length;i++){ if(Math.abs(tagWidths[i]-wIn)<=1.5) return true; } return false; }
     runs.forEach(function(r){
       var hasTag = r.tagIdx && r.tagIdx.length>0;
       if(hasTag || r._inherited) sup[r.id]=true;       // ANCHORED BY A SIZE TAG (or carry-forward from a tagged run).
-                                                        // fittings / bare connection are NOT enough — background floor/
-                                                        // diffuser lines can fake those. No duct size => not duct.
+      else if(widthMatchesTag(r.widthIn)) sup[r.id]=true;  // green run whose measured width equals a real tag size on the sheet -> keep
     });
     var seeded=0; for(var k in sup) seeded++;
     if(!seeded) return 0;                                                          // nothing tagged at all -> keep all (don't nuke)
