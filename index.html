@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.35</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.37</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2092,19 +2092,38 @@ function refreshSel(){
     function lineX(p1,d1,p2,d2){ var den=d1[0]*d2[1]-d1[1]*d2[0]; if(Math.abs(den)<1e-6) return null; var t=((p2[0]-p1[0])*d2[1]-(p2[1]-p1[1])*d2[0])/den; return [p1[0]+d1[0]*t,p1[1]+d1[1]*t]; }
     var ea=endInfo(A,endA), eb=endInfo(B,endB), ad=nrm(ea.out), bd=nrm(eb.out);
     var corner=lineX(ea.p, ad, eb.p, bd); if(!corner){ if(typeof setStatus==='function')setStatus('Those two runs are parallel \u2014 can\u2019t elbow them.'); return false; }
-    function extendTo(run,end,target){ var pl=window.__runPoly(run), n=pl.length, i;
-      if(end==='start'){ var nx=pl[1]||pl[n-1], L=Math.hypot(nx[0]-target[0],nx[1]-target[1]); run.start=[target[0],target[1]];
-        var dl=Math.hypot(nx[0]-target[0],nx[1]-target[1])||1; run.dir=[(nx[0]-target[0])/dl,(nx[1]-target[1])/dl];
-        for(i=0;i<run.pieces.length;i++){ if(run.pieces[i].kind==='straight'){ run.pieces[i].lenIn=Math.max(1,Math.round(L/ppi)); break; } } }
-      else { var an=pl[n-2]||pl[0], L2=Math.hypot(target[0]-an[0],target[1]-an[1]);
-        for(i=run.pieces.length-1;i>=0;i--){ if(run.pieces[i].kind==='straight'){ run.pieces[i].lenIn=Math.max(1,Math.round(L2/ppi)); break; } } } }
+    // extend a run's clicked end to the corner ALONG ITS OWN AXIS (never recompute dir -> no flip/spin)
+    function extendTo(run,end,target){ var e=endInfo(run,end), a=nrm(e.out);
+      var t=(target[0]-e.p[0])*a[0]+(target[1]-e.p[1])*a[1];   // signed distance from the end to the corner, along the outward axis
+      var dIn=t/ppi, i;
+      if(end==='start'){ run.start=[run.start[0]+a[0]*t, run.start[1]+a[1]*t];   // slide start outward; lengthen first straight to keep the body in place
+        for(i=0;i<run.pieces.length;i++){ if(run.pieces[i].kind==='straight'){ run.pieces[i].lenIn=Math.max(1, run.pieces[i].lenIn + dIn); break; } } }
+      else { for(i=run.pieces.length-1;i>=0;i--){ if(run.pieces[i].kind==='straight'){ run.pieces[i].lenIn=Math.max(1, run.pieces[i].lenIn + dIn); break; } } } }
     extendTo(A,endA,corner); extendTo(B,endB,corner);
     var u=ad, v=[-bd[0],-bd[1]];                                  // A heads into corner along ad; leaving toward B is -bd
     var turn=Math.atan2(u[0]*v[1]-u[1]*v[0], u[0]*v[0]+u[1]*v[1]);
     var w=A.widthIn, dep=(A.pieces[0]&&A.pieces[0].depthIn)||null;
     var elb={kind:'fitting',cid:'e90',camduct:(round?'90 Elbow (round)':'90 Elbow'),round:!!round,lenIn:0,turn:turn,widthIn:w,depthIn:dep,size:(round?('\u00f8'+w):(w+'\u00d7'+(dep!=null?dep:'?'))),_elbow:true};
     if(endA==='start') A.pieces.unshift(elb); else A.pieces.push(elb);
-    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Connected the two runs with a 90\u00b0 elbow.'); return true;
+    // ---- size/shape step: if A and B differ, morph A's size into B's through the corner ----
+    var aRound=!!(A.pieces[0]&&A.pieces[0].round), bRound=!!(B.pieces[0]&&B.pieces[0].round);
+    var aW=A.widthIn, aD=(A.pieces[0]&&A.pieces[0].depthIn)!=null?A.pieces[0].depthIn:aW;
+    var bW=B.widthIn, bD=(B.pieces[0]&&B.pieces[0].depthIn)!=null?B.pieces[0].depthIn:bW;
+    var differ = (aRound!==bRound) || (aW!==bW) || (!aRound&&!bRound&&aD!==bD);
+    var stepMsg='';
+    if(differ){
+      var cid,name;
+      if(aRound!==bRound){ cid='s2r'; name='Sq \u2192 Round'; stepMsg=' + square\u2192round'; }
+      else if(bRound){ cid='reducer'; name='Reducer'; stepMsg=' + reducer'; }
+      else { cid='tr'; name='Transition'; stepMsg=' + transition'; }
+      var bSize = bRound?('\u00f8'+bW):(bW+'\u00d7'+bD);
+      var step={kind:'fitting',cid:cid,camduct:name,round:bRound,lenIn:6,widthIn:bW,depthIn:(bRound?null:bD),
+                size:bSize,_sizeStep:true,_newSide:'end',_newW:bW,_newD:(bRound?bW:bD),_newR:bRound,_newS:bSize,
+                outW:bW,outD:(bRound?bW:bD)};
+      if(endA==='start') A.pieces.unshift(step); else A.pieces.push(step);
+      try{ if(typeof applyReducerDownstream==='function') applyReducerDownstream(A); }catch(_){}
+    }
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Connected with a 90\u00b0 elbow'+stepMsg+'.'); return true;
   };
   window.__ductDirAt=function(nx,ny,radIn){    // dominant raw-PDF duct-line directions near a point (strongest first)
     if(typeof segments==='undefined'||!segments||nx==null) return [];
@@ -4555,7 +4574,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   function status(s){ try{ if(typeof setStatus==='function') setStatus(s); }catch(_){} }
   function openBar(){ if(body.style.display==='none'){ body.style.display='block'; tog.textContent='Edit ‹'; } }
   tog.onclick=function(){ var open=body.style.display!=='none'; body.style.display=open?'none':'block'; tog.textContent=open?'Edit ›':'Edit ‹'; if(!open) status('Edit mode — click a duct to select, or pick a tool.'); };
-  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',move:'Drag anywhere on a run to move the whole run.',connect:'Click near the END of one duct, then the END of another — joins them with a 90° elbow.',stamp:'Copy pieces first (tick them in the panel → Copy as stamp), then click on the plan to drop a copy. Keep clicking to place more.',insert:'Press on a duct and drag to a fitting on the wheel, then release.',size:'Click a piece and type its size.',delete:'Click a run to delete it.'};
+  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',move:'Drag anywhere on a run to move the whole run.',connect:'Click near the END of one duct, then the END of another — adds a 90° elbow, and a reducer/transition if their sizes differ.',stamp:'Copy pieces first (tick them in the panel → Copy as stamp), then click on the plan to drop a copy. Keep clicking to place more.',insert:'Press on a duct and drag to a fitting on the wheel, then release.',size:'Click a piece and type its size.',delete:'Click a run to delete it.'};
   function refl(){ Array.prototype.forEach.call(document.querySelectorAll('.dtTool'),function(b){ var on=(b.getAttribute('data-mode')===window.__editMode), isDel=(b.getAttribute('data-mode')==='delete');
       b.style.background=on?'#dbe7ff':(isDel?'#fdf2f2':'#f5f7fa'); b.style.borderColor=on?'#9dbcff':(isDel?'#f2d4d4':'#dde2e9'); b.style.color=on?'#3562c4':(isDel?'#c0484d':'#2b3441'); });
     if(hint) hint.textContent=window.__editMode?(HINTS[window.__editMode]||''):''; }
