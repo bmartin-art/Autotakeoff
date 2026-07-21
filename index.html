@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.52</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.57</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2047,7 +2047,7 @@ function refreshSel(){
   function invApplyN(m,X,Y){ var a=m[0],b=m[1],c=m[2],d=m[3],e=m[4],f=m[5],det=(a*d-b*c)||1; return [(d*(X-e)-c*(Y-f))/det,(-b*(X-e)+a*(Y-f))/det]; }
   function n2s(nx,ny){ if(!window.__nvt||!viewport) return null; var u=invApplyN(window.__nvt,nx,ny); return applyM(viewport.transform,u[0],u[1]); }
   window.__n2s=n2s;
-  window.__s2n=function(sx,sy){ if(!window.__nvt||!viewport) return null; var u=invApply(viewport.transform, sx, sy); var m=window.__nvt; return [m[0]*u[0]+m[2]*u[1]+m[4], m[1]*u[0]+m[3]*u[1]+m[5]]; };
+  window.__s2n=function(sx,sy){ if(!window.__nvt||!viewport) return null; var u=invApplyN(viewport.transform, sx, sy); var m=window.__nvt; return [m[0]*u[0]+m[2]*u[1]+m[4], m[1]*u[0]+m[3]*u[1]+m[5]]; };
   window.__renderPanel=function(){ try{ return renderPanel(); }catch(e){} };
   window.__pieceHit=function(sx,sy){                        // nearest STRAIGHT piece to a screen/SVG point -> {runId,pieceIdx,alongIn}
     var best=null;
@@ -2069,7 +2069,24 @@ function refreshSel(){
     }); });
     return (best && best.d<26)?best:null;
   };
-  window.__flipSizeStep=function(runId, pieceIdx){         // swap which side of a reducer/transition is the new size    var run=findRun(runId); if(!run) return false; var p=run.pieces[pieceIdx]; if(!p||!p._sizeStep) return false;
+  window.__elbowHit=function(sx,sy){                       // nearest elbow fitting to a point
+    var best=null;
+    (window.__runs2d||[]).forEach(function(run){ run.pieces.forEach(function(p,i){ if(p.kind!=='fitting'||!(p.cid==='e90'||p.cid==='e45'||p._elbow)) return;
+      var pts; try{ pts=piecePolyPts(run,i); }catch(_){ return; } if(!pts||!pts[0]) return;
+      var cx=(pts[0][0]+pts[2][0])/2, cy=(pts[0][1]+pts[2][1])/2, d=Math.hypot(sx-cx,sy-cy);
+      if(!best||d<best.d) best={d:d, runId:run.id, pieceIdx:i};
+    }); });
+    return (best && best.d<28)?best:null;
+  };
+  window.__flipElbow=function(runId, pieceIdx){            // reverse which way an elbow turns
+    var run=findRun(runId); if(!run) return false; var p=run.pieces[pieceIdx];
+    if(!p||p.kind!=='fitting'||!(p.cid==='e90'||p.cid==='e45'||p._elbow)) return false;
+    window.__pushRunUndo&&window.__pushRunUndo();
+    p.turn = -(p.turn||0) || (p.cid==='e45'?Math.PI/4:Math.PI/2);   // negate; if it was 0/undefined, give it a +90
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Flipped the elbow the other way.'); return true;
+  };
+  window.__flipSizeStep=function(runId, pieceIdx){         // swap which side of a reducer/transition is the new size
+    var run=findRun(runId); if(!run) return false; var p=run.pieces[pieceIdx]; if(!p||!p._sizeStep) return false;
     window.__pushRunUndo&&window.__pushRunUndo();
     function grab(st){ return {widthIn:st.widthIn,depthIn:st.depthIn,round:st.round,size:st.size,cid:st.cid,camduct:st.camduct}; }
     var A=null,B=null,i; for(i=pieceIdx-1;i>=0;i--){ if(run.pieces[i].kind==='straight'){ A=run.pieces[i]; break; } }
@@ -2247,6 +2264,38 @@ function refreshSel(){
     if(fixed){ try{renderItems();}catch(_){} try{renderPanel();}catch(_){} }
     if(typeof setStatus==='function') setStatus(fixed?('Straightened '+fixed+' elbow'+(fixed>1?'s':'')+' from the trace.'):'No flat elbows to fix (all already bent).');
     return fixed;
+  };
+  window.__smartElbowWalk=function(){    // BETA: decide each elbow's turn by peeking left/right for the same-size continuing leg
+    var runs=window.__runs2d||[], turned=0, flagged=0, snapped=false;
+    runs.forEach(function(run){
+      for(var i=0;i<run.pieces.length;i++){ var p=run.pieces[i]; if(p.kind!=='fitting'||!(p.cid==='e90'||p.cid==='e45'||p._elbow)) continue;
+        var fr=runFrames(run), f=fr[i]; if(!f) continue;
+        var inc=[f.ux,f.uy], mag=(p.cid==='e45'?Math.PI/4:Math.PI/2);
+        function headAfter(sign){ var a=sign*mag,c=Math.cos(a),s=Math.sin(a); return [inc[0]*c-inc[1]*s, inc[0]*s+inc[1]*c]; }
+        function scoreSide(h){                                   // look one "tile" ahead down this leg
+          var R=window.__runs2d||[], rad=inToPt(38), nb=0;
+          for(var j=0;j<R.length;j++){ var o=R[j]; if(o===run) continue;
+            var wd=Math.abs((o.widthIn||0)-(run.widthIn||0)); if(wd>2.5) continue;                 // SAME SIZE only
+            var oR=!!(o.pieces[0]&&o.pieces[0].round), rR=!!(run.pieces[0]&&run.pieces[0].round); if(oR!==rR) continue;
+            var eo=runEnd(o), pts=[[o.start[0],o.start[1],o.dir[0],o.dir[1]],[eo.x,eo.y,eo.ux,eo.uy]];
+            for(var k=0;k<pts.length;k++){ var q=pts[k], d=Math.hypot(q[0]-f.x,q[1]-f.y); if(d>rad) continue;
+              var al=Math.abs(q[2]*h[0]+q[3]*h[1]); if(al<0.7) continue; nb=Math.max(nb, al+(1-wd/2.5)*0.5); } }
+          var step=inToPt(16), near=window.__ductDirAt(f.x+h[0]*step, f.y+h[1]*step, 16), tw=0;
+          near.forEach(function(dd){ var al=Math.abs(h[0]*dd.dir[0]+h[1]*dd.dir[1]); if(al>0.7) tw+=dd.w*al; });
+          return {nb:nb, tw:tw};
+        }
+        var hP=headAfter(1), hN=headAfter(-1), sP=scoreSide(hP), sN=scoreSide(hN), want=0;
+        if(sP.nb>0 || sN.nb>0) want = (sP.nb>=sN.nb)?1:-1;          // 1) same-size built leg wins
+        else if(sP.tw>0 || sN.tw>0) want = (sP.tw>=sN.tw)?1:-1;     // 2) else the green trace leg
+        else { flagged++; p._elbowUncertain=true; continue; }       // 3) genuinely can't tell -> flag, don't guess
+        p._elbowUncertain=false;
+        var cur=(p.turn>0?1:(p.turn<0?-1:0));
+        if(cur!==want){ if(!snapped){ window.__pushRunUndo&&window.__pushRunUndo(); snapped=true; } p.turn=want*mag; p._elbow=true; turned++; }
+      }
+    });
+    try{renderItems();}catch(_){} try{renderPanel();}catch(_){}
+    if(typeof setStatus==='function') setStatus('Smart elbow walk (beta): set '+turned+' elbow'+(turned!==1?'s':'')+(flagged?(', '+flagged+' uncertain \u2014 flip those by hand'):', none uncertain')+'.');
+    return {turned:turned, flagged:flagged};
   };
   // ---- RUN UNDO: snapshot window.__runs2d before any destructive edit so a mis-delete/move is recoverable ----
   window.__runSnap=window.__runSnap||[];
@@ -2769,6 +2818,20 @@ function refreshSel(){
       var oux=f.ux*cu-f.uy*su, ouy=f.ux*su+f.uy*cu;                 // outgoing heading
       var noutx=-ouy, nouty=oux;                                    // left normal of outgoing heading
       var ts=(a>=0)?1:-1, outer=-ts, inner=ts;
+      // ROUND ELBOW — sweeping bend: throat + heel drawn as concentric arcs about the bend center
+      if(p.round){
+        var Rc=inToPt((p.widthIn||run.widthIn))*1.5;                // centerline radius ~1.5x diameter (standard long-radius)
+        var Tin=[f.x - f.ux*Rc, f.y - f.uy*Rc];                     // tangent point back along the incoming leg
+        var nin=[f.nx*inner, f.ny*inner];                           // toward the inside of the turn
+        var O=[Tin[0]+nin[0]*Rc, Tin[1]+nin[1]*Rc];                 // arc center
+        var Tout=[f.x + oux*Rc, f.y + ouy*Rc];
+        var angIn=Math.atan2(Tin[1]-O[1], Tin[0]-O[0]), angOut=Math.atan2(Tout[1]-O[1], Tout[0]-O[0]);
+        var dA=angOut-angIn; while(dA>Math.PI)dA-=2*Math.PI; while(dA<-Math.PI)dA+=2*Math.PI;
+        var rIn=Math.max(1,Rc-hw), rOut=Rc+hw, N=12, arr=[], k;
+        for(k=0;k<=N;k++){ var an=angIn+dA*k/N; arr.push([O[0]+Math.cos(an)*rOut, O[1]+Math.sin(an)*rOut]); }   // heel (outer) arc
+        for(k=N;k>=0;k--){ var an2=angIn+dA*k/N; arr.push([O[0]+Math.cos(an2)*rIn, O[1]+Math.sin(an2)*rIn]); }  // throat (inner) arc back
+        return arr.map(function(q){return n2s(q[0],q[1]);});
+      }
       function lx(p1,d1,p2,d2){ var den=d1[0]*d2[1]-d1[1]*d2[0]; if(Math.abs(den)<1e-6) return p1; var t=((p2[0]-p1[0])*d2[1]-(p2[1]-p1[1])*d2[0])/den; return [p1[0]+d1[0]*t,p1[1]+d1[1]*t]; }
       var inOut=[f.x+f.nx*outer*hw, f.y+f.ny*outer*hw];             // incoming outer wall point
       var inIn =[f.x+f.nx*inner*hw, f.y+f.ny*inner*hw];             // incoming inner wall point
@@ -4682,6 +4745,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
    <div style="font-size:10px;color:#8a93a1;margin:0 0 8px 2px;letter-spacing:.4px;text-transform:uppercase;font-weight:600">Duct editing</div>
    <button id="dtUndo" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#fff4e6;border:1px solid #ffd9a8;color:#b5641a;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:700;font-size:12px">↶ Undo last change</button>
    <button id="dtFixElbows" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#eafaf0;border:1px solid #a9e0c0;color:#1b7a45;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">↰ Straighten elbows from trace</button>
+   <button id="dtSmartWalk" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#eef4ff;border:1px solid #a9c4ff;color:#3562c4;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⟳ Smart elbow walk (beta)</button>
    <button class="dtTool" data-mode="dragsize" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-resize width</button>
    <button class="dtTool" data-mode="draglen" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-end (length)</button>
    <button class="dtTool" data-mode="move" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Move run</button>
@@ -4711,6 +4775,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   window.refreshUndoBtn=function(){ var u=document.getElementById('dtUndo'); if(!u) return; var n=(window.__runSnap||[]).length; u.textContent=n?('\u21b6 Undo last change ('+n+')'):'\u21b6 Undo last change'; u.style.opacity=n?'1':'.5'; u.style.cursor=n?'pointer':'default'; };
   var undoBtn=document.getElementById('dtUndo'); if(undoBtn) undoBtn.onclick=function(){ if(window.__undoRun&&window.__undoRun()){ if(window.refreshUndoBtn) window.refreshUndoBtn(); } };
   var fixElb=document.getElementById('dtFixElbows'); if(fixElb) fixElb.onclick=function(){ try{ window.__repairElbowTurns&&window.__repairElbowTurns(); }catch(e){} };
+  var smartW=document.getElementById('dtSmartWalk'); if(smartW) smartW.onclick=function(){ try{ window.__smartElbowWalk&&window.__smartElbowWalk(); }catch(e){} };
   setInterval(function(){ if(window.refreshUndoBtn) window.refreshUndoBtn(); },700);
   var tapBtn=document.getElementById('dtTapBtn'); if(tapBtn) tapBtn.onclick=function(){ window.__editMode=null; refl(); var real=document.getElementById('tapToolBtn'); if(real){ real.click(); status('Tap tool on — click the duct to drop taps (style/size/direction in its panel).'); } else status('Tap tool not available.'); };
   document.getElementById('dtOff').onclick=function(){ window.__editMode=null; window.__tapMain=null; refl(); status('Edit off — click a duct to select.'); };
@@ -4742,8 +4807,26 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     wheelSel=sel; if(wheel) Array.prototype.forEach.call(wheel.querySelectorAll('.wtile'),function(el){ var on=(+el.getAttribute('data-i')===sel); el.style.background=on?'#dbe7ff':'#fff'; el.style.borderColor=on?'#9dbcff':'#dde2e9'; el.style.color=on?'#3562c4':'#2b3441'; el.style.transform=on?'scale(1.12)':'scale(1)'; });
   }
   function closeWheel(){ if(wheel){ try{wheel.remove();}catch(_){}} wheel=null; }
+  // ---- right-click radial TOOL picker (switch edit tool without the sidebar) ----
+  var TOOLS=[{m:'insert',t:'Insert'},{m:'connect',t:'Connect'},{m:'move',t:'Move'},{m:'flipelbow',t:'Flip elbow'},{m:'delete',t:'Del run'},{m:'delpiece',t:'Del piece'},{m:'dragsize',t:'Width'}];
+  var twSel=-1;
+  function showToolWheel(cx,cy){ closeWheel(); twSel=-1;
+    wheel=document.createElement('div'); wheel.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;z-index:100000;pointer-events:none';
+    var R=74, html='<div style="position:absolute;left:'+(cx-10)+'px;top:'+(cy-10)+'px;width:20px;height:20px;border-radius:50%;background:#b5641a;opacity:.5"></div>';
+    TOOLS.forEach(function(it,i){ var a=-Math.PI/2+i*(2*Math.PI/TOOLS.length), x=cx+Math.cos(a)*R, y=cy+Math.sin(a)*R;
+      html+='<div class="twtile" data-i="'+i+'" style="position:absolute;left:'+(x-33)+'px;top:'+(y-16)+'px;width:66px;height:32px;line-height:32px;text-align:center;border-radius:16px;background:#fff;border:1.5px solid #e6c69a;box-shadow:0 3px 11px rgba(30,40,60,.22);font:700 11px -apple-system,system-ui,sans-serif;color:#7a4a12">'+it.t+'</div>'; });
+    wheel.innerHTML=html; document.body.appendChild(wheel);
+  }
+  function updToolWheel(cx,cy,mx,my){ var dx=mx-cx,dy=my-cy,dist=Math.hypot(dx,dy),sel=-1;
+    if(dist>28){ var ang=Math.atan2(dy,dx),best=1e9; TOOLS.forEach(function(it,i){ var ta=-Math.PI/2+i*(2*Math.PI/TOOLS.length),d=Math.abs(((ang-ta+Math.PI*3)%(2*Math.PI))-Math.PI); if(d<best){best=d;sel=i;} }); }
+    twSel=sel; if(wheel) Array.prototype.forEach.call(wheel.querySelectorAll('.twtile'),function(el){ var on=(+el.getAttribute('data-i')===sel); el.style.background=on?'#ffedd5':'#fff'; el.style.borderColor=on?'#e6a86a':'#e6c69a'; el.style.transform=on?'scale(1.12)':'scale(1)'; });
+  }
 
   var drag=null;
+  overlay.addEventListener('contextmenu', function(e){ e.preventDefault(); }, true);   // right-click drives the tool wheel, not the browser menu
+  overlay.addEventListener('mousedown', function(e){
+    if(e.button===2){ e.preventDefault(); e.stopPropagation(); drag={mode:'toolwheel', cx:e.clientX, cy:e.clientY}; showToolWheel(e.clientX,e.clientY); status('Drag to a tool, release to switch.'); return; }
+  }, true);
   overlay.addEventListener('mousedown', function(e){
     var m=window.__editMode; if(e.button!==0) return;
     if(m==='stamp'){ var sst=toSvg(e); if(!sst) return; e.stopPropagation(); e.preventDefault();
@@ -4778,6 +4861,8 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     if(m==='insert'){ var s0=toSvg(e); if(!s0) return;
       var fs=(window.__sizeStepHit)?window.__sizeStepHit(s0[0],s0[1]):null;
       if(fs){ e.stopPropagation(); e.preventDefault(); if(window.__flipSizeStep) window.__flipSizeStep(fs.runId, fs.pieceIdx); try{window.__renderPanel&&window.__renderPanel();}catch(_){} return; }   // tap an existing reducer -> flip its direction
+      var eh=(window.__elbowHit)?window.__elbowHit(s0[0],s0[1]):null;
+      if(eh){ e.stopPropagation(); e.preventDefault(); if(window.__flipElbow) window.__flipElbow(eh.runId, eh.pieceIdx); try{window.__renderPanel&&window.__renderPanel();}catch(_){} return; }   // tap an existing elbow -> flip its turn direction
       var tgt=(window.__pieceHit)?window.__pieceHit(s0[0],s0[1]):null; if(!tgt) return; e.stopPropagation(); e.preventDefault(); drag={mode:'wheel', target:tgt, cx:e.clientX, cy:e.clientY, sx:s0[0], sy:s0[1]}; showWheel(e.clientX,e.clientY); status('Drag to a fitting, then release. (Tap a reducer to flip it.)'); return; }
     if(m!=='dragsize'&&m!=='draglen'&&m!=='move') return;   // other modes -> let the piece handler (pcHit) run
     var sp=toSvg(e); if(!sp) return; var r=hitRun(sp); if(!r){ return; }
@@ -4810,6 +4895,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
 
   window.addEventListener('mousemove', function(e){ if(!drag) return;
     if(drag.mode==='wheel'){ updWheel(drag.cx, drag.cy, e.clientX, e.clientY); return; }
+    if(drag.mode==='toolwheel'){ updToolWheel(drag.cx, drag.cy, e.clientX, e.clientY); return; }
     var sp=toSvg(e); if(!sp) return;
     if(drag.mode==='size'){
       var vx=sp[0]-drag.a[0], vy=sp[1]-drag.a[1]; var perp=Math.abs(vx*(-drag.uy)+vy*drag.ux);
@@ -4830,6 +4916,27 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   }, true);
 
   window.addEventListener('mouseup', function(){ if(!drag) return;
+    if(drag.mode==='toolwheel'){ var tsel=twSel, tcx=drag.cx, tcy=drag.cy; closeWheel(); drag=null;
+      if(tsel>=0){ var tm=TOOLS[tsel].m;
+        if(tm==='delpiece'){                                        // act immediately on the piece under the cursor
+          var sp=null; try{ var pt=overlay.createSVGPoint(); pt.x=tcx; pt.y=tcy; var ctm=overlay.getScreenCTM(); if(ctm){ var u=pt.matrixTransform(ctm.inverse()); sp=[u.x,u.y]; } }catch(_){ sp=null; }
+          var hit=null; if(sp){ hit=(window.__sizeStepHit&&window.__sizeStepHit(sp[0],sp[1]))||(window.__elbowHit&&window.__elbowHit(sp[0],sp[1]))||(window.__pieceHit&&window.__pieceHit(sp[0],sp[1])); }
+          if(hit && window.__pcDel){ window.__pcDel(hit.runId, hit.pieceIdx); status('Deleted that piece.'); }
+          else status('Right-click directly on a piece to delete it.');
+          window.__editMode=null;
+        } else if(tm==='flipelbow'){                                 // flip the elbow under the cursor
+          var sp2=null; try{ var pt2=overlay.createSVGPoint(); pt2.x=tcx; pt2.y=tcy; var ctm2=overlay.getScreenCTM(); if(ctm2){ var u2=pt2.matrixTransform(ctm2.inverse()); sp2=[u2.x,u2.y]; } }catch(_){ sp2=null; }
+          var eh=sp2&&window.__elbowHit?window.__elbowHit(sp2[0],sp2[1]):null;
+          if(eh && window.__flipElbow){ window.__flipElbow(eh.runId, eh.pieceIdx); }
+          else status('Right-click directly on an elbow to flip it.');
+          window.__editMode=null;
+        } else {
+          window.__editMode=tm; status('Tool: '+TOOLS[tsel].t+'.');
+          try{ var t=document.getElementById('dtBarToggle'), body=document.getElementById('dtBarBody'); if(t&&body&&body.style.display==='none') t.click(); }catch(_){}   // open the edit toolbar so the active tool shows
+          try{ if(typeof refl==='function') refl(); }catch(_){}
+        }
+      }
+      return; }
     if(drag.mode==='wheel'){ var sel=wheelSel, tg=drag.target, cxr=drag.cx, cyr=drag.cy; closeWheel();
       if(sel>=0 && tg && window.__doInsert){ var it=WITEMS[sel];
         if(it.k==='s2r'){ transitionDialog(tg.runId,tg.pieceIdx,tg.alongIn,'',cxr,cyr,'round'); }
