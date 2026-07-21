@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.57</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.61</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -314,12 +314,13 @@
          <button class="btn adv" id="itemsClearBtn" style="flex:1;background:#3a2030;border-color:#7a3b4b;color:#fbb">Clear</button>
        </div>
        <button class="btn go" id="trackWalkBtn" style="margin-top:6px;font-weight:700">Build (track-walk · beta)</button>
+       <button class="btn" id="walkBetaBtn" style="margin-top:6px;font-weight:700;background:#eef4ff;border-color:#a9c4ff;color:#3562c4">Build (trace-walk · beta 2)</button>
        <button class="btn go" id="aiAssignTest" style="margin-top:6px;font-weight:700">AI: assign tags → ducts (test)</button>
        <div class="hint" style="margin-top:2px">Experiment — after a build, sends the extracted centerlines + size tags + the full sheet image to the AI and asks only <b>which tag labels which duct</b>. Draws its picks on the plan (blue dot = tag → orange dot = chosen duct) and tables width-agreement. Changes no runs; open the downloaded file so the worker call isn't sandbox-blocked.</div>
        <button class="btn go" id="aiCleanupRuns" style="margin-top:6px;font-weight:700">AI cleanup: drop doubles + not-ductwork</button>
        <div class="hint" style="margin-top:2px">After a build: draws every run numbered on the full sheet and asks the AI which are <b>duplicates</b> of another run and which sit on <b>non-ductwork</b> (text, walls, grilles, empty). Auto-removes what it flags (↶ undo appears). It can only pick from runs that exist — it never adds duct.</div>
-       <button class="btn go" id="aiFindMissing" style="margin-top:6px;font-weight:700">AI: find missing duct (second look)</button>
-       <div class="hint" style="margin-top:2px">Scans the <b>print</b> against your runs and flags spots that show ductwork with <b>no run</b> (dashed-yellow ! boxes on the plan) — even where the builder never made a candidate. Build them with the Edit tools. Points, doesn't auto-place.</div>
+       <button class="btn go" id="aiFindMissing" style="margin-top:6px;font-weight:700;display:none">AI: find missing duct (second look)</button>
+       <div class="hint" style="margin-top:2px;display:none">Scans the <b>print</b> against your runs and flags spots that show ductwork with <b>no run</b> (dashed-yellow ! boxes on the plan) — even where the builder never made a candidate. Build them with the Edit tools. Points, doesn't auto-place.</div>
        <div class="row" style="margin-top:6px;display:flex;gap:6px">
          <button class="btn" id="editDelBtn" style="flex:1;background:#2a1418;border-color:#7a3b4b;color:#fbb">Click-to-delete: OFF</button>
          <button class="btn" id="editSizeBtn" style="flex:1;background:#14202a;border-color:#3b6a8a;color:#bdf">✎ Click-to-resize: OFF</button>
@@ -2085,6 +2086,21 @@ function refreshSel(){
     p.turn = -(p.turn||0) || (p.cid==='e45'?Math.PI/4:Math.PI/2);   // negate; if it was 0/undefined, give it a +90
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Flipped the elbow the other way.'); return true;
   };
+  window.__appendStraight=function(runId, end, lenIn){     // add a straight leg to a run END (e.g. off an elbow), then you drag it to length
+    var run=findRun(runId); if(!run) return false;
+    window.__pushRunUndo&&window.__pushRunUndo();
+    var last=run.pieces[run.pieces.length-1]||{}, first=run.pieces[0]||{};
+    var srcEnd = (end==='start')?first:last;
+    var w=srcEnd.widthIn||run.widthIn, dep=(srcEnd.depthIn!=null?srcEnd.depthIn:null), rnd=!!srcEnd.round;
+    var st={kind:'straight',lenIn:(lenIn||12),widthIn:w,depthIn:dep,round:rnd,size:(rnd?('\u00f8'+w):(w+(dep!=null?('\u00d7'+dep):'"'))),cid:rnd?'spiral':'st',camduct:rnd?'Spiral':'Straight Duct'};
+    if(end==='start') run.pieces.unshift(st); else run.pieces.push(st);
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Added a straight leg \u2014 drag its open end to length.'); return true;
+  };
+  window.__nearestRunEnd=function(sx,sy){                  // which run + end is nearest a screen point
+    var best=null; (window.__runs2d||[]).forEach(function(r){ var pl=window.__runPoly(r), n=pl.length;
+      [['start',pl[0]],['finish',pl[n-1]]].forEach(function(pr){ var s=window.__n2s(pr[1][0],pr[1][1]); if(!s)return; var d=Math.hypot(sx-s[0],sy-s[1]); if(!best||d<best.d) best={d:d,runId:r.id,end:pr[0]}; }); });
+    return (best&&best.d<40)?best:null;
+  };
   window.__flipSizeStep=function(runId, pieceIdx){         // swap which side of a reducer/transition is the new size
     var run=findRun(runId); if(!run) return false; var p=run.pieces[pieceIdx]; if(!p||!p._sizeStep) return false;
     window.__pushRunUndo&&window.__pushRunUndo();
@@ -2901,6 +2917,7 @@ function refreshSel(){
         poly.setAttribute('fill',fill); poly.setAttribute('stroke',stroke); poly.setAttribute('stroke-width',on?'3':'1.5'); poly.style.cursor='pointer';
         var pcHit=function(e){ e.stopPropagation();
           var m=window.__editMode;
+          if(e.button!==2){ selRun=run.id; try{window.__selRunId=run.id;}catch(_){} try{window.__showRunPanel&&window.__showRunPanel();}catch(_){} }   // any left-click on a run shows it in the run view
           if(m==='delete'){ window.__pushRunUndo&&window.__pushRunUndo(); window.__runs2d=(window.__runs2d||[]).filter(function(r){return r.id!==run.id;}); sel.clear(); selRun=null; renderItems(); renderPanel(); setStatus('Deleted run. (Undo with the Undo button or Ctrl+Z.)'); return; }
           if(m==='size'){ var v=prompt('Size for this piece (e.g. 20x8 or 12\u00f8):', p.size||''); if(v==null||!v.trim()) return;
             var pd=parseTagDims(v); if(!pd){ setStatus('Couldn\u2019t read \u201c'+v+'\u201d as a size \u2014 try like 20x8 or 12\u00f8.'); return; }
@@ -3416,9 +3433,57 @@ function refreshSel(){
   window.__runPoly=__runPoly;
   window.__ductDiag=__ductDiag;
   window.__buildRunsTrackWalk=buildRunsTrackWalk;
+  window.__walkBuildBeta=function(){    // BETA WALK: follow the green-trace spine; lay straights + elbows (turn taken from the path, never guessed)
+    if(typeof scaleIPF==='undefined' || !(scaleIPF>0)){ setStatus('Set the drawing scale first.'); return; }
+    try{ buildSegmentRuns(); }catch(e){}
+    var sg=window.__sgRuns||[]; if(!sg.length){ setStatus('No centerlines to walk — mark/scan duct first.'); return; }
+    var pp=6*scaleIPF, TOL=inToPt(16);
+    var F=[]; sg.forEach(function(r){ var c=r.corners; if(!c||c.length<4) return;
+      var A=[(c[0][0]+c[3][0])/2,(c[0][1]+c[3][1])/2], B=[(c[1][0]+c[2][0])/2,(c[1][1]+c[2][1])/2];
+      if(Math.hypot(B[0]-A[0],B[1]-A[1])<inToPt(6)) return;
+      F.push({A:A,B:B,w:(typeof snapDuctW==='function'?snapDuctW(r.widthIn):r.widthIn),used:false}); });
+    if(!F.length){ setStatus('No usable centerline fragments.'); return; }
+    function near(p,q){ return Math.hypot(p[0]-q[0],p[1]-q[1])<=TOL; }
+    function unit(a,b){ var dx=b[0]-a[0],dy=b[1]-a[1],l=Math.hypot(dx,dy)||1; return [dx/l,dy/l]; }
+    function deg(pt,excl){ var n=0; F.forEach(function(g){ if(g===excl) return; if(near(pt,g.A)||near(pt,g.B)) n++; }); return n; }
+    function walkFrom(f, startPt){
+      var cur=f, from=startPt.slice(), to=(near(startPt,f.A)?f.B.slice():f.A.slice());
+      var dir0=unit(from,to), pieces=[], prev=dir0, guard=0;
+      while(cur && guard++<500){
+        cur.used=true;
+        var heading=unit(from,to);
+        if(pieces.length){ var turn=Math.atan2(prev[0]*heading[1]-prev[1]*heading[0], prev[0]*heading[0]+prev[1]*heading[1]);
+          if(Math.abs(turn)>0.35) pieces.push({kind:'fitting',cid:'e90',camduct:'90 Elbow',turn:turn,lenIn:0,widthIn:cur.w,_elbow:true,_walk:true}); }
+        var segLen=Math.hypot(to[0]-from[0],to[1]-from[1])/pp;
+        pieces.push({kind:'straight',lenIn:Math.max(1,Math.round(segLen)),widthIn:cur.w,depthIn:null,size:cur.w+'"',round:false,cid:'st',camduct:'Straight Duct'});
+        prev=heading;
+        var cands=[]; F.forEach(function(g){ if(g.used) return; if(near(to,g.A)) cands.push({g:g,to:g.B.slice()}); else if(near(to,g.B)) cands.push({g:g,to:g.A.slice()}); });
+        if(cands.length!==1) break;                       // stop at a fork (branch/tee) or dead end — Stage 1
+        from=to.slice(); to=cands[0].to; cur=cands[0].g;
+      }
+      return {start:startPt.slice(), dir:dir0, w:f.w, pieces:pieces};
+    }
+    window.__pushRunUndo&&window.__pushRunUndo();
+    var runs=[], pal=(typeof palette!=='undefined'&&palette.length)?palette:['#22a95f'];
+    // pass 1: seed at free ends (open runs); pass 2: leftover loops
+    for(var pass=0; pass<2; pass++){
+      F.forEach(function(f){ if(f.used) return;
+        var sp = (pass===0) ? ((deg(f.A,f)===0)?f.A:((deg(f.B,f)===0)?f.B:null)) : f.A;
+        if(!sp) return;
+        var w=walkFrom(f, sp);
+        if(w.pieces.length) runs.push({ id:'wk'+Date.now().toString(36)+Math.floor(Math.random()*1e4), start:w.start, dir:w.dir, widthIn:w.w, color:pal[runs.length%pal.length], label:'', pieces:w.pieces, _walk:true });
+      });
+    }
+    window.__runs2d=runs;
+    var nElb=0; runs.forEach(function(r){ r.pieces.forEach(function(p){ if(p._elbow)nElb++; }); });
+    try{ if(window.__integrateYoloFittings) window.__integrateYoloFittings(); }catch(e){}   // YOLO only swaps fittings in
+    renderItems(); renderPanel();
+    setStatus('Walk build (beta): '+runs.length+' runs, '+nElb+' elbows laid from the trace path. Forks/taps become separate runs for now — connect them with the tools.');
+  };
 
   (function(){ var b=document.getElementById('itemsFromRunsBtn'); if(b) b.onclick=runsFromPreview;
     var tw=document.getElementById('trackWalkBtn'); if(tw) tw.onclick=buildRunsTrackWalk;
+    var wb=document.getElementById('walkBetaBtn'); if(wb) wb.onclick=function(){ try{ window.__walkBuildBeta(); }catch(e){ setStatus('Walk error: '+((e&&e.message)||e)); } };
     (function(){ var dB=document.getElementById('editDelBtn'), sB=document.getElementById('editSizeBtn'), tB=document.getElementById('editTapBtn');
       function upd(){ var m=window.__editMode;
         if(dB){ dB.textContent='\uD83D\uDDD1 Click-to-delete: '+(m==='delete'?'ON':'OFF'); dB.style.background=m==='delete'?'#5a1820':'#2a1418'; }
@@ -4749,6 +4814,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
    <button class="dtTool" data-mode="dragsize" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-resize width</button>
    <button class="dtTool" data-mode="draglen" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-end (length)</button>
    <button class="dtTool" data-mode="move" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Move run</button>
+   <button class="dtTool" data-mode="rotate" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Rotate run</button>
     <button class="dtTool" data-mode="connect" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Connect 2 runs (elbow)</button>
     <button class="dtTool" data-mode="stamp" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f3effc;border:1px solid #cdbdf0;color:#5a3fa0;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">⧉ Stamp (paste copies)</button>
    <button class="dtTool" data-mode="insert" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Insert (hold &amp; drag)</button>
@@ -4767,7 +4833,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   function status(s){ try{ if(typeof setStatus==='function') setStatus(s); }catch(_){} }
   function openBar(){ if(body.style.display==='none'){ body.style.display='block'; tog.textContent='Edit ‹'; } }
   tog.onclick=function(){ var open=body.style.display!=='none'; body.style.display=open?'none':'block'; tog.textContent=open?'Edit ›':'Edit ‹'; if(!open) status('Edit mode — click a duct to select, or pick a tool.'); };
-  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',move:'Drag anywhere on a run to move the whole run.',connect:'Click one duct, then another — then choose Elbow (corner) or Tap (into the side).',stamp:'Copy pieces first (tick them in the panel → Copy as stamp), then click on the plan to drop a copy. Keep clicking to place more.',insert:'Press on a duct and drag to a fitting on the wheel, then release.',size:'Click a piece and type its size.',delete:'Click a run to delete it.'};
+  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',move:'Drag anywhere on a run to move the whole run.',rotate:'Drag to spin the run around its start — hold Shift to snap to 15°.',connect:'Click one duct, then another — then choose Elbow (corner) or Tap (into the side).',stamp:'Copy pieces first (tick them in the panel → Copy as stamp), then click on the plan to drop a copy. Keep clicking to place more.',insert:'Press on a duct and drag to a fitting on the wheel, then release.',size:'Click a piece and type its size.',delete:'Click a run to delete it.'};
   function refl(){ Array.prototype.forEach.call(document.querySelectorAll('.dtTool'),function(b){ var on=(b.getAttribute('data-mode')===window.__editMode), isDel=(b.getAttribute('data-mode')==='delete');
       b.style.background=on?'#dbe7ff':(isDel?'#fdf2f2':'#f5f7fa'); b.style.borderColor=on?'#9dbcff':(isDel?'#f2d4d4':'#dde2e9'); b.style.color=on?'#3562c4':(isDel?'#c0484d':'#2b3441'); });
     if(hint) hint.textContent=window.__editMode?(HINTS[window.__editMode]||''):''; }
@@ -4808,7 +4874,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   }
   function closeWheel(){ if(wheel){ try{wheel.remove();}catch(_){}} wheel=null; }
   // ---- right-click radial TOOL picker (switch edit tool without the sidebar) ----
-  var TOOLS=[{m:'insert',t:'Insert'},{m:'connect',t:'Connect'},{m:'move',t:'Move'},{m:'flipelbow',t:'Flip elbow'},{m:'delete',t:'Del run'},{m:'delpiece',t:'Del piece'},{m:'dragsize',t:'Width'}];
+  var TOOLS=[{m:'insert',t:'Insert'},{m:'connect',t:'Connect'},{m:'addstraight',t:'Add straight'},{m:'move',t:'Move'},{m:'rotate',t:'Rotate'},{m:'flipelbow',t:'Flip elbow'},{m:'delete',t:'Del run'},{m:'delpiece',t:'Del piece'}];
   var twSel=-1;
   function showToolWheel(cx,cy){ closeWheel(); twSel=-1;
     wheel=document.createElement('div'); wheel.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;z-index:100000;pointer-events:none';
@@ -4868,7 +4934,11 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     var sp=toSvg(e); if(!sp) return; var r=hitRun(sp); if(!r){ return; }
     e.stopPropagation(); e.preventDefault();
     var pin=pxPerIn(r)||1;
-    if(m==='move'){
+    if(m==='rotate'){
+      window.__pushRunUndo&&window.__pushRunUndo();
+      var pv=n2s(r.start[0],r.start[1]);                                   // pivot = the run's start (its connection point)
+      drag={mode:'rotate', r:r, pivot:pv, a0:Math.atan2(sp[1]-pv[1], sp[0]-pv[0]), dir0:[r.dir[0],r.dir[1]]};
+    } else if(m==='move'){
       window.__pushRunUndo&&window.__pushRunUndo();
       var o=n2s(r.start[0],r.start[1]), ex=n2s(r.start[0]+1,r.start[1]), ey=n2s(r.start[0],r.start[1]+1);   // screen basis for nvt axes
       var b1=[ex[0]-o[0],ex[1]-o[1]], b2=[ey[0]-o[0],ey[1]-o[1]], det=(b1[0]*b2[1]-b1[1]*b2[0])||1;
@@ -4908,6 +4978,12 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
       if(drag.r.pieces[drag.idx]) drag.r.pieces[drag.idx].lenIn=Math.round(lenIn);
       if(drag.dStart){ var pp=ppiFn(); drag.r.start=[drag.anchorN[0]-drag.r.dir[0]*lenIn*pp, drag.anchorN[1]-drag.r.dir[1]*lenIn*pp]; }
       if(hint) hint.textContent='length '+Math.round(lenIn)+'"'; reRun();
+    } else if(drag.mode==='rotate'){
+      var aNow=Math.atan2(sp[1]-drag.pivot[1], sp[0]-drag.pivot[0]), dA=aNow-drag.a0;
+      if(window.event && window.event.shiftKey){ dA=Math.round(dA/(Math.PI/12))*(Math.PI/12); }   // Shift = snap 15°
+      var c=Math.cos(dA), s=Math.sin(dA);
+      drag.r.dir=[drag.dir0[0]*c-drag.dir0[1]*s, drag.dir0[0]*s+drag.dir0[1]*c];
+      if(hint) hint.textContent='rotating run (hold Shift to snap 15°)'; reRun();
     } else if(drag.mode==='move'){
       var dvx=sp[0]-drag.sp0[0], dvy=sp[1]-drag.sp0[1];
       var dnx=drag.inv[0][0]*dvx+drag.inv[0][1]*dvy, dny=drag.inv[1][0]*dvx+drag.inv[1][1]*dvy;
@@ -4930,6 +5006,11 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
           if(eh && window.__flipElbow){ window.__flipElbow(eh.runId, eh.pieceIdx); }
           else status('Right-click directly on an elbow to flip it.');
           window.__editMode=null;
+        } else if(tm==='addstraight'){                               // append a straight leg to the nearest run end, then drag length
+          var sp3=null; try{ var pt3=overlay.createSVGPoint(); pt3.x=tcx; pt3.y=tcy; var ctm3=overlay.getScreenCTM(); if(ctm3){ var u3=pt3.matrixTransform(ctm3.inverse()); sp3=[u3.x,u3.y]; } }catch(_){ sp3=null; }
+          var re=sp3&&window.__nearestRunEnd?window.__nearestRunEnd(sp3[0],sp3[1]):null;
+          if(re && window.__appendStraight){ window.__appendStraight(re.runId, re.end, 12); window.__editMode='draglen'; try{ if(typeof refl==='function') refl(); }catch(_){} }
+          else { status('Right-click near a run END to add a straight leg.'); window.__editMode=null; }
         } else {
           window.__editMode=tm; status('Tool: '+TOOLS[tsel].t+'.');
           try{ var t=document.getElementById('dtBarToggle'), body=document.getElementById('dtBarBody'); if(t&&body&&body.style.display==='none') t.click(); }catch(_){}   // open the edit toolbar so the active tool shows
@@ -5086,7 +5167,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   var STEPS=[
     {t:'Read size tags', run:function(){ if(!click('aiTileSweep')) status('Read-tags button unavailable.'); }, note:'Reading the size tags across your work area. When it finishes, check them and add any it missed, then Next.'},
     {t:'Find fittings (YOLO)', run:function(){ if(!click('yoloScanBtn')) status('YOLO scan unavailable — load best.onnx first.'); }, note:'Scanning for elbows / tees / taps. Review with Clean with YOLO (fix or mark ones it missed), then Next.'},
-    {t:'Build runs + AI sweep', run:function(){ if(click('trackWalkBtn')) setTimeout(function(){ try{ if(typeof aiFindMissing==='function') aiFindMissing(); }catch(_){}} ,1200); }, note:'Building the duct runs, then sweeping the print for any duct with no run (yellow ! boxes).'},
+    {t:'Build runs', run:function(){ click('trackWalkBtn'); }, note:'Building the duct runs from the trace.'},
     {t:'Edit & finish', run:function(){ openEdit(); }, note:'Opening the Edit tools — drag-resize width, drag-end length, insert fittings, tap, move.'}
   ];
   var step=0;
@@ -5105,7 +5186,8 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
       if(sb && !sb.disabled && typeof sb.onclick==='function'){ prog('Auto: finding fittings\u2026'); try{ await sb.onclick(); }catch(e){ console.warn('auto yolo',e); } }
       prog('Auto: building runs\u2026'); try{ if(window.__buildRunsTrackWalk) window.__buildRunsTrackWalk(); }catch(e){ console.warn('auto build',e); }
       await new Promise(function(r){ setTimeout(r,600); });
-      prog('Auto: checking for missed duct\u2026'); try{ if(typeof aiFindMissing==='function') await aiFindMissing(); }catch(e){ console.warn('auto sweep',e); }
+      // AI 'find missing duct' sweep removed from auto takeoff (left big yellow boxes; unused).
+      try{ var _mv=document.getElementById('aiMissViz'); if(_mv) _mv.innerHTML=''; }catch(_){}
       openEdit(); status('Auto takeoff complete \u2014 review, then use the Edit tools.');
     } finally { setTimeout(function(){ auto.disabled=false; auto.textContent=orig; }, 1400); }
   }
