@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.61</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.63</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -213,7 +213,7 @@
      <label class="adv" style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="dropTagBoxes" checked> <b>Drop boxes around tags & round symbols</b> — strip the rectangles around size labels and diffuser/damper circles, in every mode</label>
      <label style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="blackOnly"> <b>Black lines only</b> — hide gray background (duct is often pure black)</label>
      <div style="font-size:12px;margin-top:3px;opacity:.85">Darkness cutoff <input type="range" id="blkThresh" min="0" max="1" step="0.02" value="0.45" style="width:120px;vertical-align:middle"> <span id="blkThreshV">0.45</span> <span id="blkCounts" style="opacity:.7"></span></div>
-     <div class="adv" style="font-size:12px;margin-top:3px;opacity:.85">Min length <input type="range" id="blkMinLen" min="0" max="60" step="2" value="10" style="width:120px;vertical-align:middle"> <span id="blkMinV">10</span> pt <span style="opacity:.6">(lower = grab shorter pieces)</span></div>
+     <div class="adv" style="font-size:12px;margin-top:3px;opacity:.85">Min length <input type="range" id="blkMinLen" min="0" max="200" step="2" value="10" style="width:120px;vertical-align:middle"> <span id="blkMinV">10</span> pt <span style="opacity:.6">(raise to drop short grid / cross lines)</span></div>
      <label class="adv" style="display:block;margin-top:5px;font-size:12px"><input type="checkbox" id="strictBlack"> <b>True black only</b> — judge by the ink color, not the on-screen reading <span style="opacity:.7">(drops gray that reads as black; may drop a few faint walls — pick those back)</span></label>
      <label style="display:block;margin-top:5px;font-size:12px;opacity:.85"><input type="checkbox" id="darkMap"> Show darkness map <span style="opacity:.7">(green = will trace · red = dark but under cutoff, drag Darkness cutoff down to grab · blue = light/background)</span></label>
      <div class="row adv" style="margin-top:7px"><button class="btn go" id="traceAllDark" style="width:100%;background:#0c2a3a;border-color:#2b7aa0;color:#bfe6ff;font-weight:600">Trace all dark lines → duct</button></div>
@@ -1144,8 +1144,8 @@ function classify(){
     }   // color and/or shade pickers: tapped colors/shades become duct
     if(s.lock){ s.cls=s.lock; continue; }
     if(__ductRuns){ var __dDiag=(s._u&&s._u.o==='D'&&s.paired); s.cls = ((s.ductRun||__dDiag) ? (__aiFirst?'maybe':'duct') : 'not'); continue; }   // precision geometry mode (+ paired diagonal runs the H/V detector can't see)
-    if(matchSample && ductRef){ s.cls=(darkOf(s) >= __blkT)?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY color takeoff: every black line (slider controls the cutoff)
-    if(__black){ s.cls=(darkOf(s) >= __blkT)?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY black mode: every black line (slider controls the cutoff)
+    if(matchSample && ductRef){ s.cls=((darkOf(s) >= __blkT) && (s.len==null || s.len >= __blkMin))?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY color takeoff: dark AND long enough (Min length drops short grid/cross lines)
+    if(__black){ s.cls=((darkOf(s) >= __blkT) && (s.len==null || s.len >= __blkMin))?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY black mode: dark AND long enough (Min length drops short grid/cross lines)
     if(pickHeavy){ s.cls=((s.lw||0) >= __lwT)?(__aiFirst?'maybe':'duct'):'not'; continue; }   // HEAVY mode: thicker-than-cutoff lines are duct (line-weight slider controls it)
     if(s.labelBox){ s.cls='not'; continue; }   // dimension-text box border, not duct (auto mode only)
     if(s.curved && s.ulen<26){ s.cls='not'; continue; }  // round symbols (diffusers, registers, T/H sensors) are never duct
@@ -1781,7 +1781,9 @@ function drawOverlay(){
   const g=$('lineLayer'); if(!g) return;
   const show={duct:$('showDuct').checked,maybe:$('showMaybe').checked,not:$('showNot').checked};
   const runs=(document.getElementById('runsView')||{}).checked;
-  const cvEl=document.getElementById('pdfCanvas'); if(cvEl) cvEl.style.opacity = runs?'0.15':'1';
+  const blackOnly=(document.getElementById('blackOnly')||{}).checked;
+  const emph=runs||blackOnly;                                   // both fade the print + spotlight the duct
+  const cvEl=document.getElementById('pdfCanvas'); if(cvEl) cvEl.style.opacity = emph?'0.15':'1';
   const __darkMap=(document.getElementById('darkMap')||{}).checked;
   // bucket every segment into a few path groups by stroke/width/opacity -> a handful of <path> nodes instead of ~80k <line> nodes
   var groups={}, order=[];
@@ -1794,7 +1796,7 @@ function drawOverlay(){
     }
     if(!show[s.cls]) continue;
     if(s.cls!=='duct' && s.layer && layers[s.layer] && !layers[s.layer].visible) continue;
-    if(runs){
+    if(emph){
       if(s.cls==='duct'){ var conf=s.paired && s.ulen>=55 && (s.ori==='H'||s.ori==='V'||s.ori==='D'); if(conf) add('rcd','#16c66a',4.5,1,s); else add('rud','#16c66a',2.5,0.9,s); }
       else if(s.cls==='maybe'){ add('rm',HEX.maybe,1.5,0.3,s); }
       else { add('rn',HEX[s.cls]||'#ff4d4d',1.5,0.22,s); }
