@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.45</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.52</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2131,31 +2131,33 @@ function refreshSel(){
     if(A.label&&!B.label) B.label=A.label; else if(B.label&&!A.label) A.label=B.label;
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Connected with a 90\u00b0 elbow'+stepMsg+' \u2014 both now one color.'); return true;
   };
-  window.__connectTap=function(idA, endA, idB, endB){    // tap the branch run into the side of the trunk run
+  window.__connectTap=function(idA, endA, idB, endB, shopTap){    // tap the branch run into the side of the trunk run
     var A=findRun(idA), B=findRun(idB); if(!A||!B||A===B) return false;
     var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
     function endPt(run,end){ var pl=window.__runPoly(run),n=pl.length; return end==='start'?pl[0]:pl[n-1]; }
     function nrm(d){ var l=Math.hypot(d[0],d[1])||1; return [d[0]/l,d[1]/l]; }
     function segDist(p,a,b){ var vx=b[0]-a[0],vy=b[1]-a[1],wx=p[0]-a[0],wy=p[1]-a[1],c1=vx*wx+vy*wy,c2=vx*vx+vy*vy,t=c2?Math.max(0,Math.min(1,c1/c2)):0,px=a[0]+vx*t,py=a[1]+vy*t; return Math.hypot(p[0]-px,p[1]-py); }
     function distPtRun(pt,run){ var pl=window.__runPoly(run),best=1e18,i; for(i=0;i<pl.length-1;i++) best=Math.min(best,segDist(pt,pl[i],pl[i+1])); return best; }
-    // decide which is the branch (its clicked end lands on the other's body) and which is the trunk
-    var eaP=endPt(A,endA), ebP=endPt(B,endB);
+    // pick branch vs trunk: for each run, take its end NEAREST the other run; the run whose nearest-end is
+    // closest to the other's body is the branch (it dead-ends into the trunk). Uses nearest ends, not clicked ends.
+    function nearestEnd(run,other){ var s=endPt(run,'start'), e=endPt(run,'finish'); var ds=distPtRun(s,other), de=distPtRun(e,other); return de<ds?{end:'finish',d:de}:{end:'start',d:ds}; }
+    var aN=nearestEnd(A,B), bN=nearestEnd(B,A);
     var branch,trunk,brEnd;
-    if(distPtRun(ebP,A) <= distPtRun(eaP,B)){ branch=B; brEnd=endB; trunk=A; } else { branch=A; brEnd=endA; trunk=B; }
+    if(bN.d<=aN.d){ branch=B; brEnd=bN.end; trunk=A; } else { branch=A; brEnd=aN.end; trunk=B; }
     window.__pushRunUndo&&window.__pushRunUndo();
-    // project branch end (screen frame) onto each straight piece of the trunk -> nearest piece + alongIn
-    var bp=endPt(branch,brEnd), bpS=window.__n2s(bp[0],bp[1]); if(!bpS){ return false; }
+    // project the branch's nearest end (screen frame) onto each straight piece of the trunk -> nearest piece + alongIn
+    var bp=endPt(branch,brEnd), bpS=window.__n2s(bp[0],bp[1]); if(!bpS){ if(typeof setStatus==='function')setStatus('Tap: couldn\u2019t map the runs on screen \u2014 try again.'); return false; }
     var bestI=-1,bestT=0,bestD=1e18,bestP=null;
     for(var i=0;i<trunk.pieces.length;i++){ if(trunk.pieces[i].kind!=='straight') continue;
-      var q; try{ q=piecePolyPts(trunk,i); }catch(_){ continue; } if(!q) continue;
+      var q; try{ q=piecePolyPts(trunk,i); }catch(_){ continue; } if(!q||!q[0]) continue;
       var AA=[(q[0][0]+q[3][0])/2,(q[0][1]+q[3][1])/2], BB=[(q[1][0]+q[2][0])/2,(q[1][1]+q[2][1])/2];
       var vx=BB[0]-AA[0],vy=BB[1]-AA[1],c2=vx*vx+vy*vy,t=c2?Math.max(0,Math.min(1,((bpS[0]-AA[0])*vx+(bpS[1]-AA[1])*vy)/c2)):0;
       var px=AA[0]+vx*t,py=AA[1]+vy*t,dd=Math.hypot(bpS[0]-px,bpS[1]-py);
       if(dd<bestD){ bestD=dd; bestI=i; bestT=t; bestP=[px,py]; } }
-    if(bestI<0){ return false; }
+    if(bestI<0){ if(typeof setStatus==='function')setStatus('Tap: the trunk run has no straight length to tap into.'); return false; }
     var alongIn=Math.max(1, bestT*(trunk.pieces[bestI].lenIn||0));
     var bRound=!!(branch.pieces[0]&&branch.pieces[0].round), tRound=!!(trunk.pieces[0]&&trunk.pieces[0].round);
-    // extend the branch's clicked end to reach the trunk centerline point (direction-preserving)
+    // extend the branch's nearest end to reach the trunk centerline point (direction-preserving)
     var Ppage=window.__s2n?window.__s2n(bestP[0],bestP[1]):null;
     if(Ppage){ var pl2=window.__runPoly(branch), n2=pl2.length;
       var out = brEnd==='start' ? [pl2[0][0]-(pl2[1]||pl2[0])[0], pl2[0][1]-(pl2[1]||pl2[0])[1]] : [pl2[n2-1][0]-(pl2[n2-2]||pl2[0])[0], pl2[n2-1][1]-(pl2[n2-2]||pl2[0])[1]];
@@ -2165,9 +2167,36 @@ function refreshSel(){
         for(k=0;k<branch.pieces.length;k++){ if(branch.pieces[k].kind==='straight'){ branch.pieces[k].lenIn=Math.max(1,branch.pieces[k].lenIn+dIn); break; } } }
       else { for(k=branch.pieces.length-1;k>=0;k--){ if(branch.pieces[k].kind==='straight'){ branch.pieces[k].lenIn=Math.max(1,branch.pieces[k].lenIn+dIn); break; } } } }
     // insert a tap into the trunk at that point (no new branch run - the branch already exists)
-    if(window.__doInsert) window.__doInsert(trunk.id, bestI, alongIn, {type:'tap', branch:false, branchW:branch.widthIn, branchRound:bRound, mainRound:tRound});
+    if(window.__doInsert) window.__doInsert(trunk.id, bestI, alongIn, {type:'tap', branch:false, branchW:branch.widthIn, branchRound:bRound, mainRound:tRound, shopTap:!!shopTap});
     var shared=trunk.color||branch.color||'#5b8def'; trunk.color=shared; branch.color=shared;
-    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Tapped the branch into the trunk \u2014 both now one color.'); return true;
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus((shopTap?'Shop-tapped':'Tapped')+' the branch into the trunk \u2014 both now one color.'); return true;
+  };
+  window.__runSideAt=function(runId,pieceIdx,alongIn,sx,sy){   // +1/-1: which side of the run centerline a screen point is on (page-space)
+    var run=findRun(runId); if(!run) return 1; var fr=runFrames(run), f=fr[pieceIdx]; if(!f) return 1;
+    var cx=f.x+f.ux*inToPt(alongIn||0), cy=f.y+f.uy*inToPt(alongIn||0);
+    var pp=window.__s2n?window.__s2n(sx,sy):null; if(!pp) return 1;
+    return ((pp[0]-cx)*f.nx+(pp[1]-cy)*f.ny)>=0 ? 1 : -1;
+  };
+  window.__connectReducer=function(idA, endA, idB, endB){    // join two in-line runs of different size with a reducer/transition/sq2round (no corner)
+    var A=findRun(idA), B=findRun(idB); if(!A||!B||A===B) return false;
+    var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
+    window.__pushRunUndo&&window.__pushRunUndo();
+    function endInfo(run,end){ var pl=window.__runPoly(run),n=pl.length; return end==='start'?{p:pl[0],out:[pl[0][0]-(pl[1]||pl[0])[0],pl[0][1]-(pl[1]||pl[0])[1]]}:{p:pl[n-1],out:[pl[n-1][0]-(pl[n-2]||pl[0])[0],pl[n-1][1]-(pl[n-2]||pl[0])[1]]}; }
+    function nrm(d){ var l=Math.hypot(d[0],d[1])||1; return [d[0]/l,d[1]/l]; }
+    var ea=endInfo(A,endA), eb=endInfo(B,endB), a=nrm(ea.out);
+    // slide A's clicked end along its own axis to reach B's clicked end (direction-preserving)
+    var t=(eb.p[0]-ea.p[0])*a[0]+(eb.p[1]-ea.p[1])*a[1], dIn=t/ppi, k;
+    if(endA==='start'){ A.start=[A.start[0]+a[0]*t, A.start[1]+a[1]*t]; for(k=0;k<A.pieces.length;k++){ if(A.pieces[k].kind==='straight'){ A.pieces[k].lenIn=Math.max(1,A.pieces[k].lenIn+dIn); break; } } }
+    else { for(k=A.pieces.length-1;k>=0;k--){ if(A.pieces[k].kind==='straight'){ A.pieces[k].lenIn=Math.max(1,A.pieces[k].lenIn+dIn); break; } } }
+    var aR=!!(A.pieces[0]&&A.pieces[0].round), bR=!!(B.pieces[0]&&B.pieces[0].round);
+    var bW=B.widthIn, bD=(B.pieces[0]&&B.pieces[0].depthIn)!=null?B.pieces[0].depthIn:bW;
+    var cid,name; if(aR!==bR){ cid='s2r'; name='Sq \u2192 Round'; } else if(bR){ cid='reducer'; name='Reducer'; } else { cid='tr'; name='Transition'; }
+    var bSize=bR?('\u00f8'+bW):(bW+'\u00d7'+bD);
+    var step={kind:'fitting',cid:cid,camduct:name,round:bR,lenIn:6,widthIn:bW,depthIn:(bR?null:bD),size:bSize,_sizeStep:true,_newSide:'end',_newW:bW,_newD:(bR?bW:bD),_newR:bR,_newS:bSize,outW:bW,outD:(bR?bW:bD)};
+    if(endA==='start') A.pieces.unshift(step); else A.pieces.push(step);
+    try{ if(typeof applyReducerDownstream==='function') applyReducerDownstream(A); }catch(_){}
+    var shared=A.color||B.color||'#5b8def'; A.color=shared; B.color=shared;
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Connected with a '+name+' \u2014 both now one color.'); return true;
   };
   window.__ductDirAt=function(nx,ny,radIn){    // dominant raw-PDF duct-line directions near a point (strongest first)
     if(typeof segments==='undefined'||!segments||nx==null) return [];
@@ -2189,7 +2218,30 @@ function refreshSel(){
         var fr=runFrames(run), f=fr[i]; if(!f) continue;                 // fresh frames (accounts for earlier fixes)
         var inc=[f.ux,f.uy], dirs=window.__ductDirAt(f.x,f.y,22), out=null, bestPerp=0.55;
         dirs.forEach(function(dd){ var dot=Math.abs(inc[0]*dd.dir[0]+inc[1]*dd.dir[1]); if(dot<bestPerp){ bestPerp=dot; out=dd.dir; } });
-        if(out){ var cr=inc[0]*out[1]-inc[1]*out[0]; p.turn=(cr>=0?1:-1)*(p.cid==='e45'?Math.PI/4:Math.PI/2); p._elbow=true; if(!p.camduct)p.camduct=(p.cid==='e45'?'45 Elbow':'90 Elbow'); fixed++; }
+        if(out){
+          var mag=(p.cid==='e45'?Math.PI/4:Math.PI/2);
+          function headAfter(sign){ var a=sign*mag,c=Math.cos(a),s=Math.sin(a); return [inc[0]*c-inc[1]*s, inc[0]*s+inc[1]*c]; }
+          // PRIMARY (train-track): turn toward a nearby OTHER run of matching size whose leg continues that way.
+          function neighborToward(h){ var best=0, R=window.__runs2d||[], rad=inToPt(34);
+            for(var j=0;j<R.length;j++){ var o=R[j]; if(o===run) continue;
+              var wd=Math.abs((o.widthIn||0)-(run.widthIn||0)); if(wd>2.5) continue;                 // must match this run's size
+              var oRound=!!(o.pieces[0]&&o.pieces[0].round), rRound=!!(run.pieces[0]&&run.pieces[0].round); if(oRound!==rRound) continue;
+              var eo=runEnd(o), pts=[[o.start[0],o.start[1],o.dir[0],o.dir[1]],[eo.x,eo.y,eo.ux,eo.uy]];
+              for(var k=0;k<pts.length;k++){ var q=pts[k], d=Math.hypot(q[0]-f.x,q[1]-f.y); if(d>rad) continue;   // its end sits at this corner
+                var al=Math.abs(q[2]*h[0]+q[3]*h[1]); if(al<0.7) continue;                                        // and it runs along this leg
+                var sc=al + (1-wd/2.5)*0.4 + Math.max(0,(rad-d)/rad)*0.4; if(sc>best) best=sc; } }
+            return best; }
+          // FALLBACK: which side has more raw green trace running along the new leg.
+          function ductWeightToward(h){ var step=inToPt(14), px=f.x+h[0]*step, py=f.y+h[1]*step, near=window.__ductDirAt(px,py,14), w=0;
+            near.forEach(function(dd){ var al=Math.abs(h[0]*dd.dir[0]+h[1]*dd.dir[1]); if(al>0.7) w+=dd.w*al; }); return w; }
+          var hP=headAfter(1), hN=headAfter(-1);
+          var nP=neighborToward(hP), nN=neighborToward(hN), sign;
+          if(nP>0 || nN>0){ sign=(nP>=nN)?1:-1; }                         // a matching-size run continues one way -> go there
+          else { var wP=ductWeightToward(hP), wN=ductWeightToward(hN);
+            if(wP>0 || wN>0) sign=(wP>=wN)?1:-1;
+            else { var cr=inc[0]*out[1]-inc[1]*out[0]; sign=(cr>=0?1:-1); } }  // last resort: geometric guess
+          p.turn=sign*mag; p._elbow=true; if(!p.camduct)p.camduct=(p.cid==='e45'?'45 Elbow':'90 Elbow'); fixed++;
+        }
       }
     });
     if(fixed){ try{renderItems();}catch(_){} try{renderPanel();}catch(_){} }
@@ -2220,8 +2272,14 @@ function refreshSel(){
     if(t==='tap'){ var bW=spec.branchW||Math.max(6,Math.round(w/2)), bSide=spec.branchSide||1, bRound=!!spec.branchRound, bD=(spec.branchD!=null?spec.branchD:(bRound?bW:null)), bSize=bRound?('\u00f8'+bW):(bW+'\u00d7'+(bD!=null?bD:'?'));
       var tap={kind:'fitting',cid:'stap',camduct:(spec.shopTap?'Shop Tap':'Tap'),round:false,lenIn:0,widthIn:w,depthIn:dep,size:sz,_tap:true,shopTap:!!spec.shopTap,branchSide:bSide,branchW:bW,branchLenIn:10,throatIn:10,mainRound:(spec.mainRound!=null?!!spec.mainRound:rr),branchRound:bRound};
       pieces.splice(pieceIdx,1,before,tap,after);
-      if(spec.branch){ var fr=runFrames(run), f=fr[pieceIdx+1]; if(f){ var hwB=inToPt(w/2);
-        window.__runs2d=window.__runs2d||[]; window.__runs2d.push({ id:'br'+Date.now().toString(36), start:[f.x+f.nx*bSide*hwB, f.y+f.ny*bSide*hwB], dir:[f.nx*bSide, f.ny*bSide], widthIn:bW, pieces:[{kind:'straight',lenIn:(spec.branchLenIn||24),widthIn:bW,depthIn:bD,size:bSize,cid:bRound?'spiral':'st',camduct:bRound?'Spiral':'Straight Duct',round:bRound}], _branch:true }); } }
+      if(spec.branch){ var fr=runFrames(run), f=fr[pieceIdx+1]; if(f){
+        var brId='br'+Date.now().toString(36);
+        tap.branchId=brId;                                                   // link tap -> its branch
+        window.__runs2d=window.__runs2d||[];
+        window.__runs2d.push({ id:brId, start:[f.x, f.y],                    // START AT THE TAP POINT on the trunk so it's truly attached
+          dir:[f.nx*bSide, f.ny*bSide], widthIn:bW, color:run.color,
+          pieces:[{kind:'straight',lenIn:(spec.branchLenIn||24),widthIn:bW,depthIn:bD,size:bSize,cid:bRound?'spiral':'st',camduct:bRound?'Spiral':'Straight Duct',round:bRound}],
+          _branch:true, _tapRunId:run.id }); } }
       renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Added a tap'+(spec.branch?' + '+bSize+' branch \u2014 drag its end to length':'')+'.'); return true; }
     var fit;
     if(t==='elbow90'||t==='elbow45'){ var ang=(t==='elbow45'?Math.PI/4:Math.PI/2)*((spec.dir==='L')?1:-1);
@@ -4704,19 +4762,23 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
         mnu.innerHTML='<div style="font-weight:800;margin-bottom:7px;color:#5b8def">Connect how?</div>'
           +'<button id="cpElbow" style="width:100%;margin-bottom:5px;background:#eef4ff;border:1px solid #a9c4ff;color:#3562c4;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">↰ Elbow (corner)</button>'
           +'<button id="cpTap" style="width:100%;margin-bottom:5px;background:#f3effc;border:1px solid #cdbdf0;color:#5a3fa0;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">⌐ Tap (into side)</button>'
+          +'<button id="cpShopTap" style="width:100%;margin-bottom:5px;background:#f3effc;border:1px solid #cdbdf0;color:#5a3fa0;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">⌐ Shop tap (angled collar)</button>'
+          +'<button id="cpReducer" style="width:100%;margin-bottom:5px;background:#eafaf0;border:1px solid #a9e0c0;color:#1b7a45;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">⇥ Reducer / transition (in-line)</button>'
           +'<button id="cpCancel" style="width:100%;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:6px;cursor:pointer">Cancel</button>';
         document.body.appendChild(mnu);
         ['mousedown','mouseup','wheel'].forEach(function(t){ mnu.addEventListener(t,function(ev){ev.stopPropagation();},true); });
-        function done(fn,label){ try{ var ok=fn?fn(cA.runId,cA.end,cB.runId,cB.end):null; if(ok===false) status('Couldn\u2019t '+label+' those two \u2014 try the other ends.'); }catch(err){ status('Connect error: '+((err&&err.message)||err)); } try{window.__renderPanel&&window.__renderPanel();}catch(_){} try{mnu.remove();}catch(_){} }
+        function done(fn,label,extra){ try{ var ok=fn?fn(cA.runId,cA.end,cB.runId,cB.end,extra):null; if(ok===false) status('Couldn\u2019t '+label+' those two \u2014 try the other ends.'); }catch(err){ status('Connect error: '+((err&&err.message)||err)); } try{window.__renderPanel&&window.__renderPanel();}catch(_){} try{mnu.remove();}catch(_){} }
         mnu.querySelector('#cpElbow').onclick=function(){ done(window.__connectElbow,'elbow'); };
-        mnu.querySelector('#cpTap').onclick=function(){ done(window.__connectTap,'tap'); };
+        mnu.querySelector('#cpTap').onclick=function(){ done(window.__connectTap,'tap',false); };
+        mnu.querySelector('#cpShopTap').onclick=function(){ done(window.__connectTap,'tap',true); };
+        mnu.querySelector('#cpReducer').onclick=function(){ done(window.__connectReducer,'reduce'); };
         mnu.querySelector('#cpCancel').onclick=function(){ try{mnu.remove();}catch(_){} status('Connect cancelled.'); };
       }
       return; }
     if(m==='insert'){ var s0=toSvg(e); if(!s0) return;
       var fs=(window.__sizeStepHit)?window.__sizeStepHit(s0[0],s0[1]):null;
       if(fs){ e.stopPropagation(); e.preventDefault(); if(window.__flipSizeStep) window.__flipSizeStep(fs.runId, fs.pieceIdx); try{window.__renderPanel&&window.__renderPanel();}catch(_){} return; }   // tap an existing reducer -> flip its direction
-      var tgt=(window.__pieceHit)?window.__pieceHit(s0[0],s0[1]):null; if(!tgt) return; e.stopPropagation(); e.preventDefault(); drag={mode:'wheel', target:tgt, cx:e.clientX, cy:e.clientY}; showWheel(e.clientX,e.clientY); status('Drag to a fitting, then release. (Tap a reducer to flip it.)'); return; }
+      var tgt=(window.__pieceHit)?window.__pieceHit(s0[0],s0[1]):null; if(!tgt) return; e.stopPropagation(); e.preventDefault(); drag={mode:'wheel', target:tgt, cx:e.clientX, cy:e.clientY, sx:s0[0], sy:s0[1]}; showWheel(e.clientX,e.clientY); status('Drag to a fitting, then release. (Tap a reducer to flip it.)'); return; }
     if(m!=='dragsize'&&m!=='draglen'&&m!=='move') return;   // other modes -> let the piece handler (pcHit) run
     var sp=toSvg(e); if(!sp) return; var r=hitRun(sp); if(!r){ return; }
     e.stopPropagation(); e.preventDefault();
@@ -4774,7 +4836,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
         else if(it.k==='reducer'){ transitionDialog(tg.runId,tg.pieceIdx,tg.alongIn,'',cxr,cyr,'rect'); }
         else if(it.k==='elbow'){ elbowDialog(tg.runId,tg.pieceIdx,tg.alongIn,cxr,cyr); }
         else if(it.k==='offset'){ var od2=prompt('Offset distance (in):','12'); if(od2!=null) window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:'offset',offsetIn:(parseFloat(od2)||12)}); }
-        else if(it.k==='tap'){ tapDialog(tg.runId,tg.pieceIdx,tg.alongIn,cxr,cyr); }
+        else if(it.k==='tap'){ var tapSide=window.__runSideAt?window.__runSideAt(tg.runId,tg.pieceIdx,tg.alongIn,drag.sx,drag.sy):1; tapDialog(tg.runId,tg.pieceIdx,tg.alongIn,cxr,cyr,tapSide); }
         else { window.__doInsert(tg.runId,tg.pieceIdx,tg.alongIn,{type:it.k}); }
         try{ window.__renderPanel&&window.__renderPanel(); }catch(_){}
       }
@@ -4841,22 +4903,21 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     menuEl.querySelector('#eGo').onclick=function(){ if(window.__doInsert) window.__doInsert(runId,pieceIdx,alongIn,{type:'elbow90',dir:dirLR,round:(shape==='round')}); closeMenu(); };
   }
   window.__elbowDialog=elbowDialog;
-  function tapDialog(runId, pieceIdx, alongIn, cx, cy){
+  function tapDialog(runId, pieceIdx, alongIn, cx, cy, side){
     closeMenu();
     var run=(window.__runs2d||[]).filter(function(r){return r.id===runId;})[0];
     var mainRound = run && run.pieces && run.pieces[pieceIdx] ? !!run.pieces[pieceIdx].round : false;
+    var bSide = (side===-1?-1:1);
     menuEl=document.createElement('div');
-    menuEl.style.cssText='position:fixed;z-index:99999;left:'+Math.max(6,Math.min(cx||220, window.innerWidth-244))+'px;top:'+Math.max(6,Math.min(cy||160, window.innerHeight-300))+'px;width:230px;background:#fff;border:1px solid #dde2e9;border-radius:11px;padding:12px;box-shadow:0 10px 30px rgba(30,40,60,.20);font:12px -apple-system,system-ui,sans-serif;color:#2b3441';
+    menuEl.style.cssText='position:fixed;z-index:99999;left:'+Math.max(6,Math.min(cx||220, window.innerWidth-244))+'px;top:'+Math.max(6,Math.min(cy||160, window.innerHeight-260))+'px;width:230px;background:#fff;border:1px solid #dde2e9;border-radius:11px;padding:12px;box-shadow:0 10px 30px rgba(30,40,60,.20);font:12px -apple-system,system-ui,sans-serif;color:#2b3441';
     var shape='round';
     function seg(cls,val,label){ return '<button class="'+cls+'" data-v="'+val+'" style="flex:1;padding:6px;border-radius:7px;border:2px solid #dde2e9;background:#f5f7fa;color:#2b3441;cursor:pointer;font-weight:600">'+label+'</button>'; }
     menuEl.innerHTML='<div style="font-weight:800;margin-bottom:2px;color:#5b8def">Tap off the duct</div>'+
       '<div style="font-size:10px;color:#8a93a1;margin-bottom:8px">Tapping off a '+(mainRound?'round':'rectangular')+' main</div>'+
       '<div style="font-size:10px;color:#8a93a1;margin-bottom:3px">Branch shape</div><div style="display:flex;gap:5px;margin-bottom:8px">'+seg('pShape','round','Round')+seg('pShape','rect','Rectangular')+'</div>'+
       '<div style="font-size:10px;color:#8a93a1;margin-bottom:3px" id="pSizeLbl">Branch \u00f8 (in)</div>'+
-      '<input id="pSize" placeholder="8" style="width:100%;box-sizing:border-box;padding:7px;border:1px solid #dde2e9;border-radius:7px;background:#f8fafc;color:#232b36;margin-bottom:8px">'+
-      '<div style="font-size:10px;color:#8a93a1;margin-bottom:3px">Branch length (in)</div>'+
-      '<input id="pLen" value="24" style="width:100%;box-sizing:border-box;padding:7px;border:1px solid #dde2e9;border-radius:7px;background:#f8fafc;color:#232b36;margin-bottom:10px">'+
-      '<button id="pGo" style="width:100%;background:#5b8def;border:none;color:#fff;font-weight:700;border-radius:8px;padding:8px;cursor:pointer;margin-bottom:5px">Insert tap + branch</button>'+
+      '<input id="pSize" placeholder="8" style="width:100%;box-sizing:border-box;padding:7px;border:1px solid #dde2e9;border-radius:7px;background:#f8fafc;color:#232b36;margin-bottom:10px">'+
+      '<button id="pGo" style="width:100%;background:#5b8def;border:none;color:#fff;font-weight:700;border-radius:8px;padding:8px;cursor:pointer;margin-bottom:5px">Add tap + branch, then drag length</button>'+
       '<button id="pCancel" style="width:100%;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:6px;cursor:pointer">Cancel</button>';
     document.body.appendChild(menuEl);
     ['mousedown','mouseup','wheel'].forEach(function(t){ menuEl.addEventListener(t,function(e){e.stopPropagation();},true); });
@@ -4866,9 +4927,10 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     paint();
     menuEl.querySelector('#pCancel').onclick=closeMenu;
     menuEl.querySelector('#pGo').onclick=function(){ var el=menuEl.querySelector('#pSize'), sz=parseSize(el.value, shape==='round'); if(!sz){ el.style.borderColor='#e55'; el.focus(); return; }
-      var len=parseFloat(menuEl.querySelector('#pLen').value)||24;
-      if(window.__doInsert) window.__doInsert(runId, pieceIdx, alongIn, {type:'tap', branch:true, branchW:sz.w, branchD:(sz.round?sz.w:sz.h), branchRound:!!sz.round, branchLenIn:len, mainRound:mainRound});
-      closeMenu(); status('Added tap + '+(sz.round?('\u00f8'+sz.w):(sz.w+'\u00d7'+sz.h))+' branch \u2014 drag its end to length.'); };
+      if(window.__doInsert) window.__doInsert(runId, pieceIdx, alongIn, {type:'tap', branch:true, branchW:sz.w, branchD:(sz.round?sz.w:sz.h), branchRound:!!sz.round, branchLenIn:12, branchSide:bSide, mainRound:mainRound});
+      closeMenu();
+      window.__editMode='draglen'; try{ if(typeof refl==='function') refl(); }catch(_){}     // hand straight into drag-for-length
+      status('Tap placed with a stub \u2014 now drag the branch\u2019s open end to set its length.'); };
     menuEl.querySelector('#pSize').focus();
   }
   window.__tapDialog=tapDialog;
@@ -4973,7 +5035,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     col.style.cssText='position:fixed;top:56px;left:292px;z-index:9997;background:#fff;border:1px solid #dde2e9;color:#3a4656;border-radius:0 9px 9px 0;padding:8px 7px;cursor:pointer;font-weight:800;font-size:14px;box-shadow:2px 2px 10px rgba(30,40,60,.10);transition:left .12s';
     var hidden=false;
     col.onclick=function(){ hidden=!hidden;
-      app.style.gridTemplateColumns=hidden?'0 1fr':'300px 1fr';
+      app.style.gridTemplateColumns=hidden?'1fr':'300px 1fr';   // single column when collapsed so MAIN fills (not the 0-width col)
       aside.style.display=hidden?'none':'';
       col.textContent=hidden?'\u203a':'\u2039';
       col.style.left=hidden?'0px':'292px';
