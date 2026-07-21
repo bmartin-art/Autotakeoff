@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.37</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.39</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2084,6 +2084,7 @@ function refreshSel(){
   };
   window.__connectElbow=function(idA, endA, idB, endB, round){    // join two runs at the corner where their axes meet
     var A=findRun(idA), B=findRun(idB); if(!A||!B||A===B) return false;
+    var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
     window.__pushRunUndo&&window.__pushRunUndo();
     function endInfo(run,end){ var pl=window.__runPoly(run), n=pl.length;
       if(end==='start') return {p:pl[0], out:[pl[0][0]-(pl[1]||pl[0])[0], pl[0][1]-(pl[1]||pl[0])[1]]};
@@ -4623,7 +4624,13 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
       var pl=window.__runPoly(rr), n=pl.length, sS=n2s(pl[0][0],pl[0][1]), sE=n2s(pl[n-1][0],pl[n-1][1]);
       var end=(Math.hypot(s1[0]-sS[0],s1[1]-sS[1])<Math.hypot(s1[0]-sE[0],s1[1]-sE[1]))?'start':'finish';
       if(!window.__connA){ window.__connA={runId:rr.id,end:end}; status('First duct picked \u2014 now click the second duct to connect.'); }
-      else { if(rr.id!==window.__connA.runId && window.__connectElbow) window.__connectElbow(window.__connA.runId, window.__connA.end, rr.id, end, false); window.__connA=null; try{window.__renderPanel&&window.__renderPanel();}catch(_){} }
+      else { var cA=window.__connA;
+        if(rr.id===cA.runId){ status('That\u2019s the same run \u2014 click the other duct.'); return; }   // keep waiting, don't jam
+        window.__connA=null;                                                                              // reset BEFORE the call so we never get stuck
+        try{ var ok=window.__connectElbow?window.__connectElbow(cA.runId, cA.end, rr.id, end, false):null;
+             if(ok===false) status('Couldn\u2019t connect those \u2014 they look parallel or the ends face away. Try the ends nearest the corner.'); }
+        catch(err){ status('Connect error: '+((err&&err.message)||err)); }
+        try{window.__renderPanel&&window.__renderPanel();}catch(_){} }
       return; }
     if(m==='insert'){ var s0=toSvg(e); if(!s0) return;
       var fs=(window.__sizeStepHit)?window.__sizeStepHit(s0[0],s0[1]):null;
@@ -4872,6 +4879,45 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   }
   launch.onclick=function(){ launch.style.display='none'; pan.style.display='block'; goTo(0); };
   ['mousedown','mouseup','wheel','click'].forEach(function(t){ pan.addEventListener(t,function(e){ e.stopPropagation(); },true); launch.addEventListener(t,function(e){ e.stopPropagation(); },true); });
+})();
+</script>
+<script>
+(function(){
+  function init(){
+    var app=document.querySelector('.app'), aside=document.querySelector('aside');
+    if(!app||!aside){ return setTimeout(init,300); }
+    // ---------- LEFT SIDEBAR COLLAPSE ----------
+    var col=document.createElement('button'); col.id='asideToggle'; col.title='Hide / show the left panel';
+    col.textContent='\u2039';
+    col.style.cssText='position:fixed;top:56px;left:292px;z-index:9997;background:#fff;border:1px solid #dde2e9;color:#3a4656;border-radius:0 9px 9px 0;padding:8px 7px;cursor:pointer;font-weight:800;font-size:14px;box-shadow:2px 2px 10px rgba(30,40,60,.10);transition:left .12s';
+    var hidden=false;
+    col.onclick=function(){ hidden=!hidden;
+      app.style.gridTemplateColumns=hidden?'0 1fr':'300px 1fr';
+      aside.style.display=hidden?'none':'';
+      col.textContent=hidden?'\u203a':'\u2039';
+      col.style.left=hidden?'0px':'292px';
+      try{ if(typeof drawOverlay==='function') drawOverlay(); }catch(_){}
+    };
+    document.body.appendChild(col);
+
+    // ---------- MOVE SELECTED-RUN PANEL TO THE RIGHT ----------
+    var ipb=document.getElementById('itemPanelBody');
+    if(ipb){
+      var rp=document.createElement('div'); rp.id='dtRunPanel';
+      rp.style.cssText='position:fixed;top:118px;right:216px;z-index:9996;width:252px;max-height:74vh;overflow-y:auto;background:#0e1722;border:1px solid #26405c;border-radius:11px;padding:10px;box-shadow:-3px 3px 18px rgba(30,40,60,.22);color:#fff;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;display:none';
+      var hd=document.createElement('div'); hd.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px';
+      hd.innerHTML='<span style="font-weight:700;font-size:12px;color:#bfe6ff">Selected run</span>';
+      var cl=document.createElement('button'); cl.textContent='\u00d7'; cl.title='close'; cl.style.cssText='background:none;border:none;color:#8aa6bf;cursor:pointer;font-size:17px;line-height:1';
+      cl.onclick=function(){ rp.style.display='none'; };
+      hd.appendChild(cl); rp.appendChild(hd);
+      rp.appendChild(ipb);                 // relocate the run detail body onto the right dock
+      document.body.appendChild(rp);
+      // show on the right whenever a run is selected; hide when nothing is selected
+      setInterval(function(){ try{ rp.style.display = window.__selRunId ? '' : 'none'; }catch(_){} }, 400);
+      window.__showRunPanel=function(){ rp.style.display=''; };
+    }
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
 })();
 </script>
 </body>
