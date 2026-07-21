@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.63</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.65</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -313,6 +313,7 @@
          <button class="btn go" id="itemsFromRunsBtn" style="flex:2;background:#0c2a1a;border-color:#2b9e5c;color:#bfffd2;font-weight:700">Build takeoff (joints)</button>
          <button class="btn adv" id="itemsClearBtn" style="flex:1;background:#3a2030;border-color:#7a3b4b;color:#fbb">Clear</button>
        </div>
+       <button class="btn" id="startCleanBtn" style="margin-top:6px;font-weight:700;background:#fff4e6;border-color:#ffd9a8;color:#b5641a">Start clean — clear all green</button>
        <button class="btn go" id="trackWalkBtn" style="margin-top:6px;font-weight:700">Build (track-walk · beta)</button>
        <button class="btn" id="walkBetaBtn" style="margin-top:6px;font-weight:700;background:#eef4ff;border-color:#a9c4ff;color:#3562c4">Build (trace-walk · beta 2)</button>
        <button class="btn go" id="aiAssignTest" style="margin-top:6px;font-weight:700">AI: assign tags → ducts (test)</button>
@@ -825,6 +826,17 @@ function snapLocks(){ var m={}; segments.forEach(function(s,i){ if(s.lock) m[i]=
 function pushUndo(){ undoStack.push(snapLocks()); if(undoStack.length>50) undoStack.shift(); }
 function undo(){ if(!undoStack.length){ setStatus('Nothing to undo.'); return; } var m=undoStack.pop(); segments.forEach(function(s,i){ s.lock=m[i]||null; s._auto=false; }); classify(); drawOverlay(); setStatus('Undid last change ('+undoStack.length+' more).'); }
 function forgetThisPrint(){ printId=curPrintId(); if(LEARN.prints[printId]){ delete LEARN.prints[printId]; persistLearn(); recomputeFeat(); } segments.forEach(function(s){ s.lock=null; s._auto=false; }); if(typeof selected!=='undefined'){selected.clear(); refreshSel();} freshScan=false; classify(); drawOverlay(); setStatus('Cleared saved corrections for THIS print and reset its marks.'); }
+function startClean(){    // BLANK SLATE: wipe all green + saved trace, and stop auto-classify from repainting until the user selects
+  try{ printId=curPrintId(); if(LEARN.prints[printId]){ delete LEARN.prints[printId]; persistLearn(); recomputeFeat(); } }catch(_){}
+  segments.forEach(function(s){ s.lock=null; s._auto=false; s.cls='not'; });
+  if(typeof selected!=='undefined'){ selected.clear(); if(typeof refreshSel==='function') refreshSel(); }
+  selectionDone=false; freshScan=false; matchSample=false; ductRef=null;               // classify() now paints nothing until you pick duct
+  var bo=document.getElementById('blackOnly'); if(bo) bo.checked=false;
+  try{ window.__runs2d=[]; window.__selRunId=null; if(window.__renderItems)window.__renderItems(); if(window.__renderPanel)window.__renderPanel(); }catch(_){}
+  try{ var mv=document.getElementById('aiMissViz'); if(mv) mv.innerHTML=''; }catch(_){}
+  classify(); drawOverlay(); try{ updateCounts(); }catch(_){}
+  setStatus('Blank slate \u2014 all green cleared. Now select duct (paint it, box-select, or pick a mode), then Build.');
+}
 loadLearn();
 /* ===== AI teaching examples (few-shot in-context learning) ===== */
 var EX_KEY='brookstone_duct_examples_v1';
@@ -1782,8 +1794,8 @@ function drawOverlay(){
   const show={duct:$('showDuct').checked,maybe:$('showMaybe').checked,not:$('showNot').checked};
   const runs=(document.getElementById('runsView')||{}).checked;
   const blackOnly=(document.getElementById('blackOnly')||{}).checked;
-  const emph=runs||blackOnly;                                   // both fade the print + spotlight the duct
-  const cvEl=document.getElementById('pdfCanvas'); if(cvEl) cvEl.style.opacity = emph?'0.15':'1';
+  const emph=runs;                                              // only Runs view fades the print + spotlights duct; black-lines mode leaves the print alone
+  const cvEl=document.getElementById('pdfCanvas'); if(cvEl) cvEl.style.opacity = runs?'0.15':'1';
   const __darkMap=(document.getElementById('darkMap')||{}).checked;
   // bucket every segment into a few path groups by stroke/width/opacity -> a handful of <path> nodes instead of ~80k <line> nodes
   var groups={}, order=[];
@@ -3486,6 +3498,7 @@ function refreshSel(){
   (function(){ var b=document.getElementById('itemsFromRunsBtn'); if(b) b.onclick=runsFromPreview;
     var tw=document.getElementById('trackWalkBtn'); if(tw) tw.onclick=buildRunsTrackWalk;
     var wb=document.getElementById('walkBetaBtn'); if(wb) wb.onclick=function(){ try{ window.__walkBuildBeta(); }catch(e){ setStatus('Walk error: '+((e&&e.message)||e)); } };
+    var scb=document.getElementById('startCleanBtn'); if(scb) scb.onclick=function(){ try{ startClean(); }catch(e){ setStatus('Start clean error: '+((e&&e.message)||e)); } };
     (function(){ var dB=document.getElementById('editDelBtn'), sB=document.getElementById('editSizeBtn'), tB=document.getElementById('editTapBtn');
       function upd(){ var m=window.__editMode;
         if(dB){ dB.textContent='\uD83D\uDDD1 Click-to-delete: '+(m==='delete'?'ON':'OFF'); dB.style.background=m==='delete'?'#5a1820':'#2a1418'; }
