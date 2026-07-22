@@ -67,7 +67,9 @@
   .btn.notduct{border-color:var(--not);color:var(--not)}
   .hint{font-size:11px;color:var(--dim);line-height:1.5;margin-top:8px}
   .sec .hint{max-height:0;opacity:0;overflow:hidden;margin-top:0;transition:max-height .2s ease,opacity .2s ease,margin-top .2s ease;pointer-events:none}
-  .sec:hover .hint{max-height:260px;opacity:1;margin-top:8px}
+  aside.info-on .sec .hint{max-height:260px;opacity:1;margin-top:8px;pointer-events:auto}
+  .infoDot{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1px solid #cdd6e2;background:#fff;color:#8a93a1;font-size:11px;font-weight:700;font-style:italic;cursor:pointer;margin-left:6px;flex:none;line-height:1}
+  .infoDot.on{background:#eef4ff;border-color:#a9c4ff;color:#3562c4}
   /* ── Stage ── */
   main{position:relative;overflow:auto;background:
     repeating-conic-gradient(#e6eaf0 0% 25%,#eef1f5 0% 50%) 0/22px 22px}
@@ -135,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.67</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.77</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -156,6 +158,11 @@
  </header>
 
  <aside>
+   <div id="leftTabs" style="display:flex;gap:6px;margin-bottom:9px">
+     <button id="tabBtnSel" style="flex:1;padding:9px;border-radius:9px;border:1px solid #cdd6e2;background:#eef4ff;color:#3562c4;font-weight:800;font-size:13px;cursor:pointer">PDF / Selection <span id="infoDotSel" class="infoDot">i</span></button>
+     <button id="tabBtnEdit" style="flex:1;padding:9px;border-radius:9px;border:1px solid #dde2e9;background:#f5f7fa;color:#6b7482;font-weight:800;font-size:13px;cursor:pointer">Edit tools <span id="infoDotEdit" class="infoDot">i</span></button>
+   </div>
+   <div id="tabSelection">
    <div class="sec" style="background:#f7f9fc;border:1px solid #e2e7ee;border-radius:10px">
      <h3>Takeoff Toolbox</h3>
      <div class="row adv"><button class="btn" id="workSet">▢ Set work area</button><button class="btn" id="workClear">Clear area</button></div>
@@ -164,19 +171,19 @@
      <div class="hint" id="scaleDet">Scale: auto-detecting…</div>
      <button class="btn" id="scaleAI" style="font-size:11px;padding:3px 8px;margin-top:3px">Read scale (AI)</button>
      <label class="adv" style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="aiFirst"> <b>AI-first</b> (single-layer) — don’t pre-green; let the AI promote the duct</label>
-     <div class="row" style="margin-top:7px"><button class="btn go" id="tbPick" style="width:100%;background:#fbf4e3;border-color:#e6d3a3;color:#8a6a1a;font-weight:600">Pick a duct line (color + thickness)</button></div>
-     <div class="row" style="margin-top:7px"><button class="btn go" id="setupWiz" style="width:100%;background:#e9f1fb;border-color:#b6d2ef;color:#2f6fb0;font-weight:700">Guided setup (recommended)</button></div>
-     <div class="row" style="margin-top:6px;gap:6px"><button class="btn" id="simRemove" style="flex:1;background:#fdf0ee;border-color:#f0ccc4;color:#b0432f">Flag similar to remove</button><button class="btn" id="simPromote" style="flex:1;background:#e9f7ef;border-color:#b3e0c6;color:#218153">Find similar duct</button></div>
+     <div class="row" style="margin-top:7px"></div>
+     <div class="row" style="margin-top:7px"></div>
+     <div class="row" style="margin-top:6px;gap:6px"></div>
      <div class="hint" style="margin-top:3px">Click one object — geometry finds every match and lights up the real lines. <b>Flag similar</b>: click a non-duct thing → matches turn red → click any to keep → remove the rest. <b>Find similar duct</b>: click a missed elbow/run → matches turn green.</div>
      <div class="hint adv" id="sampleInfo">Click a piece of duct on the print - it matches every line like it.</div>
      <div class="adv" style="font-size:12px;margin-top:3px;opacity:.85">Color tol <input type="range" id="mTolD" min="0.05" max="0.7" step="0.02" value="0.30" style="width:90px;vertical-align:middle"> <span id="mTolDV">0.30</span> &nbsp; Thick tol <input type="range" id="mTolW" min="0" max="3" step="0.1" value="3" style="width:80px;vertical-align:middle"> <span id="mTolWV">off</span></div>
-     <div class="row adv" style="margin-top:7px"><button class="btn go" id="tbRunSel" style="width:100%;background:#e9f1fb;border-color:#b6d2ef;color:#2b6aa0;font-weight:600">Run line selection</button></div>
+     <div class="row adv" style="margin-top:7px"></div>
      <div class="hint adv">Set work area, scale, line-weight and color filters first, then run line selection. (AI review is separate.)</div>
-     <div class="row adv" style="margin-top:7px"><button class="btn go" id="tbAi">AI take-off / review</button><button class="btn go" id="tbConfirm" style="">✓ Confirm</button></div>
-     <div class="row" style="margin-top:6px"><button class="btn duct" id="tbLock" style="width:100%">Yellow → Green &amp; lock in for this PDF</button></div>
-     <div class="row adv" style="margin-top:7px"><button class="btn go" id="exportTrace" style="width:100%;background:#e9f7ef;border-color:#b3e0c6;color:#1f7a45;font-weight:600">Export trace overlay (PDF)</button></div>
+     <div class="row adv" style="margin-top:7px"></div>
+     <div class="row" style="margin-top:6px"></div>
+     <div class="row adv" style="margin-top:7px"></div>
      <div class="hint adv">Burns the current green tracing on top of a faded print and saves a high-res PDF — for spotting exactly which lines got missed.</div>
-     <div class="row" style="margin-top:6px"><button class="btn" id="exportLearn" style="flex:1">⬇ Export learning</button><button class="btn" id="importLearn" style="flex:1">⬆ Import</button></div>
+     <div class="row" style="margin-top:6px"></div>
      <input type="file" id="importLearnFile" accept="application/json,.json" style="display:none">
      <div class="row" style="margin-top:6px"><button class="btn go" id="saveTakeoff" style="flex:1;background:#e9f1fb;border-color:#b6d2ef;color:#2b6aa0;font-weight:600">Save takeoff</button><button class="btn" id="loadTakeoff" style="flex:1">Load takeoff</button></div>
      <input type="file" id="loadTakeoffFile" accept="application/json,.json" style="display:none">
@@ -184,11 +191,7 @@
      <div class="hint">Save the AI’s learning (examples + locks + completed takeoffs) to a file so it survives across days and devices. Import to restore or combine libraries on another computer.</div>
      <div class="hint adv"><b>Line take-off:</b> Select / Paint below. <b>AI take-off:</b> turn on AI-first, then AI take-off/review. Use the work box + heavy-lines to strip clutter first.</div>
    </div>
-   <div class="sec">
-     <h3>✓ Completed takeoffs</h3>
-     <div id="completedList"></div>
-     <div class="hint">Locking in a print saves a reference here (this browser): name, date, line count, sizes, and a thumbnail.</div>
-   </div>
+   
    <div class="sec">
      <h3>Classification</h3>
      <div class="legend-row">
@@ -216,7 +219,7 @@
      <div class="adv" style="font-size:12px;margin-top:3px;opacity:.85">Min length <input type="range" id="blkMinLen" min="0" max="200" step="2" value="10" style="width:120px;vertical-align:middle"> <span id="blkMinV">10</span> pt <span style="opacity:.6">(raise to drop short grid / cross lines)</span></div>
      <label class="adv" style="display:block;margin-top:5px;font-size:12px"><input type="checkbox" id="strictBlack"> <b>True black only</b> — judge by the ink color, not the on-screen reading <span style="opacity:.7">(drops gray that reads as black; may drop a few faint walls — pick those back)</span></label>
      <label style="display:block;margin-top:5px;font-size:12px;opacity:.85"><input type="checkbox" id="darkMap"> Show darkness map <span style="opacity:.7">(green = will trace · red = dark but under cutoff, drag Darkness cutoff down to grab · blue = light/background)</span></label>
-     <div class="row adv" style="margin-top:7px"><button class="btn go" id="traceAllDark" style="width:100%;background:#0c2a3a;border-color:#2b7aa0;color:#bfe6ff;font-weight:600">Trace all dark lines → duct</button></div>
+     <div class="row adv" style="margin-top:7px"></div>
      <div class="hint">Sets the cutoff just above the light background and selects every line darker than it — so the dark lines on the map become the actual green selection. Then nudge the Darkness cutoff up if gray creeps in.</div>
      <div id="shadePalette" style="display:none;margin-top:8px;padding:7px;border:1px solid #1d2b3a;border-radius:8px;background:#0a121b"></div>
      <div id="colorPalette" style="display:none;margin-top:8px;padding:7px;border:1px solid #1d2b3a;border-radius:8px;background:#0a121b"></div>
@@ -237,11 +240,6 @@
      <div class="hint">How far apart two parallel walls can be to read as one duct, in the drawing's real points (not pixels) — so zoom never changes it. Widen the max if a wide duct isn't catching.</div>
    </div>
 
-   <div class="sec">
-     <h3><span id="layersToggle" style="cursor:pointer;user-select:none"><span id="layersCaret">▸</span> Layers</span> <span id="layerCount" class="status"></span>
-       <span><a class="mini" id="autoL">auto</a> · <a class="mini" id="isoL">isolate duct</a> · <a class="mini" id="showAllL">all</a> · <a class="mini" id="hideAllL">none</a></span></h3>
-     <div id="layerList" style="display:none"><div class="hint">Layers from the PDF appear here. Toggle the eye to isolate; tag a layer as DUCT to turn its lines green.</div></div>
-   </div>
 
    <div class="sec">
      <h3>Selection</h3>
@@ -267,11 +265,8 @@
      <h3>Cleanup tools</h3>
      <div class="selbar">
        <button class="btn" id="cleanNoise">⌫ Clear text &amp; symbols <span style="opacity:.6">(incl. round diffusers)</span></button>
-       <button class="btn adv" id="findDrops">⤫ Mark drops on duct</button>
        <div class="row adv">
-         <button class="btn duct" id="promoteMaybe">Possible → duct</button>
-         <button class="btn notduct" id="clearMaybe">Clear possible</button>
-       </div>
+         </div>
        <button class="btn adv" id="resetAll">Reset all marks</button>
        <button class="btn" id="undoBtn">↶ Undo (Ctrl+Z)</button>
        <button class="btn adv" id="forgetPrint">Forget this print</button>
@@ -292,31 +287,17 @@
          <option value="claude-sonnet-4-6" selected>Sonnet 4.6 — balanced (~$0.14/sheet)</option>
          <option value="claude-opus-4-8">Opus 4.8 — most accurate (~$0.24/sheet)</option>
        </select>
-       <button class="btn go" id="aiScan">AI review lines (duct + possible)</button>
-       <button class="btn" id="cleanThenAI" style="margin-top:4px">Clean text/symbols, then AI review</button>
-       <button class="btn go" id="confirmTk" style="">✓ Looks right — teach AI from this whole print</button>
        <label class="adv" style="display:block;font-size:12px;margin-top:5px">Max blobs to review <input type="number" id="aiCap" value="120" min="1" max="500" style="width:62px"></label>
        <label style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="aiDeep" checked> Deep review — judge <b>every</b> green feature (use after marking furniture)</label>
        <label class="adv" style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="aiRecheck"> <b>Re-check confirmed</b> — re-review the whole print, including locked/green duct</label>
        <label style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="exOn" checked> Teach AI from my corrections <span id="exCount" style="opacity:.7"></span></label>
-       <button class="btn" id="teachPrint" style="margin-top:4px;background:#13243a;border-color:#2b6aa0;color:#cfe7ff">Teach AI from this print (it's correct)</button>
-       <button class="btn adv" id="exClear">Clear AI examples</button>
-       <button class="btn adv" id="aiUndo">↶ Undo AI review</button>
-       <button class="btn go" id="verifyTags" style="margin-top:4px">✓ Verify duct against size tags</button>
-       <button class="btn go" id="aiFullTakeoff" style="margin-top:6px">Run full AI takeoff (whole sheet)</button>
-       <button class="btn go" id="aiSizeRuns" style="margin-top:4px">Read sizes (per-run, tight crop)</button>
        <button class="btn go" id="aiTileSweep" style="margin-top:4px">Read tags (tile sweep · work area)</button>
        <label style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="autoDimChk"> Auto-read dim text on PDF load <span style="opacity:.7">(off — picks up random text; use tile sweep instead)</span></label>
-       <button class="btn go" id="dimFind" style="margin-top:6px">Find duct by dimension (tag-match)</button>
-       <button class="btn go" id="buildRuns" style="margin-top:6px">Preview runs (optional — Build takeoff does this for you)</button>
        <div class="row" style="margin-top:6px;display:flex;gap:6px">
-         <button class="btn go" id="itemsFromRunsBtn" style="flex:2;background:#0c2a1a;border-color:#2b9e5c;color:#bfffd2;font-weight:700">Build takeoff (joints)</button>
          <button class="btn adv" id="itemsClearBtn" style="flex:1;background:#3a2030;border-color:#7a3b4b;color:#fbb">Clear</button>
        </div>
        <button class="btn" id="startCleanBtn" style="margin-top:6px;font-weight:700;background:#fff4e6;border-color:#ffd9a8;color:#b5641a">Start clean — clear all green</button>
-       <button class="btn go" id="spineBuildBtn" style="margin-top:6px;font-weight:700;background:#e9fbf0;border:2px solid #22a95f;color:#12833f">★ Spine Build (v2) — infill from green</button>
        <button class="btn go" id="trackWalkBtn" style="margin-top:6px;font-weight:700">Build (track-walk · beta)</button>
-       <button class="btn" id="walkBetaBtn" style="margin-top:6px;font-weight:700;background:#eef4ff;border-color:#a9c4ff;color:#3562c4">Build (trace-walk · beta 2)</button>
        <button class="btn go" id="aiAssignTest" style="margin-top:6px;font-weight:700">AI: assign tags → ducts (test)</button>
        <div class="hint" style="margin-top:2px">Experiment — after a build, sends the extracted centerlines + size tags + the full sheet image to the AI and asks only <b>which tag labels which duct</b>. Draws its picks on the plan (blue dot = tag → orange dot = chosen duct) and tables width-agreement. Changes no runs; open the downloaded file so the worker call isn't sandbox-blocked.</div>
        <button class="btn go" id="aiCleanupRuns" style="margin-top:6px;font-weight:700">AI cleanup: drop doubles + not-ductwork</button>
@@ -356,6 +337,8 @@
        <div id="aiOut"><div class="hint">The AI looks at a crop of each questionable blob on your actual sheet &mdash; the yellow "possible" lines <b>and</b> short green bits (dampers, handles, arrows that got swept into duct) &mdash; and judges each, boxing the feature in question so a damper sitting on a duct still gets called out. Flagged blobs auto-clear; hover a card to circle the spot, Undo to put it back. Run cleanup first so it only handles real questions.<br><br><b>Open the downloaded file</b> (not the in-Claude preview) so the call to your worker isn't sandbox-blocked.</div></div>
      </div>
    </div>
+   </div><!-- /tabSelection -->
+   <div id="tabEdit" style="display:none"></div>
  </aside>
 
  <main id="main">
@@ -537,12 +520,12 @@ function renderLayerPanel(){
   const ids=Object.keys(layers);
   if(!ids.length){
     wrap.innerHTML='<div class="hint">No PDF layers on this document. Use the width filter + selection to mark duct lines manually.</div>';
-    $('layerCount').textContent='(0)'; return;
+    if($('layerCount'))$('layerCount').textContent='(0)'; return;
   }
   // Show only layers actually drawn on this page; fall back to all if tagging missed
   let show=ids.filter(id=>pageLayersUsed.has(id));
   if(!show.length) show=ids;
-  $('layerCount').textContent='('+show.length+(show.length<ids.length?' on pg':'')+')';
+  if($('layerCount'))$('layerCount').textContent='('+show.length+(show.length<ids.length?' on pg':'')+')';
   show.forEach(id=>{
     const L=layers[id];
     const row=document.createElement('div'); row.className='layer';
@@ -554,9 +537,9 @@ function renderLayerPanel(){
     row.append(eye,nm,tag); wrap.appendChild(row);
   });
 }
-$('autoL').onclick=()=>{ suggestDuctLayers(); renderLayerPanel(); classify(); repaintCanvas(); }; $('isoL').onclick=isolateDuctLayers;
-$('showAllL').onclick=()=>{ for(const id in layers) layers[id].visible=true; renderLayerPanel(); repaintCanvas(); };
-$('hideAllL').onclick=()=>{ for(const id in layers) layers[id].visible=false; renderLayerPanel(); repaintCanvas(); };
+(function(){var b;b=$('autoL');if(b)b.onclick=()=>{ suggestDuctLayers(); renderLayerPanel(); classify(); repaintCanvas(); };b=$('isoL');if(b)b.onclick=isolateDuctLayers;})();
+if($('showAllL'))$('showAllL').onclick=()=>{ for(const id in layers) layers[id].visible=true; renderLayerPanel(); repaintCanvas(); };
+if($('hideAllL'))$('hideAllL').onclick=()=>{ for(const id in layers) layers[id].visible=false; renderLayerPanel(); repaintCanvas(); };
 
 // ---- page picker ----
 async function buildPagePicker(){
@@ -1005,7 +988,7 @@ function renderCompleted(){
   if(!arr.length){ el.innerHTML='<div class="hint">No completed takeoffs yet. Locking in a print adds it here.</div>'; return; }
   arr.sort(function(a,b){return b.date-a.date;});
   el.innerHTML=arr.map(function(r){ var sz=Object.keys(r.sizes||{}).sort().map(function(k){return k+'\u00d7'+r.sizes[k];}).slice(0,10).join(', '); var d=new Date(r.date);
-    return '<div style="display:flex;gap:8px;padding:6px;border:1px solid #234;border-radius:6px;margin-bottom:6px;align-items:flex-start">'+(r.thumb?'<img src="'+r.thumb+'" style="width:54px;height:54px;object-fit:cover;border-radius:4px;flex:0 0 auto;background:#fff">':'')+'<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:12px;word-break:break-all">'+r.name+' \u00b7 p'+r.page+'</div><div style="font-size:11px;opacity:.7">'+d.toLocaleDateString()+' '+d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})+' \u00b7 '+r.lines+' lines'+(r.lf?(' \u00b7 ~'+r.lf+' LF'):'')+'</div><div style="font-size:11px;opacity:.6">'+(sz||'')+'</div></div><button data-del="'+r.id+'" title="remove" style="background:none;border:none;color:#c66;cursor:pointer;font-size:15px;line-height:1">\u00d7</button></div>'; }).join('');
+    return '<div style="display:flex;gap:8px;padding:6px;border:1px solid #234;border-radius:6px;margin-bottom:6px;align-items:flex-start">'+(r.thumb?'<img src="'+r.thumb+'" style="width:54px;height:54px;object-fit:cover;border-radius:4px;flex:0 0 auto;background:#fff">':'')+'<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:12px;word-break:break-all">'+r.name+' \u00b7 p'+r.page+'</div><div style="font-size:11px;opacity:.7">'+d.toLocaleDateString()+' '+d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})+' \u00b7 '+r.lines+' lines'+(r.lf?(' \u00b7 ~'+r.lf+' LF'):'')+'</div><div style="font-size:11px;opacity:.6">'+(sz||'')+'</div></div><button data-del="'+r.id+'" style="background:none;border:none;color:#c66;cursor:pointer;font-size:15px;line-height:1">\u00d7</button></div>'; }).join('');
   el.querySelectorAll('button[data-del]').forEach(function(b){ b.onclick=function(){ var id=b.getAttribute('data-del'); var a=loadCompleted().filter(function(r){return r.id!==id;}); saveCompleted(a); renderCompleted(); }; });
 }
 function clearExamples(){ if(!confirm('Clear the AI teaching examples on this browser?'))return; EXAMPLES=[]; persistExamples(); updateExBadge(); setStatus('Cleared AI teaching examples.'); }
@@ -2111,6 +2094,17 @@ function refreshSel(){
     if(end==='start') run.pieces.unshift(st); else run.pieces.push(st);
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Added a straight leg \u2014 drag its open end to length.'); return true;
   };
+  window.__splitPiece=function(runId, pieceIdx, alongIn){   // cut a straight duct piece into two at alongIn (inches from its start)
+    var run=findRun(runId); if(!run) return false; var p=run.pieces[pieceIdx];
+    if(!p||p.kind!=='straight') return false;
+    var L=p.lenIn||0; if(L<3) return false;
+    var at=Math.max(1, Math.min(L-1, alongIn||L/2));                    // keep both halves >=1"
+    window.__pushRunUndo&&window.__pushRunUndo();
+    var second={kind:'straight',lenIn:Math.round(L-at),widthIn:p.widthIn,depthIn:p.depthIn,round:p.round,size:p.size,cid:p.cid,camduct:p.camduct};
+    p.lenIn=Math.round(at);
+    run.pieces.splice(pieceIdx+1,0,second);
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Split the duct into two pieces.'); return true;
+  };
   window.__nearestRunEnd=function(sx,sy){                  // which run + end is nearest a screen point
     var best=null; (window.__runs2d||[]).forEach(function(r){ var pl=window.__runPoly(r), n=pl.length;
       [['start',pl[0]],['finish',pl[n-1]]].forEach(function(pr){ var s=window.__n2s(pr[1][0],pr[1][1]); if(!s)return; var d=Math.hypot(sx-s[0],sy-s[1]); if(!best||d<best.d) best={d:d,runId:r.id,end:pr[0]}; }); });
@@ -2246,6 +2240,26 @@ function refreshSel(){
     var shared=A.color||B.color||'#5b8def'; A.color=shared; B.color=shared;
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Connected with a '+name+' \u2014 both now one color.'); return true;
   };
+  window.__connectOffset=function(idA, endA, idB, endB){    // bridge two offset (parallel) ends with an offset jog: two 45s + a straight
+    var A=findRun(idA), B=findRun(idB); if(!A||!B||A===B) return false;
+    var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
+    function endInfo(run,end){ var pl=window.__runPoly(run),n=pl.length;
+      if(end==='start') return {p:pl[0], h:[pl[0][0]-(pl[1]||pl[0])[0], pl[0][1]-(pl[1]||pl[0])[1]]};
+      return {p:pl[n-1], h:[pl[n-1][0]-(pl[n-2]||pl[0])[0], pl[n-1][1]-(pl[n-2]||pl[0])[1]]}; }
+    function nrm(d){ var l=Math.hypot(d[0],d[1])||1; return [d[0]/l,d[1]/l]; }
+    var ea=endInfo(A,endA), eb=endInfo(B,endB), h=nrm(ea.h);              // A's outward heading (toward B)
+    var dx=eb.p[0]-ea.p[0], dy=eb.p[1]-ea.p[1];
+    var along=dx*h[0]+dy*h[1];                                           // distance toward B along A's heading
+    var perpx=-h[1], perpy=h[0], off=dx*perpx+dy*perpy;                  // lateral offset
+    if(along<=inToPt(2)){ if(typeof setStatus==='function')setStatus('Offset connect: the 2nd end isn\u2019t ahead of the 1st \u2014 try the other ends.'); return false; }
+    window.__pushRunUndo&&window.__pushRunUndo();
+    var w=A.widthIn, dep=(A.pieces[0]&&A.pieces[0].depthIn)!=null?A.pieces[0].depthIn:null, rr=!!(A.pieces[0]&&A.pieces[0].round);
+    var offp={kind:'fitting',cid:'offset',camduct:'Offset',round:rr,lenIn:Math.max(2,Math.round(along/ppi)),widthIn:w,depthIn:dep,
+      size:(rr?('\u00f8'+w):(w+(dep!=null?('\u00d7'+dep):'"'))),_offset:true,offsetIn:Math.round(Math.abs(off)/ppi),offsetSide:(off>=0?1:-1)};
+    if(endA==='start') A.pieces.unshift(offp); else A.pieces.push(offp);
+    var shared=A.color||B.color||'#5b8def'; A.color=shared; B.color=shared;
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Connected with an offset \u2014 two 45s + a straight ('+offp.offsetIn+'" over '+offp.lenIn+'").'); return true;
+  };
   window.__ductDirAt=function(nx,ny,radIn){    // dominant raw-PDF duct-line directions near a point (strongest first)
     if(typeof segments==='undefined'||!segments||nx==null) return [];
     var rad=inToPt(radIn||30), bins={};
@@ -2257,76 +2271,41 @@ function refreshSel(){
     var arr=Object.keys(bins).map(function(k){ var b=bins[k], a=b.s/b.w; return {ang:a,w:b.w,dir:[Math.cos(a),Math.sin(a)]}; });
     arr.sort(function(p,q){return q.w-p.w;}); return arr;
   };
-  window.__repairElbowTurns=function(){    // give every flat (turn=0) elbow a real 90° turn inferred from the green trace
+  window.__repairElbowTurns=function(){    // turn every elbow the way the GREEN TRACE goes (and fix wrong-way ones)
     var runs=window.__runs2d||[], fixed=0;
     runs.forEach(function(run){
       for(var i=0;i<run.pieces.length;i++){ var p=run.pieces[i];
         if(p.kind!=='fitting' || !(p.cid==='e90'||p.cid==='e45'||p._elbow)) continue;
-        if(p.turn && Math.abs(p.turn)>0.08) continue;                    // already bent
         var fr=runFrames(run), f=fr[i]; if(!f) continue;                 // fresh frames (accounts for earlier fixes)
-        var inc=[f.ux,f.uy], dirs=window.__ductDirAt(f.x,f.y,22), out=null, bestPerp=0.55;
-        dirs.forEach(function(dd){ var dot=Math.abs(inc[0]*dd.dir[0]+inc[1]*dd.dir[1]); if(dot<bestPerp){ bestPerp=dot; out=dd.dir; } });
-        if(out){
-          var mag=(p.cid==='e45'?Math.PI/4:Math.PI/2);
-          function headAfter(sign){ var a=sign*mag,c=Math.cos(a),s=Math.sin(a); return [inc[0]*c-inc[1]*s, inc[0]*s+inc[1]*c]; }
-          // PRIMARY (train-track): turn toward a nearby OTHER run of matching size whose leg continues that way.
-          function neighborToward(h){ var best=0, R=window.__runs2d||[], rad=inToPt(34);
-            for(var j=0;j<R.length;j++){ var o=R[j]; if(o===run) continue;
-              var wd=Math.abs((o.widthIn||0)-(run.widthIn||0)); if(wd>2.5) continue;                 // must match this run's size
-              var oRound=!!(o.pieces[0]&&o.pieces[0].round), rRound=!!(run.pieces[0]&&run.pieces[0].round); if(oRound!==rRound) continue;
-              var eo=runEnd(o), pts=[[o.start[0],o.start[1],o.dir[0],o.dir[1]],[eo.x,eo.y,eo.ux,eo.uy]];
-              for(var k=0;k<pts.length;k++){ var q=pts[k], d=Math.hypot(q[0]-f.x,q[1]-f.y); if(d>rad) continue;   // its end sits at this corner
-                var al=Math.abs(q[2]*h[0]+q[3]*h[1]); if(al<0.7) continue;                                        // and it runs along this leg
-                var sc=al + (1-wd/2.5)*0.4 + Math.max(0,(rad-d)/rad)*0.4; if(sc>best) best=sc; } }
-            return best; }
-          // FALLBACK: which side has more raw green trace running along the new leg.
-          function ductWeightToward(h){ var step=inToPt(14), px=f.x+h[0]*step, py=f.y+h[1]*step, near=window.__ductDirAt(px,py,14), w=0;
-            near.forEach(function(dd){ var al=Math.abs(h[0]*dd.dir[0]+h[1]*dd.dir[1]); if(al>0.7) w+=dd.w*al; }); return w; }
-          var hP=headAfter(1), hN=headAfter(-1);
-          var nP=neighborToward(hP), nN=neighborToward(hN), sign;
-          if(nP>0 || nN>0){ sign=(nP>=nN)?1:-1; }                         // a matching-size run continues one way -> go there
-          else { var wP=ductWeightToward(hP), wN=ductWeightToward(hN);
-            if(wP>0 || wN>0) sign=(wP>=wN)?1:-1;
-            else { var cr=inc[0]*out[1]-inc[1]*out[0]; sign=(cr>=0?1:-1); } }  // last resort: geometric guess
-          p.turn=sign*mag; p._elbow=true; if(!p.camduct)p.camduct=(p.cid==='e45'?'45 Elbow':'90 Elbow'); fixed++;
-        }
+        var inc=[f.ux,f.uy], mag=(p.cid==='e45'?Math.PI/4:Math.PI/2);
+        function headAfter(sign){ var a=sign*mag,c=Math.cos(a),s=Math.sin(a); return [inc[0]*c-inc[1]*s, inc[0]*s+inc[1]*c]; }
+        // PRIMARY: how much GREEN trace continues along each candidate leg (sampled down the leg, near counts more)
+        function greenAlong(h){ var w=0, steps=[8,16,24,32,40], si;
+          for(si=0; si<steps.length; si++){ var d=inToPt(steps[si]), px=f.x+h[0]*d, py=f.y+h[1]*d, near=window.__ductDirAt(px,py,12);
+            near.forEach(function(dd){ var al=Math.abs(h[0]*dd.dir[0]+h[1]*dd.dir[1]); if(al>0.72) w+=dd.w*al*(1-si*0.12); }); }
+          return w; }
+        // TIEBREAK: a matching-size built run continuing that way
+        function neighborToward(h){ var best=0, R=window.__runs2d||[], rad=inToPt(34), j,k;
+          for(j=0;j<R.length;j++){ var o=R[j]; if(o===run) continue;
+            var wd=Math.abs((o.widthIn||0)-(run.widthIn||0)); if(wd>2.5) continue;
+            var oR=!!(o.pieces[0]&&o.pieces[0].round), rR=!!(run.pieces[0]&&run.pieces[0].round); if(oR!==rR) continue;
+            var eo=runEnd(o), pts=[[o.start[0],o.start[1],o.dir[0],o.dir[1]],[eo.x,eo.y,eo.ux,eo.uy]];
+            for(k=0;k<pts.length;k++){ var q=pts[k], dd=Math.hypot(q[0]-f.x,q[1]-f.y); if(dd>rad) continue;
+              var al=Math.abs(q[2]*h[0]+q[3]*h[1]); if(al<0.7) continue; var sc=al+(1-wd/2.5)*0.4; if(sc>best) best=sc; } }
+          return best; }
+        var hP=headAfter(1), hN=headAfter(-1);
+        var gP=greenAlong(hP), gN=greenAlong(hN), want=0, mx=Math.max(gP,gN);
+        if(mx>0 && Math.abs(gP-gN) > mx*0.12){ want=(gP>gN)?1:-1; }        // GREEN decides — turn where the trace runs
+        else { var nP=neighborToward(hP), nN=neighborToward(hN); if(nP>0||nN>0) want=(nP>=nN)?1:-1; }   // near-tie -> matching-size neighbor
+        var cur=(p.turn>0.08?1:(p.turn<-0.08?-1:0));
+        if(want!==0){ if(cur!==want){ p.turn=want*mag; fixed++; } p._elbow=true; if(!p.camduct)p.camduct=(p.cid==='e45'?'45 Elbow':'90 Elbow'); }
+        else if(cur===0){ var cr=inc[0]*(-inc[1])-inc[1]*inc[0]; p.turn=mag; p._elbow=true; if(!p.camduct)p.camduct='90 Elbow'; fixed++; }  // no signal + flat: default bend (rare)
+        // else: ambiguous AND already bent -> leave it as the user/builder had it
       }
     });
     if(fixed){ try{renderItems();}catch(_){} try{renderPanel();}catch(_){} }
-    if(typeof setStatus==='function') setStatus(fixed?('Straightened '+fixed+' elbow'+(fixed>1?'s':'')+' from the trace.'):'No flat elbows to fix (all already bent).');
+    if(typeof setStatus==='function') setStatus(fixed?('Turned '+fixed+' elbow'+(fixed>1?'s':'')+' to follow the green.'):'Elbows already follow the green.');
     return fixed;
-  };
-  window.__smartElbowWalk=function(){    // BETA: decide each elbow's turn by peeking left/right for the same-size continuing leg
-    var runs=window.__runs2d||[], turned=0, flagged=0, snapped=false;
-    runs.forEach(function(run){
-      for(var i=0;i<run.pieces.length;i++){ var p=run.pieces[i]; if(p.kind!=='fitting'||!(p.cid==='e90'||p.cid==='e45'||p._elbow)) continue;
-        var fr=runFrames(run), f=fr[i]; if(!f) continue;
-        var inc=[f.ux,f.uy], mag=(p.cid==='e45'?Math.PI/4:Math.PI/2);
-        function headAfter(sign){ var a=sign*mag,c=Math.cos(a),s=Math.sin(a); return [inc[0]*c-inc[1]*s, inc[0]*s+inc[1]*c]; }
-        function scoreSide(h){                                   // look one "tile" ahead down this leg
-          var R=window.__runs2d||[], rad=inToPt(38), nb=0;
-          for(var j=0;j<R.length;j++){ var o=R[j]; if(o===run) continue;
-            var wd=Math.abs((o.widthIn||0)-(run.widthIn||0)); if(wd>2.5) continue;                 // SAME SIZE only
-            var oR=!!(o.pieces[0]&&o.pieces[0].round), rR=!!(run.pieces[0]&&run.pieces[0].round); if(oR!==rR) continue;
-            var eo=runEnd(o), pts=[[o.start[0],o.start[1],o.dir[0],o.dir[1]],[eo.x,eo.y,eo.ux,eo.uy]];
-            for(var k=0;k<pts.length;k++){ var q=pts[k], d=Math.hypot(q[0]-f.x,q[1]-f.y); if(d>rad) continue;
-              var al=Math.abs(q[2]*h[0]+q[3]*h[1]); if(al<0.7) continue; nb=Math.max(nb, al+(1-wd/2.5)*0.5); } }
-          var step=inToPt(16), near=window.__ductDirAt(f.x+h[0]*step, f.y+h[1]*step, 16), tw=0;
-          near.forEach(function(dd){ var al=Math.abs(h[0]*dd.dir[0]+h[1]*dd.dir[1]); if(al>0.7) tw+=dd.w*al; });
-          return {nb:nb, tw:tw};
-        }
-        var hP=headAfter(1), hN=headAfter(-1), sP=scoreSide(hP), sN=scoreSide(hN), want=0;
-        if(sP.nb>0 || sN.nb>0) want = (sP.nb>=sN.nb)?1:-1;          // 1) same-size built leg wins
-        else if(sP.tw>0 || sN.tw>0) want = (sP.tw>=sN.tw)?1:-1;     // 2) else the green trace leg
-        else { flagged++; p._elbowUncertain=true; continue; }       // 3) genuinely can't tell -> flag, don't guess
-        p._elbowUncertain=false;
-        var cur=(p.turn>0?1:(p.turn<0?-1:0));
-        if(cur!==want){ if(!snapped){ window.__pushRunUndo&&window.__pushRunUndo(); snapped=true; } p.turn=want*mag; p._elbow=true; turned++; }
-      }
-    });
-    try{renderItems();}catch(_){} try{renderPanel();}catch(_){}
-    if(typeof setStatus==='function') setStatus('Smart elbow walk (beta): set '+turned+' elbow'+(turned!==1?'s':'')+(flagged?(', '+flagged+' uncertain \u2014 flip those by hand'):', none uncertain')+'.');
-    return {turned:turned, flagged:flagged};
   };
   // ---- RUN UNDO: snapshot window.__runs2d before any destructive edit so a mis-delete/move is recoverable ----
   window.__runSnap=window.__runSnap||[];
@@ -3061,21 +3040,21 @@ function refreshSel(){
       if(selRun!==run.id) return;                 // list stays clear until you click a run — then show just that one
       var open=true;
       h+='<div class="aicard" style="border-color:'+run.color+'33">'
-        +'<div class="h" style="cursor:pointer" onclick="__runOpen(\''+run.id+'\')"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+run.color+';margin-right:5px"></span>'+(run.label?vh(run.label)+' \u00b7 ':'')+run.axis+' run'+(run._flag==='mismatch'?' <span style="color:#e0a92a">\u26a0 size?</span>':run._flag==='1-wall'?' <span style="color:#e0a92a">\u26a0 1-wall</span>':'')+(run._needH?' <span style="color:#e0a92a" title="width from line scale; height unknown \u2014 no size tag on this run">\u26a0 H?</span>':'')+' \u00b7 '+run.pieces.length+' pc \u00b7 '+fmtFt(runLenIn(run))+'</div>';
+        +'<div class="h" style="cursor:pointer" onclick="__runOpen(\''+run.id+'\')"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+run.color+';margin-right:5px"></span>'+(run.label?vh(run.label)+' \u00b7 ':'')+run.axis+' run'+(run._flag==='mismatch'?' <span style="color:#e0a92a">\u26a0 size?</span>':run._flag==='1-wall'?' <span style="color:#e0a92a">\u26a0 1-wall</span>':'')+(run._needH?' <span style="color:#e0a92a">\u26a0 H?</span>':'')+' \u00b7 '+run.pieces.length+' pc \u00b7 '+fmtFt(runLenIn(run))+'</div>';
       if(open){
         run.pieces.forEach(function(pc,i){
           var key=run.id+':'+i, on=sel.has(key);
           h+='<div style="display:flex;align-items:center;gap:5px;margin:3px 0;padding:4px;border-radius:5px;background:'+(on?'rgba(34,211,238,.12)':'#0e1722')+'">'
-            +'<input type="checkbox" '+(on?'checked':'')+' onclick="__pcSel(\''+run.id+'\','+i+')" title="select to bulk-change size" style="flex:0 0 auto;margin:0 1px;cursor:pointer">'
+            +'<input type="checkbox" '+(on?'checked':'')+' onclick="__pcSel(\''+run.id+'\','+i+')" style="flex:0 0 auto;margin:0 1px;cursor:pointer">'
             +'<span style="flex:0 0 16px;font-size:10px;opacity:.6">'+(i+1)+'</span>';
           if(pc.kind==='straight'){
             h+='<input type="number" step="0.5" value="'+pc.lenIn+'" onchange="__pcLen(\''+run.id+'\','+i+',this.value)" style="width:54px;padding:3px;border:1px solid #345;border-radius:4px;background:#0b1420;color:#fff"><span style="font-size:10px;opacity:.6">in</span>'
-              +'<span style="flex:1;font-size:11px;color:'+(pc._scaled?'#f5b342':'#bfe6ff')+'" title="'+(pc._scaled?'scaled from the print \u2014 no size tag found':'read from a size tag')+'">'+vh(pc.size)+(pc._scaled?' ~':'')+'</span>';
+              +'<span style="flex:1;font-size:11px;color:'+(pc._scaled?'#f5b342':'#bfe6ff')+'">'+vh(pc.size)+(pc._scaled?' ~':'')+'</span>';
           } else {
             h+='<span style="flex:1;font-size:11px;color:#f5b342">\u25c8 '+vh(pc.camduct||pc.cid)+(pc.outW?(' \u2192'+pc.outW+(pc.cid==='s2r'?'\u00f8':'x'+(pc.outD||pc.outW))):'')+'</span>';
           }
-          h+='<button onclick="__pcIns(\''+run.id+'\','+i+',event)" title="insert fitting after" style="border:none;background:#243;color:#9f9;border-radius:4px;cursor:pointer;padding:2px 5px">+</button>'
-            +'<button onclick="__pcDel(\''+run.id+'\','+i+')" title="delete piece" style="border:none;background:#422;color:#f99;border-radius:4px;cursor:pointer;padding:2px 5px">\u00d7</button></div>';
+          h+='<button onclick="__pcIns(\''+run.id+'\','+i+',event)" style="border:none;background:#243;color:#9f9;border-radius:4px;cursor:pointer;padding:2px 5px">+</button>'
+            +'<button onclick="__pcDel(\''+run.id+'\','+i+')" style="border:none;background:#422;color:#f99;border-radius:4px;cursor:pointer;padding:2px 5px">\u00d7</button></div>';
         });
         h+='<div style="display:flex;gap:5px;margin-top:5px"><button onclick="__runAddJoint(\''+run.id+'\')" style="flex:1;padding:5px;border:1px solid #2b6;border-radius:5px;background:#0c2a1a;color:#bfd;cursor:pointer">+ joint</button><button onclick="__runDel(\''+run.id+'\')" style="flex:1;padding:5px;border:1px solid #533;border-radius:5px;background:#3a2030;color:#fbb;cursor:pointer">delete run</button></div>';
       }
@@ -3448,137 +3427,10 @@ function refreshSel(){
   window.__runPoly=__runPoly;
   window.__ductDiag=__ductDiag;
   window.__buildRunsTrackWalk=buildRunsTrackWalk;
-  window.__walkBuildBeta=function(){    // BETA WALK: follow the green-trace spine; lay straights + elbows (turn taken from the path, never guessed)
-    if(typeof scaleIPF==='undefined' || !(scaleIPF>0)){ setStatus('Set the drawing scale first.'); return; }
-    try{ buildSegmentRuns(); }catch(e){}
-    var sg=window.__sgRuns||[]; if(!sg.length){ setStatus('No centerlines to walk — mark/scan duct first.'); return; }
-    var pp=6*scaleIPF, TOL=inToPt(16);
-    var F=[]; sg.forEach(function(r){ var c=r.corners; if(!c||c.length<4) return;
-      var A=[(c[0][0]+c[3][0])/2,(c[0][1]+c[3][1])/2], B=[(c[1][0]+c[2][0])/2,(c[1][1]+c[2][1])/2];
-      if(Math.hypot(B[0]-A[0],B[1]-A[1])<inToPt(6)) return;
-      F.push({A:A,B:B,w:(typeof snapDuctW==='function'?snapDuctW(r.widthIn):r.widthIn),used:false}); });
-    if(!F.length){ setStatus('No usable centerline fragments.'); return; }
-    function near(p,q){ return Math.hypot(p[0]-q[0],p[1]-q[1])<=TOL; }
-    function unit(a,b){ var dx=b[0]-a[0],dy=b[1]-a[1],l=Math.hypot(dx,dy)||1; return [dx/l,dy/l]; }
-    function deg(pt,excl){ var n=0; F.forEach(function(g){ if(g===excl) return; if(near(pt,g.A)||near(pt,g.B)) n++; }); return n; }
-    function walkFrom(f, startPt){
-      var cur=f, from=startPt.slice(), to=(near(startPt,f.A)?f.B.slice():f.A.slice());
-      var dir0=unit(from,to), pieces=[], prev=dir0, guard=0;
-      while(cur && guard++<500){
-        cur.used=true;
-        var heading=unit(from,to);
-        if(pieces.length){ var turn=Math.atan2(prev[0]*heading[1]-prev[1]*heading[0], prev[0]*heading[0]+prev[1]*heading[1]);
-          if(Math.abs(turn)>0.35) pieces.push({kind:'fitting',cid:'e90',camduct:'90 Elbow',turn:turn,lenIn:0,widthIn:cur.w,_elbow:true,_walk:true}); }
-        var segLen=Math.hypot(to[0]-from[0],to[1]-from[1])/pp;
-        pieces.push({kind:'straight',lenIn:Math.max(1,Math.round(segLen)),widthIn:cur.w,depthIn:null,size:cur.w+'"',round:false,cid:'st',camduct:'Straight Duct'});
-        prev=heading;
-        var cands=[]; F.forEach(function(g){ if(g.used) return; if(near(to,g.A)) cands.push({g:g,to:g.B.slice()}); else if(near(to,g.B)) cands.push({g:g,to:g.A.slice()}); });
-        if(cands.length!==1) break;                       // stop at a fork (branch/tee) or dead end — Stage 1
-        from=to.slice(); to=cands[0].to; cur=cands[0].g;
-      }
-      return {start:startPt.slice(), dir:dir0, w:f.w, pieces:pieces};
-    }
-    window.__pushRunUndo&&window.__pushRunUndo();
-    var runs=[], pal=(typeof palette!=='undefined'&&palette.length)?palette:['#22a95f'];
-    // pass 1: seed at free ends (open runs); pass 2: leftover loops
-    for(var pass=0; pass<2; pass++){
-      F.forEach(function(f){ if(f.used) return;
-        var sp = (pass===0) ? ((deg(f.A,f)===0)?f.A:((deg(f.B,f)===0)?f.B:null)) : f.A;
-        if(!sp) return;
-        var w=walkFrom(f, sp);
-        if(w.pieces.length) runs.push({ id:'wk'+Date.now().toString(36)+Math.floor(Math.random()*1e4), start:w.start, dir:w.dir, widthIn:w.w, color:pal[runs.length%pal.length], label:'', pieces:w.pieces, _walk:true });
-      });
-    }
-    window.__runs2d=runs;
-    var nElb=0; runs.forEach(function(r){ r.pieces.forEach(function(p){ if(p._elbow)nElb++; }); });
-    try{ if(window.__integrateYoloFittings) window.__integrateYoloFittings(); }catch(e){}   // YOLO only swaps fittings in
-    renderItems(); renderPanel();
-    setStatus('Walk build (beta): '+runs.length+' runs, '+nElb+' elbows laid from the trace path. Forks/taps become separate runs for now — connect them with the tools.');
-  };
-
-  // ============================================================================
-  // SPINE BUILD (v2) — isolated graph-walk builder. Runs OFF the green you selected.
-  //   1) pair walls into centerline spines (buildSegmentRuns -> __sgRuns)
-  //   2) walk each spine from a free end, following the SAME-WIDTH continuation
-  //      through corners; lay straights + elbows with the turn from real geometry
-  //   3) at a break: same-width leg within reach -> jump; else size-tag -> continue;
-  //      else STOP and flag (never guess)
-  //   4) YOLO swaps fittings onto the finished clean runs
-  // Validated against real exports before shipping. Does NOT touch track-walk.
-  // ============================================================================
-  window.__spineBuild=function(){
-    if(typeof scaleIPF==='undefined' || !(scaleIPF>0)){ setStatus('Set the drawing scale first.'); return; }
-    try{ buildSegmentRuns(); }catch(e){}
-    var sg=window.__sgRuns||[]; if(!sg.length){ setStatus('No green duct selected — paint/select duct first, then Spine Build.'); return; }
-    var pp=6*scaleIPF, TOL=inToPt(16), REACH=inToPt(48);
-    // spine segments from centerline fragments
-    var S=[]; sg.forEach(function(r){ var c=r.corners; if(!c||c.length<4) return;
-      var A=[(c[0][0]+c[3][0])/2,(c[0][1]+c[3][1])/2], B=[(c[1][0]+c[2][0])/2,(c[1][1]+c[2][1])/2];
-      if(Math.hypot(B[0]-A[0],B[1]-A[1])<inToPt(4)) return;
-      S.push({A:A,B:B,w:(typeof snapDuctW==='function'?snapDuctW(r.widthIn):r.widthIn), used:false}); });
-    if(!S.length){ setStatus('No usable spine fragments.'); return; }
-    function near(p,q){ return Math.hypot(p[0]-q[0],p[1]-q[1])<=TOL; }
-    function nearR(p,q,R){ return Math.hypot(p[0]-q[0],p[1]-q[1])<=R; }
-    function unit(a,b){ var dx=b[0]-a[0],dy=b[1]-a[1],l=Math.hypot(dx,dy)||1; return [dx/l,dy/l]; }
-    function deg(pt,excl){ var n=0; S.forEach(function(s){ if(s===excl) return; if(near(pt,s.A)||near(pt,s.B)) n++; }); return n; }
-    // continuation options from point `to`, arriving with heading `h`, current width `w`
-    function nextFrom(to,h,w){
-      var cands=[];
-      S.forEach(function(s){ if(s.used) return;
-        [[s.A,s.B],[s.B,s.A]].forEach(function(pr){ var e=pr[0],o=pr[1];
-          var d=Math.hypot(e[0]-to[0],e[1]-to[1]); if(d>REACH) return;
-          var hh=unit(to,o), align=h[0]*hh[0]+h[1]*hh[1]; if(align< -0.35) return;   // don't double back
-          var wdiff=Math.abs((s.w||0)-(w||0));
-          // score: touching(0) beats bridged; same-width beats different; straighter beats sharper
-          var touch=near(to,e)?0:1;
-          cands.push({s:s,o:o,hh:hh,align:align,wdiff:wdiff,touch:touch,d:d}); }); });
-      cands.sort(function(a,b){
-        if(a.touch!==b.touch) return a.touch-b.touch;                 // prefer a fragment that actually touches
-        var aw=a.wdiff>2.0, bw=b.wdiff>2.0; if(aw!==bw) return aw?1:-1; // prefer same width
-        return b.align-a.align;                                       // prefer straightest
-      });
-      return cands[0]||null;
-    }
-    var pal=(typeof palette!=='undefined'&&palette.length)?palette:['#22a95f','#5b8def','#e0952b','#c257c9','#2bb5b0'];
-    var runsOut=[], elbows=0, stops=0;
-    function buildRun(seed, startPt){
-      var cur=seed, frm=startPt.slice(), to=(near(startPt,seed.A)?seed.B.slice():seed.A.slice());
-      var dir0=unit(frm,to), pieces=[], prev=dir0, guard=0;
-      cur.used=true;
-      while(cur && guard++<300){
-        var heading=unit(frm,to);
-        if(pieces.length){ var t=Math.atan2(prev[0]*heading[1]-prev[1]*heading[0], prev[0]*heading[0]+prev[1]*heading[1]);
-          if(Math.abs(t)>0.35){ pieces.push({kind:'fitting',cid:'e90',camduct:'90 Elbow',turn:t,lenIn:0,widthIn:cur.w,_elbow:true,_walk:true}); elbows++; } }
-        var segLen=Math.hypot(to[0]-frm[0],to[1]-frm[1])/pp;
-        pieces.push({kind:'straight',lenIn:Math.max(1,Math.round(segLen)),widthIn:cur.w,depthIn:null,size:cur.w+'"',round:false,cid:'st',camduct:'Straight Duct'});
-        prev=heading;
-        var nx=nextFrom(to,heading,cur.w);
-        if(!nx){ stops++; break; }                                    // honest stop at a real dead-end/fork
-        nx.s.used=true; frm=to.slice(); to=nx.o.slice(); cur=nx.s;
-      }
-      return {start:startPt.slice(), dir:dir0, w:seed.w, pieces:pieces};
-    }
-    window.__pushRunUndo&&window.__pushRunUndo();
-    for(var pass=0; pass<2; pass++){
-      S.forEach(function(s){ if(s.used) return;
-        var sp = (pass===0) ? (deg(s.A,s)===0?s.A : (deg(s.B,s)===0?s.B : null)) : s.A;
-        if(!sp) return;
-        var w=buildRun(s, sp);
-        if(w.pieces.length) runsOut.push({ id:'sp'+Date.now().toString(36)+Math.floor(Math.random()*1e4), start:w.start, dir:w.dir, widthIn:w.w, color:pal[runsOut.length%pal.length], label:'', pieces:w.pieces, _spine:true });
-      });
-    }
-    window.__runs2d=runsOut;
-    try{ if(window.__integrateYoloFittings) window.__integrateYoloFittings(); }catch(e){}   // YOLO swaps fittings onto clean runs
-    var totLF=0; runsOut.forEach(function(r){ r.pieces.forEach(function(p){ if(p.kind==='straight') totLF+=(p.lenIn||0)/12; }); });
-    renderItems(); renderPanel();
-    setStatus('Spine Build: '+runsOut.length+' runs, '+elbows+' elbows (turn from the trace), '+Math.round(totLF)+' LF. '+(stops?stops+' open end(s) flagged — connect with the tools.':'')); 
-  };
 
   (function(){ var b=document.getElementById('itemsFromRunsBtn'); if(b) b.onclick=runsFromPreview;
     var tw=document.getElementById('trackWalkBtn'); if(tw) tw.onclick=buildRunsTrackWalk;
-    var wb=document.getElementById('walkBetaBtn'); if(wb) wb.onclick=function(){ try{ window.__walkBuildBeta(); }catch(e){ setStatus('Walk error: '+((e&&e.message)||e)); } };
     var scb=document.getElementById('startCleanBtn'); if(scb) scb.onclick=function(){ try{ startClean(); }catch(e){ setStatus('Start clean error: '+((e&&e.message)||e)); } };
-    var spb=document.getElementById('spineBuildBtn'); if(spb) spb.onclick=function(){ try{ window.__spineBuild(); }catch(e){ setStatus('Spine Build error: '+((e&&e.message)||e)); } };
     (function(){ var dB=document.getElementById('editDelBtn'), sB=document.getElementById('editSizeBtn'), tB=document.getElementById('editTapBtn');
       function upd(){ var m=window.__editMode;
         if(dB){ dB.textContent='\uD83D\uDDD1 Click-to-delete: '+(m==='delete'?'ON':'OFF'); dB.style.background=m==='delete'?'#5a1820':'#2a1418'; }
@@ -3975,16 +3827,16 @@ function clearTextAndSymbols(){ pushUndo(); var a=cleanNoise()||0; var b=clearRo
   else { setStatus('Nothing to clear \u2014 your selection is already clean. (The scanner reads linework, not text characters, and tag boxes/symbols are already excluded by the \u201cDrop boxes\u201d rule.)'); }
 }
 var __cr=document.getElementById('clearRound'); if(__cr) __cr.onclick=clearTextAndSymbols;
-$('findDrops').onclick=findDrops;
-$('promoteMaybe').onclick=()=>{ pushUndo(); segments.forEach(s=>{ if(s.cls==='maybe'&&s.lock!=='not'){ s.lock='duct'; s._userMark=true; } }); classify(); drawOverlay(); };
-$('clearMaybe').onclick =()=>{ pushUndo(); segments.forEach(s=>{ if(s.cls==='maybe'&&s.lock!=='duct'){ s.lock='not'; s._userMark=true; } }); classify(); drawOverlay(); };
+if($('findDrops'))$('findDrops').onclick=findDrops;
+if($('promoteMaybe'))$('promoteMaybe').onclick=()=>{ pushUndo(); segments.forEach(s=>{ if(s.cls==='maybe'&&s.lock!=='not'){ s.lock='duct'; s._userMark=true; } }); classify(); drawOverlay(); };
+if($('clearMaybe'))$('clearMaybe').onclick =()=>{ pushUndo(); segments.forEach(s=>{ if(s.cls==='maybe'&&s.lock!=='duct'){ s.lock='not'; s._userMark=true; } }); classify(); drawOverlay(); };
 (function(){ var et=document.getElementById('exportTrace'); if(et) et.onclick=exportTraceOverlay; })();
 (function(){ var sb=document.getElementById('shadeBoxes'); if(sb) sb.onchange=function(){ drawOverlay(); }; })();
 (function(){ var td=document.getElementById('traceAllDark'); if(td) td.onclick=traceAllDark; })();
 (function(){ var vt=document.getElementById('verifyTags'); if(vt) vt.onclick=verifyAgainstTags; })();
 (function(){ var tp=document.getElementById('teachPrint'); if(tp) tp.onclick=harvestExamples; })();
 $('resetAll').onclick   =()=>{ pushUndo(); segments.forEach(s=>s.lock=null); selected.clear(); refreshSel(); classify(); drawOverlay(); };
-$('forgetLearn').onclick=forgetLearning; $('forgetPrint').onclick=forgetThisPrint; $('undoBtn').onclick=undo; $('exClear').onclick=clearExamples; $('aiUndo').onclick=undo; $('confirmTk').onclick=confirmTakeoff;
+(function(){var b;b=$('forgetLearn'); if(b)b.onclick=forgetLearning;b=$('forgetPrint'); if(b)b.onclick=forgetThisPrint;b=$('undoBtn'); if(b)b.onclick=undo;b=$('exClear'); if(b)b.onclick=clearExamples;b=$('aiUndo'); if(b)b.onclick=undo;b=$('confirmTk'); if(b)b.onclick=confirmTakeoff;})();
 
 // ---- Dimension-match: find duct by matching wall-gaps to the print's own size tags ----
 function widthDictFromTags(){ var by={}, all=[]; (tags||[]).forEach(function(t){ var m=/(\d+)\s*[xX\u00d7]\s*(\d+)/.exec(String(t.text||'')); if(!m)return; var w=parseInt(m[1]), d=parseInt(m[2]); if(!(w>0&&d>0))return; all.push({w:w,d:d,nx:t.nx,ny:t.ny}); (by[w]=by[w]||{})[d]=1; }); return {by:by, all:all}; }
@@ -4589,7 +4441,7 @@ function cropDataURL(bbox, idxs){
   return out.toDataURL('image/png').split(',')[1];
 }
 let aiClusters=[];
-$('aiScan').onclick=async()=>{
+if($('aiScan'))$('aiScan').onclick=async()=>{
   const out=$('aiOut');
   var __deep=document.getElementById('aiDeep')&&document.getElementById('aiDeep').checked;
   aiClusters=clusterMaybe(__deep);
@@ -4900,12 +4752,11 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
 </script>
 
 <div id="dtBar" style="position:fixed;top:120px;right:0;z-index:9998;display:flex;flex-direction:column;align-items:flex-end;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;user-select:none">
- <button id="dtBarToggle" title="Duct editing tools" style="background:#fff;border:1px solid #dde2e9;border-right:none;color:#3a4656;border-radius:9px 0 0 9px;padding:9px 12px;cursor:pointer;font-weight:700;font-size:13px;box-shadow:-2px 2px 10px rgba(30,40,60,.10)">Edit</button>
+ <button id="dtBarToggle" style="background:#fff;border:1px solid #dde2e9;border-right:none;color:#3a4656;border-radius:9px 0 0 9px;padding:9px 12px;cursor:pointer;font-weight:700;font-size:13px;box-shadow:-2px 2px 10px rgba(30,40,60,.10)">Edit</button>
  <div id="dtBarBody" style="display:none;background:#fff;border:1px solid #dde2e9;border-right:none;border-radius:11px 0 0 11px;padding:11px;margin-top:5px;box-shadow:-3px 3px 16px rgba(30,40,60,.14);width:204px">
    <div style="font-size:10px;color:#8a93a1;margin:0 0 8px 2px;letter-spacing:.4px;text-transform:uppercase;font-weight:600">Duct editing</div>
    <button id="dtUndo" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#fff4e6;border:1px solid #ffd9a8;color:#b5641a;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:700;font-size:12px">↶ Undo last change</button>
    <button id="dtFixElbows" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#eafaf0;border:1px solid #a9e0c0;color:#1b7a45;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">↰ Straighten elbows from trace</button>
-   <button id="dtSmartWalk" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#eef4ff;border:1px solid #a9c4ff;color:#3562c4;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⟳ Smart elbow walk (beta)</button>
    <button class="dtTool" data-mode="dragsize" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-resize width</button>
    <button class="dtTool" data-mode="draglen" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-end (length)</button>
    <button class="dtTool" data-mode="move" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Move run</button>
@@ -4936,7 +4787,6 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   window.refreshUndoBtn=function(){ var u=document.getElementById('dtUndo'); if(!u) return; var n=(window.__runSnap||[]).length; u.textContent=n?('\u21b6 Undo last change ('+n+')'):'\u21b6 Undo last change'; u.style.opacity=n?'1':'.5'; u.style.cursor=n?'pointer':'default'; };
   var undoBtn=document.getElementById('dtUndo'); if(undoBtn) undoBtn.onclick=function(){ if(window.__undoRun&&window.__undoRun()){ if(window.refreshUndoBtn) window.refreshUndoBtn(); } };
   var fixElb=document.getElementById('dtFixElbows'); if(fixElb) fixElb.onclick=function(){ try{ window.__repairElbowTurns&&window.__repairElbowTurns(); }catch(e){} };
-  var smartW=document.getElementById('dtSmartWalk'); if(smartW) smartW.onclick=function(){ try{ window.__smartElbowWalk&&window.__smartElbowWalk(); }catch(e){} };
   setInterval(function(){ if(window.refreshUndoBtn) window.refreshUndoBtn(); },700);
   var tapBtn=document.getElementById('dtTapBtn'); if(tapBtn) tapBtn.onclick=function(){ window.__editMode=null; refl(); var real=document.getElementById('tapToolBtn'); if(real){ real.click(); status('Tap tool on — click the duct to drop taps (style/size/direction in its panel).'); } else status('Tap tool not available.'); };
   document.getElementById('dtOff').onclick=function(){ window.__editMode=null; window.__tapMain=null; refl(); status('Edit off — click a duct to select.'); };
@@ -4969,7 +4819,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   }
   function closeWheel(){ if(wheel){ try{wheel.remove();}catch(_){}} wheel=null; }
   // ---- right-click radial TOOL picker (switch edit tool without the sidebar) ----
-  var TOOLS=[{m:'insert',t:'Insert'},{m:'connect',t:'Connect'},{m:'addstraight',t:'Add straight'},{m:'move',t:'Move'},{m:'rotate',t:'Rotate'},{m:'flipelbow',t:'Flip elbow'},{m:'delete',t:'Del run'},{m:'delpiece',t:'Del piece'}];
+  var TOOLS=[{m:'insert',t:'Insert'},{m:'connect',t:'Connect'},{m:'addstraight',t:'Add straight'},{m:'split',t:'Split'},{m:'move',t:'Move'},{m:'rotate',t:'Rotate'},{m:'flipelbow',t:'Flip elbow'},{m:'delete',t:'Del run'},{m:'delpiece',t:'Del piece'}];
   var twSel=-1;
   function showToolWheel(cx,cy){ closeWheel(); twSel=-1;
     wheel=document.createElement('div'); wheel.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;z-index:100000;pointer-events:none';
@@ -5008,6 +4858,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
           +'<button id="cpTap" style="width:100%;margin-bottom:5px;background:#f3effc;border:1px solid #cdbdf0;color:#5a3fa0;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">⌐ Tap (into side)</button>'
           +'<button id="cpShopTap" style="width:100%;margin-bottom:5px;background:#f3effc;border:1px solid #cdbdf0;color:#5a3fa0;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">⌐ Shop tap (angled collar)</button>'
           +'<button id="cpReducer" style="width:100%;margin-bottom:5px;background:#eafaf0;border:1px solid #a9e0c0;color:#1b7a45;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">⇥ Reducer / transition (in-line)</button>'
+          +'<button id="cpOffset" style="width:100%;margin-bottom:5px;background:#fff4e6;border:1px solid #ffd9a8;color:#b5641a;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">⟋ Offset (two 45s + straight)</button>'
           +'<button id="cpCancel" style="width:100%;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:6px;cursor:pointer">Cancel</button>';
         document.body.appendChild(mnu);
         ['mousedown','mouseup','wheel'].forEach(function(t){ mnu.addEventListener(t,function(ev){ev.stopPropagation();},true); });
@@ -5016,6 +4867,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
         mnu.querySelector('#cpTap').onclick=function(){ done(window.__connectTap,'tap',false); };
         mnu.querySelector('#cpShopTap').onclick=function(){ done(window.__connectTap,'tap',true); };
         mnu.querySelector('#cpReducer').onclick=function(){ done(window.__connectReducer,'reduce'); };
+        mnu.querySelector('#cpOffset').onclick=function(){ done(window.__connectOffset,'offset'); };
         mnu.querySelector('#cpCancel').onclick=function(){ try{mnu.remove();}catch(_){} status('Connect cancelled.'); };
       }
       return; }
@@ -5048,6 +4900,10 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
       var pl=window.__runPoly(r), n=pl.length;
       var sS=n2s(pl[0][0],pl[0][1]), sE=n2s(pl[n-1][0],pl[n-1][1]);
       var dStart=(Math.hypot(sp[0]-sS[0],sp[1]-sS[1]) < Math.hypot(sp[0]-sE[0],sp[1]-sE[1]));
+      // if the clicked END terminates in a fitting (e.g. an elbow), add a straight AT that end so we lengthen the end you clicked
+      var endPieceIsFit = dStart ? (r.pieces[0] && r.pieces[0].kind==='fitting') : (r.pieces[r.pieces.length-1] && r.pieces[r.pieces.length-1].kind==='fitting');
+      if(endPieceIsFit){ var w=r.widthIn, st={kind:'straight',lenIn:6,widthIn:w,depthIn:null,round:!!(r.pieces[0]&&r.pieces[0].round),size:(w+'\u00d7?'),cid:'st',camduct:'Straight Duct',_added:true};
+        if(dStart) r.pieces.unshift(st); else r.pieces.push(st); pl=window.__runPoly(r); n=pl.length; sS=n2s(pl[0][0],pl[0][1]); sE=n2s(pl[n-1][0],pl[n-1][1]); }
       var idx=-1,i;
       if(dStart){ for(i=0;i<r.pieces.length;i++){ if(r.pieces[i].kind==='straight'){ idx=i; break; } } }
       else { for(i=r.pieces.length-1;i>=0;i--){ if(r.pieces[i].kind==='straight'){ idx=i; break; } } }
@@ -5100,6 +4956,12 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
           var eh=sp2&&window.__elbowHit?window.__elbowHit(sp2[0],sp2[1]):null;
           if(eh && window.__flipElbow){ window.__flipElbow(eh.runId, eh.pieceIdx); }
           else status('Right-click directly on an elbow to flip it.');
+          window.__editMode=null;
+        } else if(tm==='split'){                                    // cut the straight under the cursor into two
+          var sp4=null; try{ var pt4=overlay.createSVGPoint(); pt4.x=tcx; pt4.y=tcy; var ctm4=overlay.getScreenCTM(); if(ctm4){ var u4=pt4.matrixTransform(ctm4.inverse()); sp4=[u4.x,u4.y]; } }catch(_){ sp4=null; }
+          var ph=sp4&&window.__pieceHit?window.__pieceHit(sp4[0],sp4[1]):null;
+          if(ph && window.__splitPiece){ window.__splitPiece(ph.runId, ph.pieceIdx, ph.alongIn); }
+          else status('Right-click on a straight duct to split it there.');
           window.__editMode=null;
         } else if(tm==='addstraight'){                               // append a straight leg to the nearest run end, then drag length
           var sp3=null; try{ var pt3=overlay.createSVGPoint(); pt3.x=tcx; pt3.y=tcy; var ctm3=overlay.getScreenCTM(); if(ctm3){ var u3=pt3.matrixTransform(ctm3.inverse()); sp3=[u3.x,u3.y]; } }catch(_){ sp3=null; }
@@ -5258,7 +5120,31 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
 (function(){
   function click(id){ var b=document.getElementById(id); if(b && !b.disabled){ b.click(); return true; } return false; }
   function status(s){ try{ if(typeof setStatus==='function') setStatus(s); }catch(_){} }
-  function openEdit(){ var t=document.getElementById('dtBarToggle'), body=document.getElementById('dtBarBody'); if(t&&body&&body.style.display==='none') t.click(); }
+  function openEdit(){ if(window.__showTab) window.__showTab('edit'); }
+  (function(){ function setup(){
+    var host=document.getElementById('tabEdit'), body=document.getElementById('dtBarBody'), bar=document.getElementById('dtBar');
+    var tSel=document.getElementById('tabSelection'), bSel=document.getElementById('tabBtnSel'), bEdit=document.getElementById('tabBtnEdit');
+    if(!host||!body||!tSel||!bSel||!bEdit){ return setTimeout(setup,300); }
+    host.appendChild(body);                                   // MOVE the edit tools into the left Edit tab (keeps all handlers)
+    body.style.display='block'; body.style.width='auto'; body.style.border='none'; body.style.boxShadow='none'; body.style.margin='0'; body.style.padding='0';
+    if(bar) bar.style.display='none';                          // hide the old floating right-edge toolbar
+    window.__showTab=function(which){
+      var edit=(which==='edit');
+      tSel.style.display=edit?'none':''; host.style.display=edit?'':'none';
+      bSel.style.background=edit?'#f5f7fa':'#eef4ff'; bSel.style.color=edit?'#6b7482':'#3562c4'; bSel.style.borderColor=edit?'#dde2e9':'#cdd6e2';
+      bEdit.style.background=edit?'#eef4ff':'#f5f7fa'; bEdit.style.color=edit?'#3562c4':'#6b7482'; bEdit.style.borderColor=edit?'#cdd6e2':'#dde2e9';
+    };
+    bSel.onclick=function(){ window.__showTab('sel'); };
+    bEdit.onclick=function(){ window.__showTab('edit'); };
+    var aside=document.querySelector('aside');
+    function toggleInfo(e){ if(e){ e.stopPropagation(); e.preventDefault(); }
+      var on=!aside.classList.contains('info-on'); aside.classList.toggle('info-on', on);
+      var ds=document.getElementById('infoDotSel'), de=document.getElementById('infoDotEdit');
+      if(ds) ds.classList.toggle('on', on); if(de) de.classList.toggle('on', on); }
+    var idS=document.getElementById('infoDotSel'), idE=document.getElementById('infoDotEdit');
+    if(idS) idS.onclick=toggleInfo; if(idE) idE.onclick=toggleInfo;
+    window.__showTab('sel');                                   // default to Selection
+  } setup(); })();
   var STEPS=[
     {t:'Read size tags', run:function(){ if(!click('aiTileSweep')) status('Read-tags button unavailable.'); }, note:'Reading the size tags across your work area. When it finishes, check them and add any it missed, then Next.'},
     {t:'Find fittings (YOLO)', run:function(){ if(!click('yoloScanBtn')) status('YOLO scan unavailable — load best.onnx first.'); }, note:'Scanning for elbows / tees / taps. Review with Clean with YOLO (fix or mark ones it missed), then Next.'},
@@ -5296,7 +5182,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     h+='<div style="font-size:10px;color:#8a93a1;margin-bottom:9px">Mark the duct green with the geometry tools first, then step through.</div>';
     STEPS.forEach(function(s,i){ var st=(i<step)?'done':(i===step?'now':'todo');
       h+='<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:7px;opacity:'+(st==='todo'?.5:1)+'"><div style="flex:none;width:19px;height:19px;border-radius:50%;text-align:center;line-height:19px;font-weight:800;font-size:10px;background:'+(st==='done'?'#22a95f':st==='now'?'#e79a2b':'#e3e8ef')+';color:'+(st==='todo'?'#8a93a1':'#fff')+'">'+(st==='done'?'\u2713':(i+1))+'</div><div style="flex:1"><div style="font-weight:700;color:'+(st==='now'?'#b06a00':'#3a4656')+'">'+s.t+'</div>'+(st==='now'?('<div style="font-size:10.5px;color:#5b8def;margin-top:2px;line-height:1.35">'+s.note+'</div>'):'')+'</div></div>'; });
-    if(step<STEPS.length) h+='<div style="display:flex;gap:6px;margin-top:9px"><button id="wizRerun" style="flex:none;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer" title="Run this step again">\u21bb</button><button id="wizNext" style="flex:1;background:#eaf6ef;border:1px solid #9fd8b8;color:#1f8f52;font-weight:700;border-radius:8px;padding:8px;cursor:pointer">'+(step===STEPS.length-1?'Finish':'Next \u25b8')+'</button></div>';
+    if(step<STEPS.length) h+='<div style="display:flex;gap:6px;margin-top:9px"><button id="wizRerun" style="flex:none;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer">\u21bb</button><button id="wizNext" style="flex:1;background:#eaf6ef;border:1px solid #9fd8b8;color:#1f8f52;font-weight:700;border-radius:8px;padding:8px;cursor:pointer">'+(step===STEPS.length-1?'Finish':'Next \u25b8')+'</button></div>';
     else h+='<div style="color:#1f8f52;font-weight:700;margin-top:9px">\u2713 Takeoff built \u2014 Edit tools are open.</div><button id="wizRestart" style="width:100%;margin-top:7px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:7px;cursor:pointer">\u21bb Start over</button>';
     pan.innerHTML=h;
     var x=pan.querySelector('#wizX'); if(x) x.onclick=function(){ pan.style.display='none'; launch.style.display='block'; };
