@@ -135,7 +135,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.65</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.67</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -314,6 +314,7 @@
          <button class="btn adv" id="itemsClearBtn" style="flex:1;background:#3a2030;border-color:#7a3b4b;color:#fbb">Clear</button>
        </div>
        <button class="btn" id="startCleanBtn" style="margin-top:6px;font-weight:700;background:#fff4e6;border-color:#ffd9a8;color:#b5641a">Start clean — clear all green</button>
+       <button class="btn go" id="spineBuildBtn" style="margin-top:6px;font-weight:700;background:#e9fbf0;border:2px solid #22a95f;color:#12833f">★ Spine Build (v2) — infill from green</button>
        <button class="btn go" id="trackWalkBtn" style="margin-top:6px;font-weight:700">Build (track-walk · beta)</button>
        <button class="btn" id="walkBetaBtn" style="margin-top:6px;font-weight:700;background:#eef4ff;border-color:#a9c4ff;color:#3562c4">Build (trace-walk · beta 2)</button>
        <button class="btn go" id="aiAssignTest" style="margin-top:6px;font-weight:700">AI: assign tags → ducts (test)</button>
@@ -1928,7 +1929,7 @@ function refreshSel(){
   hint.style.cssText='position:fixed;top:62px;right:14px;z-index:99999;display:none;background:rgba(13,27,39,.96);color:#cfe;font:11px system-ui,sans-serif;padding:6px 9px;border-radius:8px;max-width:180px;line-height:1.4;box-shadow:0 2px 8px rgba(0,0,0,.4)';
   hint.innerHTML='Left-drag = paint <b style="color:#7CFFB2">duct</b><br>Right-drag = paint <b style="color:#ffd27c">not duct</b>';
   document.body.appendChild(hint);
-  function setBrush(on){ brushOn=on; if(!on) eraseMode=false;
+  function setBrush(on){ brushOn=on; window.__brushOn=on; if(!on) eraseMode=false;
     if(on && window.__tools){ Object.keys(window.__tools).forEach(function(k){ if(k!=='brush') try{window.__tools[k]();}catch(e){} }); }
     btn.style.background=(on&&!eraseMode)?'#2b6aa0':'#13212e'; btn.style.borderColor=(on&&!eraseMode)?'#7CFFB2':'#2b6aa0';
     var eb=document.getElementById('eraseBtn'); if(eb){ eb.style.background=(on&&eraseMode)?'#b34a4a':'#13212e'; eb.style.borderColor=(on&&eraseMode)?'#ffb0b0':'#b34a4a'; }
@@ -3495,10 +3496,89 @@ function refreshSel(){
     setStatus('Walk build (beta): '+runs.length+' runs, '+nElb+' elbows laid from the trace path. Forks/taps become separate runs for now — connect them with the tools.');
   };
 
+  // ============================================================================
+  // SPINE BUILD (v2) — isolated graph-walk builder. Runs OFF the green you selected.
+  //   1) pair walls into centerline spines (buildSegmentRuns -> __sgRuns)
+  //   2) walk each spine from a free end, following the SAME-WIDTH continuation
+  //      through corners; lay straights + elbows with the turn from real geometry
+  //   3) at a break: same-width leg within reach -> jump; else size-tag -> continue;
+  //      else STOP and flag (never guess)
+  //   4) YOLO swaps fittings onto the finished clean runs
+  // Validated against real exports before shipping. Does NOT touch track-walk.
+  // ============================================================================
+  window.__spineBuild=function(){
+    if(typeof scaleIPF==='undefined' || !(scaleIPF>0)){ setStatus('Set the drawing scale first.'); return; }
+    try{ buildSegmentRuns(); }catch(e){}
+    var sg=window.__sgRuns||[]; if(!sg.length){ setStatus('No green duct selected — paint/select duct first, then Spine Build.'); return; }
+    var pp=6*scaleIPF, TOL=inToPt(16), REACH=inToPt(48);
+    // spine segments from centerline fragments
+    var S=[]; sg.forEach(function(r){ var c=r.corners; if(!c||c.length<4) return;
+      var A=[(c[0][0]+c[3][0])/2,(c[0][1]+c[3][1])/2], B=[(c[1][0]+c[2][0])/2,(c[1][1]+c[2][1])/2];
+      if(Math.hypot(B[0]-A[0],B[1]-A[1])<inToPt(4)) return;
+      S.push({A:A,B:B,w:(typeof snapDuctW==='function'?snapDuctW(r.widthIn):r.widthIn), used:false}); });
+    if(!S.length){ setStatus('No usable spine fragments.'); return; }
+    function near(p,q){ return Math.hypot(p[0]-q[0],p[1]-q[1])<=TOL; }
+    function nearR(p,q,R){ return Math.hypot(p[0]-q[0],p[1]-q[1])<=R; }
+    function unit(a,b){ var dx=b[0]-a[0],dy=b[1]-a[1],l=Math.hypot(dx,dy)||1; return [dx/l,dy/l]; }
+    function deg(pt,excl){ var n=0; S.forEach(function(s){ if(s===excl) return; if(near(pt,s.A)||near(pt,s.B)) n++; }); return n; }
+    // continuation options from point `to`, arriving with heading `h`, current width `w`
+    function nextFrom(to,h,w){
+      var cands=[];
+      S.forEach(function(s){ if(s.used) return;
+        [[s.A,s.B],[s.B,s.A]].forEach(function(pr){ var e=pr[0],o=pr[1];
+          var d=Math.hypot(e[0]-to[0],e[1]-to[1]); if(d>REACH) return;
+          var hh=unit(to,o), align=h[0]*hh[0]+h[1]*hh[1]; if(align< -0.35) return;   // don't double back
+          var wdiff=Math.abs((s.w||0)-(w||0));
+          // score: touching(0) beats bridged; same-width beats different; straighter beats sharper
+          var touch=near(to,e)?0:1;
+          cands.push({s:s,o:o,hh:hh,align:align,wdiff:wdiff,touch:touch,d:d}); }); });
+      cands.sort(function(a,b){
+        if(a.touch!==b.touch) return a.touch-b.touch;                 // prefer a fragment that actually touches
+        var aw=a.wdiff>2.0, bw=b.wdiff>2.0; if(aw!==bw) return aw?1:-1; // prefer same width
+        return b.align-a.align;                                       // prefer straightest
+      });
+      return cands[0]||null;
+    }
+    var pal=(typeof palette!=='undefined'&&palette.length)?palette:['#22a95f','#5b8def','#e0952b','#c257c9','#2bb5b0'];
+    var runsOut=[], elbows=0, stops=0;
+    function buildRun(seed, startPt){
+      var cur=seed, frm=startPt.slice(), to=(near(startPt,seed.A)?seed.B.slice():seed.A.slice());
+      var dir0=unit(frm,to), pieces=[], prev=dir0, guard=0;
+      cur.used=true;
+      while(cur && guard++<300){
+        var heading=unit(frm,to);
+        if(pieces.length){ var t=Math.atan2(prev[0]*heading[1]-prev[1]*heading[0], prev[0]*heading[0]+prev[1]*heading[1]);
+          if(Math.abs(t)>0.35){ pieces.push({kind:'fitting',cid:'e90',camduct:'90 Elbow',turn:t,lenIn:0,widthIn:cur.w,_elbow:true,_walk:true}); elbows++; } }
+        var segLen=Math.hypot(to[0]-frm[0],to[1]-frm[1])/pp;
+        pieces.push({kind:'straight',lenIn:Math.max(1,Math.round(segLen)),widthIn:cur.w,depthIn:null,size:cur.w+'"',round:false,cid:'st',camduct:'Straight Duct'});
+        prev=heading;
+        var nx=nextFrom(to,heading,cur.w);
+        if(!nx){ stops++; break; }                                    // honest stop at a real dead-end/fork
+        nx.s.used=true; frm=to.slice(); to=nx.o.slice(); cur=nx.s;
+      }
+      return {start:startPt.slice(), dir:dir0, w:seed.w, pieces:pieces};
+    }
+    window.__pushRunUndo&&window.__pushRunUndo();
+    for(var pass=0; pass<2; pass++){
+      S.forEach(function(s){ if(s.used) return;
+        var sp = (pass===0) ? (deg(s.A,s)===0?s.A : (deg(s.B,s)===0?s.B : null)) : s.A;
+        if(!sp) return;
+        var w=buildRun(s, sp);
+        if(w.pieces.length) runsOut.push({ id:'sp'+Date.now().toString(36)+Math.floor(Math.random()*1e4), start:w.start, dir:w.dir, widthIn:w.w, color:pal[runsOut.length%pal.length], label:'', pieces:w.pieces, _spine:true });
+      });
+    }
+    window.__runs2d=runsOut;
+    try{ if(window.__integrateYoloFittings) window.__integrateYoloFittings(); }catch(e){}   // YOLO swaps fittings onto clean runs
+    var totLF=0; runsOut.forEach(function(r){ r.pieces.forEach(function(p){ if(p.kind==='straight') totLF+=(p.lenIn||0)/12; }); });
+    renderItems(); renderPanel();
+    setStatus('Spine Build: '+runsOut.length+' runs, '+elbows+' elbows (turn from the trace), '+Math.round(totLF)+' LF. '+(stops?stops+' open end(s) flagged — connect with the tools.':'')); 
+  };
+
   (function(){ var b=document.getElementById('itemsFromRunsBtn'); if(b) b.onclick=runsFromPreview;
     var tw=document.getElementById('trackWalkBtn'); if(tw) tw.onclick=buildRunsTrackWalk;
     var wb=document.getElementById('walkBetaBtn'); if(wb) wb.onclick=function(){ try{ window.__walkBuildBeta(); }catch(e){ setStatus('Walk error: '+((e&&e.message)||e)); } };
     var scb=document.getElementById('startCleanBtn'); if(scb) scb.onclick=function(){ try{ startClean(); }catch(e){ setStatus('Start clean error: '+((e&&e.message)||e)); } };
+    var spb=document.getElementById('spineBuildBtn'); if(spb) spb.onclick=function(){ try{ window.__spineBuild(); }catch(e){ setStatus('Spine Build error: '+((e&&e.message)||e)); } };
     (function(){ var dB=document.getElementById('editDelBtn'), sB=document.getElementById('editSizeBtn'), tB=document.getElementById('editTapBtn');
       function upd(){ var m=window.__editMode;
         if(dB){ dB.textContent='\uD83D\uDDD1 Click-to-delete: '+(m==='delete'?'ON':'OFF'); dB.style.background=m==='delete'?'#5a1820':'#2a1418'; }
@@ -4906,7 +4986,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   var drag=null;
   overlay.addEventListener('contextmenu', function(e){ e.preventDefault(); }, true);   // right-click drives the tool wheel, not the browser menu
   overlay.addEventListener('mousedown', function(e){
-    if(e.button===2){ e.preventDefault(); e.stopPropagation(); drag={mode:'toolwheel', cx:e.clientX, cy:e.clientY}; showToolWheel(e.clientX,e.clientY); status('Drag to a tool, release to switch.'); return; }
+    if(e.button===2){ if(window.__brushOn) return; e.preventDefault(); e.stopPropagation(); drag={mode:'toolwheel', cx:e.clientX, cy:e.clientY}; showToolWheel(e.clientX,e.clientY); status('Drag to a tool, release to switch.'); return; }   // brush active -> let its right-drag paint not-duct
   }, true);
   overlay.addEventListener('mousedown', function(e){
     var m=window.__editMode; if(e.button!==0) return;
