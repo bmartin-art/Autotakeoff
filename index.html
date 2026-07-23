@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.01</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.06</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -473,7 +473,14 @@ let tags=[];         // {x,y,text}  (px)
 let layers={};       // id -> {name, visible, isDuct}
 let selected=new Set();
 let dragMode='select';         // 'select' | 'duct' | 'not' | 'work'
-var workArea=null;
+var workArea=null;                 // derived BOUNDING BOX of all work areas (kept for the scan/tile-sweep, which crop one rect)
+var workAreas=[];                  // the actual set of work-area boxes; a segment counts if it's inside ANY of them
+function recomputeWA(){             // refresh the bounding box whenever the set changes
+  if(!workAreas.length){ workArea=null; return; }
+  var x0=1e18,y0=1e18,x1=-1e18,y1=-1e18;
+  workAreas.forEach(function(a){ x0=Math.min(x0,a.ux0); y0=Math.min(y0,a.uy0); x1=Math.max(x1,a.ux1); y1=Math.max(y1,a.uy1); });
+  workArea={ux0:x0,uy0:y0,ux1:x1,uy1:y1};
+}
 let includedPages=new Set();   // duct pages chosen in the picker (empty = all)
 let pageLayersUsed=new Set();  // OCG ids actually drawn on the current page
 let suggestedPages=new Set();  // pages whose duct-layer guess has already run
@@ -481,7 +488,7 @@ let suggestedPages=new Set();  // pages whose duct-layer guess has already run
 // ---- matrix helpers (pdf.js convention) ----
 const applyM=(m,x,y)=>[m[0]*x+m[2]*y+m[4], m[1]*x+m[3]*y+m[5]];
 function invVP(X,Y){ var m=viewport.transform,a=m[0],b=m[1],c=m[2],d=m[3],e=m[4],f=m[5],det=(a*d-b*c)||1; return [ (d*(X-e)-c*(Y-f))/det, (-b*(X-e)+a*(Y-f))/det ]; }
-function inArea(s){ if(!workArea) return true; var mx=(s.ux1+s.ux2)/2,my=(s.uy1+s.uy2)/2; return !(mx<workArea.ux0||mx>workArea.ux1||my<workArea.uy0||my>workArea.uy1); }
+function inArea(s){ if(!workAreas.length) return true; var mx=(s.ux1+s.ux2)/2,my=(s.uy1+s.uy2)/2; for(var i=0;i<workAreas.length;i++){ var a=workAreas[i]; if(!(mx<a.ux0||mx>a.ux1||my<a.uy0||my>a.uy1)) return true; } return false; }
 const mulM=(a,b)=>[a[0]*b[0]+a[2]*b[1], a[1]*b[0]+a[3]*b[1], a[0]*b[2]+a[2]*b[3],
                    a[1]*b[2]+a[3]*b[3], a[0]*b[4]+a[2]*b[5]+a[4], a[1]*b[4]+a[3]*b[5]+a[5]];
 
@@ -912,7 +919,7 @@ function saveTakeoff(){
   var ctrl={}; ['blackOnly','heavyOnly','strictBlack','dropTagBoxes','darkMap','runsView'].forEach(function(id){ var e=document.getElementById(id); if(e) ctrl[id]=!!e.checked; });
   ['blkThresh','lwThresh','blkMinLen'].forEach(function(id){ var e=document.getElementById(id); if(e) ctrl[id]=e.value; });
   var data={ v:1, app:'brookstone-takeoff', savedAt:new Date().toISOString(), file:(loadedFileName||''), page:pageNum, count:segments.length,
-    scaleIPF:scaleIPF, scaleAuto:scaleAuto, workArea:workArea, tags:tags,
+    scaleIPF:scaleIPF, scaleAuto:scaleAuto, workArea:workArea, workAreas:workAreas, tags:tags,
     pickedColors:Array.from(pickedColors), pickedShades:Array.from(pickedShades), pickHeavy:pickHeavy, ctrl:ctrl, marks:marks };
   var blob=new Blob([JSON.stringify(data)],{type:'application/json'});
   var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
@@ -931,7 +938,7 @@ function loadTakeoff(file){
       }
       if(d.ctrl){ for(var id in d.ctrl){ var e=document.getElementById(id); if(!e) continue; if(e.type==='checkbox') e.checked=!!d.ctrl[id]; else e.value=d.ctrl[id]; } }
       if('scaleIPF' in d){ scaleIPF=d.scaleIPF; scaleAuto=!!d.scaleAuto; try{ updateScaleUI(); }catch(e){} }
-      workArea=d.workArea||null;
+      workAreas=(d.workAreas&&d.workAreas.length)?d.workAreas:(d.workArea?[d.workArea]:[]); recomputeWA();
       pickedColors=new Set(d.pickedColors||[]); pickedShades=new Set(d.pickedShades||[]); pickHeavy=!!d.pickHeavy;
       segments.forEach(function(s){ s.lock=null; s._userMark=false; });
       var map={}; segments.forEach(function(s,i){ map[_tkKey(s)]=i; });
@@ -1571,7 +1578,7 @@ function wizRender(){
 }
 window.wizChoose=function(a){
   if(a==='wa-draw'){ dragMode='work'; var ov=document.getElementById('overlay'); if(ov) ov.style.cursor='cell'; setStatus('Drag a box around the duct area, then click Next in the setup card.'); WIZ.sub='drawing'; wizRender(); return; }
-  if(a==='wa-skip'){ workArea=null; WIZ.sub=null; WIZ.step=2; wizRender(); return; }
+  if(a==='wa-skip'){ workAreas=[]; recomputeWA(); WIZ.sub=null; WIZ.step=2; wizRender(); return; }
   if(a==='wa-next'){ WIZ.sub=null; WIZ.step=2; wizRender(); return; }
   if(a==='color-yes'){ wizFinish('color'); return; }
   if(a==='color-no'){ WIZ.step=3; wizRender(); return; }
@@ -1818,7 +1825,7 @@ function drawOverlay(){
   for(var k=0;k<order.length;k++){ var gr=groups[order[k]]; html+='<path d="'+gr.p.join('')+'" fill="none" stroke="'+gr.stroke+'" stroke-width="'+gr.w+'" stroke-opacity="'+gr.op+'" stroke-linecap="round"/>'; }
   if(window.__flagged && window.__flagged.size){ var fp=[]; window.__flagged.forEach(function(i){ var s=segments[i]; if(s) fp.push('M'+s.x1.toFixed(1)+' '+s.y1.toFixed(1)+'L'+s.x2.toFixed(1)+' '+s.y2.toFixed(1)); }); if(fp.length) html+='<path d="'+fp.join('')+'" fill="none" stroke="'+(window.__simDir==='promote'?'#22d3ee':'#ff2d2d')+'" stroke-width="5" stroke-opacity="0.95" stroke-linecap="round" pointer-events="none"/>'; }
   html+='<path id="selPath" d="'+selPathD()+'" fill="none" stroke="#ffffff" stroke-width="3.5" pointer-events="none"/>';
-  if(workArea && viewport){ var P0=applyM(viewport.transform,workArea.ux0,workArea.uy0), P1=applyM(viewport.transform,workArea.ux1,workArea.uy1); var RX=Math.min(P0[0],P1[0]),RY=Math.min(P0[1],P1[1]),RW=Math.abs(P1[0]-P0[0]),RH=Math.abs(P1[1]-P0[1]); html+='<rect x="'+RX+'" y="'+RY+'" width="'+RW+'" height="'+RH+'" fill="rgba(47,111,237,0.05)" stroke="#2f6fed" stroke-width="2" stroke-dasharray="7 5" pointer-events="none"/>'; }
+  if(workAreas.length && viewport){ workAreas.forEach(function(wa){ var P0=applyM(viewport.transform,wa.ux0,wa.uy0), P1=applyM(viewport.transform,wa.ux1,wa.uy1); var RX=Math.min(P0[0],P1[0]),RY=Math.min(P0[1],P1[1]),RW=Math.abs(P1[0]-P0[0]),RH=Math.abs(P1[1]-P0[1]); html+='<rect x="'+RX+'" y="'+RY+'" width="'+RW+'" height="'+RH+'" fill="rgba(47,111,237,0.05)" stroke="#2f6fed" stroke-width="2" stroke-dasharray="7 5" pointer-events="none"/>'; }); }
   // size-tag markers — draw where each size label actually sits (AI sweep = magenta, other = cyan).
   // Lets us see whether tags land ON the runs (snap-tolerance issue) or off them (AI-coordinate issue).
   try{ for(var _ti=0; _ti<tags.length; _ti++){ var _t=tags[_ti]; if(_t.x==null||_t.y==null) continue; if(!/\d/.test(String(_t.text||''))) continue;
@@ -1890,7 +1897,7 @@ function refreshSel(){
     segments.forEach((s,idx)=>{
       if(dragMode==='select' && !show[s.cls]) return;   // selecting grabs only what's visible; painting grabs all (so you can recover cleared/hidden lines)
       if(segHitsBox(s,x0,y0,x1,y1)) hits.push(idx); });
-    if(dragMode==='work'){ var ca=invVP(x0,y0), cb=invVP(x1,y1); workArea={ux0:Math.min(ca[0],cb[0]),uy0:Math.min(ca[1],cb[1]),ux1:Math.max(ca[0],cb[0]),uy1:Math.max(ca[1],cb[1])}; dragMode='select'; var ov2=document.getElementById('overlay'); if(ov2) ov2.style.cursor='crosshair'; document.querySelectorAll('.modes .mode').forEach(function(x){x.classList.toggle('active',x.dataset.m==='select');}); classify(); drawOverlay(); setStatus('Work area set \u2014 everything outside it is ignored.'); return; }
+    if(dragMode==='work'){ var ca=invVP(x0,y0), cb=invVP(x1,y1); workAreas.push({ux0:Math.min(ca[0],cb[0]),uy0:Math.min(ca[1],cb[1]),ux1:Math.max(ca[0],cb[0]),uy1:Math.max(ca[1],cb[1])}); recomputeWA(); dragMode='select'; var ov2=document.getElementById('overlay'); if(ov2) ov2.style.cursor='crosshair'; document.querySelectorAll('.modes .mode').forEach(function(x){x.classList.toggle('active',x.dataset.m==='select');}); classify(); drawOverlay(); setStatus('Work area '+workAreas.length+' set \u2014 only inside your box'+(workAreas.length>1?'es':'')+' is traced. Use "Set work area" again to add another.'); return; }
     if(dragMode==='select'){ hits.forEach(i=>selected.add(i)); refreshSel(); if(selected.size&&window.showQuick) window.showQuick(e.clientX,e.clientY); }
     else { pushUndo(); const lk=(dragMode==='duct'?'duct':'not'); hits.forEach(i=>{ segments[i].lock=lk; segments[i]._userMark=true; }); classify(); drawOverlay(); var __n=0; try{ if(hits.length) __n=addExamplesClustered(hits, lk, 8)||0; }catch(e){} setStatus('Marked '+hits.length+' line(s) '+lk+(hits.length?(' \u00b7 taught AI '+__n+' example(s), '+EXAMPLES.length+' learned total'):'')); }
   });
@@ -2411,6 +2418,7 @@ function refreshSel(){
     if(!p||p.kind!=='straight'){ if(typeof setStatus==='function') setStatus('Pick a straight length of duct to insert into.'); return false; }
     window.__pushRunUndo&&window.__pushRunUndo();
     var L=p.lenIn||0, a=Math.max(0,Math.min(L, alongIn||0));
+    if(spec.type==='elbow90'||spec.type==='elbow45') a=L;   // an elbow attaches at the END of the clicked duct; the existing leg keeps its angle, a NEW leg goes off at the elbow's angle
     var w=p.widthIn, dep=(p.depthIn!=null?p.depthIn:null), rr=!!p.round, sz=p.size;
     function mkS(len){ return {kind:'straight',lenIn:rnd(Math.max(0,len)),widthIn:w,depthIn:dep,size:sz,cid:rr?'spiral':'st',camduct:rr?'Spiral':'Straight Duct',round:rr}; }
     var before=mkS(a), after=mkS(L-a), t=spec.type;
@@ -2647,9 +2655,15 @@ function refreshSel(){
         if(out){
           var ductAlong=function(h){ var w=0, st=[10,20,30], i; for(i=0;i<st.length;i++){ var dd=inToPt(st[i]), near=(window.__ductDirAt?window.__ductDirAt(d.nx+h[0]*dd, d.ny+h[1]*dd, 12):[]); near.forEach(function(x){ var al=Math.abs(h[0]*x.dir[0]+h[1]*x.dir[1]); if(al>0.7) w+=x.w*al; }); } return w; };
           var wPos=ductAlong(out), wNeg=ductAlong([-out[0],-out[1]]);
-          var leg=(wPos>=wNeg)?out:[-out[0],-out[1]];
-          var dot=inc[0]*leg[0]+inc[1]*leg[1], crs=inc[0]*leg[1]-inc[1]*leg[0];
-          turnV=(Math.atan2(crs,dot)>=0?1:-1)*Math.PI/2;
+          var wStraight=ductAlong(inc), perpBest=Math.max(wPos,wNeg);
+          // ONLY bend if the run's OWN trace actually stops going straight and a perpendicular leg takes over.
+          // If green keeps running straight ahead (a tee/branch, or a mis-detected elbow), leave it straight so
+          // the run sticks to its green instead of shooting off down the branch.
+          if(perpBest>0 && perpBest > wStraight*1.3){
+            var leg=(wPos>=wNeg)?out:[-out[0],-out[1]];
+            var dot=inc[0]*leg[0]+inc[1]*leg[1], crs=inc[0]*leg[1]-inc[1]*leg[0];
+            turnV=(Math.atan2(crs,dot)>=0?1:-1)*Math.PI/2;
+          }
         }
       }
       // split the straight piece at 'into'
@@ -3811,17 +3825,21 @@ function refreshSel(){
       var rvp=page.getViewport({scale:rScale});
       var rc=document.createElement('canvas'), waOX=0, waOY=0, W=0, H=0;
       if(workArea){
-        // Render ONLY the work area at the (possibly high-detail) scale -> more pixels per symbol for
-        // the starved small classes (tee/tap/sizetag), without a memory-blowing full-sheet canvas.
+        // Render the work-area bounding box at the scale -> more pixels per symbol for the starved
+        // small classes, and (for scattered multi-area boxes) tile straight from the PDF if it's large.
         var wa0=applyM(rvp.transform, workArea.ux0, workArea.uy0), wa1=applyM(rvp.transform, workArea.ux1, workArea.uy1);
         var WX0=Math.max(0,Math.min(wa0[0],wa1[0])-40), WY0=Math.max(0,Math.min(wa0[1],wa1[1])-40);
         var WX1=Math.max(wa0[0],wa1[0])+40, WY1=Math.max(wa0[1],wa1[1])+40;
         waOX=Math.floor(WX0); waOY=Math.floor(WY0);
-        rc.width=Math.max(8,Math.ceil(WX1-WX0)); rc.height=Math.max(8,Math.ceil(WY1-WY0));
-        var rxw=rc.getContext('2d',{willReadFrequently:true}); rxw.fillStyle='#fff'; rxw.fillRect(0,0,rc.width,rc.height);
-        await withPageRender(function(){ return page.render({canvasContext:rxw, viewport:rvp, transform:[1,0,0,1,-waOX,-waOY], optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
-        console.log('[takeoff] work-area-only render', rc.width+'x'+rc.height,'at rScale',rScale.toFixed(2));
-        W=rc.width; H=rc.height;
+        W=Math.max(8,Math.ceil(WX1-WX0)); H=Math.max(8,Math.ceil(WY1-WY0));
+        if(W*H <= 16e6){
+          rc.width=W; rc.height=H;
+          var rxw=rc.getContext('2d',{willReadFrequently:true}); rxw.fillStyle='#fff'; rxw.fillRect(0,0,W,H);
+          await withPageRender(function(){ return page.render({canvasContext:rxw, viewport:rvp, transform:[1,0,0,1,-waOX,-waOY], optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
+          console.log('[takeoff] work-area render', W+'x'+H,'at rScale',rScale.toFixed(2));
+        } else {
+          rc=null; console.log('[takeoff] large work-area '+W+'x'+H+' — tiling directly from the PDF at rScale',rScale.toFixed(2));   // tile loop renders each tile offset by waOX/waOY
+        }
       } else {
         W=Math.ceil(rvp.width); H=Math.ceil(rvp.height);
         if(W*H <= 16e6){                                       // small enough to rasterize in one canvas (fast path)
@@ -4754,8 +4772,8 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ selected.clear();
   if(rm) rm.addEventListener('input',updDR);
 })();
 (function(){var ws=document.getElementById('workSet'),wc=document.getElementById('workClear'),ta=document.getElementById('tbAi'),tc=document.getElementById('tbConfirm');
-  if(ws) ws.onclick=function(){ dragMode='work'; var ov=document.getElementById('overlay'); if(ov) ov.style.cursor='cell'; document.querySelectorAll('.modes .mode').forEach(function(x){x.classList.remove('active');}); setStatus('Draw a box around the duct area.'); };
-  if(wc) wc.onclick=function(){ workArea=null; classify(); drawOverlay(); setStatus('Work area cleared.'); };
+  if(ws) ws.onclick=function(){ dragMode='work'; var ov=document.getElementById('overlay'); if(ov) ov.style.cursor='cell'; document.querySelectorAll('.modes .mode').forEach(function(x){x.classList.remove('active');}); setStatus('Draw a box around a print area. Click Set work area again to add another box'+(workAreas.length?(' (you have '+workAreas.length+')'):'')+'.'); };
+  if(wc) wc.onclick=function(){ workAreas=[]; recomputeWA(); classify(); drawOverlay(); setStatus('Work area cleared.'); };
   if(ta) ta.onclick=function(){ var b=document.getElementById('aiScan'); if(b) b.click(); };
   if(tc) tc.onclick=function(){ confirmTakeoff(); };
   var tl=document.getElementById('tbLock'); if(tl) tl.onclick=lockInTakeoff; var rs=document.getElementById('tbRunSel'); if(rs) rs.onclick=function(){ selectionDone=true; classify(); drawOverlay(); try{ setStatus('Line selection run \u2014 adjust filters to re-run live, or use AI review to refine.'); }catch(e){} }; var pk=document.getElementById('tbPick'); if(pk) pk.onclick=function(){ pickMode=true; try{document.getElementById('overlay').style.cursor='crosshair';}catch(e){} setStatus('Click a piece of duct on the print to set color + thickness.'); }; var mtd=document.getElementById('mTolD'), mtw=document.getElementById('mTolW'); function updTol(){ var a=document.getElementById('mTolDV'); if(a&&mtd)a.textContent=parseFloat(mtd.value).toFixed(2); var b2=document.getElementById('mTolWV'); if(b2&&mtw)b2.textContent=(parseFloat(mtw.value)>=3?'off':parseFloat(mtw.value).toFixed(1)); if(matchSample){ classify(); drawOverlay(); var bk=segments.filter(function(s){return s.cls==='duct';}).length; setStatus('Matched '+bk+' lines.'); } } if(mtd)mtd.addEventListener('input',updTol); if(mtw)mtw.addEventListener('input',updTol); var eb=document.getElementById('exportLearn'); if(eb) eb.onclick=exportLearning; var ib=document.getElementById('importLearn'), ifl=document.getElementById('importLearnFile'); if(ib&&ifl){ ib.onclick=function(){ ifl.click(); }; ifl.onchange=function(){ if(ifl.files&&ifl.files[0]) importLearning(ifl.files[0]); ifl.value=''; }; }
@@ -5350,19 +5368,44 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   var auto=document.createElement('button'); auto.id='autoRunBtn'; auto.textContent='Auto Takeoff';
   auto.style.cssText='background:#e9f1fb;border:1px solid #b6d2ef;color:#2f6fb0;border-radius:8px;padding:7px 13px;font-weight:700;font-size:12px;cursor:pointer;margin-left:6px';
   (document.querySelector('header')||document.body).appendChild(auto);
+  var _autoProgEl=null, _autoPoll=null;
+  function _mkAutoProg(){
+    _apHide();
+    var d=document.createElement('div'); d.id='autoProg';
+    d.style.cssText='position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:100003;width:320px;background:#fff;border:1px solid #dde2e9;border-radius:12px;padding:14px 16px;box-shadow:0 12px 34px rgba(30,40,60,.24);font:12px -apple-system,system-ui,sans-serif;color:#2b3441';
+    var steps=['Reading tags','Finding fittings','Building runs'], sh='';
+    steps.forEach(function(s,i){ sh+='<div id="apStep'+i+'" style="display:flex;align-items:center;gap:7px;margin:3px 0;color:#9aa4b0"><span class="apDot" style="width:14px;height:14px;border-radius:50%;border:2px solid #cfd6df;display:inline-block;flex:0 0 14px;text-align:center;line-height:10px"></span><span>'+s+'</span></div>'; });
+    d.innerHTML='<div style="font-weight:700;font-size:13px;margin-bottom:9px">Auto Takeoff</div><div id="apSteps">'+sh+'</div>'+
+      '<div style="height:7px;background:#eef1f5;border-radius:4px;overflow:hidden;margin-top:10px"><div id="apBar" style="height:100%;width:0%;background:linear-gradient(90deg,#5b8def,#3562c4);transition:width .25s ease"></div></div>'+
+      '<div id="apDetail" style="margin-top:7px;color:#6b7683;font-size:11px;min-height:14px"></div>';
+    document.body.appendChild(d); _autoProgEl=d;
+  }
+  function _apStep(i,state){ var el=document.getElementById('apStep'+i); if(!el) return; var dot=el.querySelector('.apDot');
+    if(state==='active'){ el.style.color='#2b3441'; el.style.fontWeight='700'; dot.style.borderColor='#5b8def'; dot.style.background='#dbe7ff'; }
+    else if(state==='done'){ el.style.color='#1f8a5b'; el.style.fontWeight='600'; dot.style.borderColor='#1f8a5b'; dot.style.background='#1f8a5b'; dot.innerHTML='<span style="color:#fff;font-size:9px;font-weight:900">\u2713</span>'; }
+  }
+  function _apBar(frac){ var b=document.getElementById('apBar'); if(b) b.style.width=Math.max(0,Math.min(100,frac*100)).toFixed(1)+'%'; }
+  function _apDetail(t){ var e=document.getElementById('apDetail'); if(e) e.textContent=t||''; }
+  function _apHide(){ if(_autoPoll){ clearInterval(_autoPoll); _autoPoll=null; } if(_autoProgEl){ try{_autoProgEl.remove();}catch(_){} _autoProgEl=null; } }
   async function runAuto(){
     var orig=auto.textContent; auto.disabled=true;
+    _mkAutoProg(); var phase=0;
+    _autoPoll=setInterval(function(){ var t=''; try{ t=document.getElementById('status').textContent||''; }catch(_){} _apDetail(t);
+      var m=t.match(/tile\s+(\d+)\s+of\s+(\d+)/i); if(phase===1 && m){ _apBar(0.15 + 0.70*((+m[1])/Math.max(1,+m[2]))); } },250);
     function prog(s){ auto.textContent=s; status(s); }
     try{
-      prog('Auto: reading tags\u2026'); try{ if(typeof aiTileSweep==='function') await aiTileSweep(); }catch(e){ console.warn('auto tags',e); }
+      phase=0; _apStep(0,'active'); _apBar(0.05); prog('Auto: reading tags\u2026'); try{ if(typeof aiTileSweep==='function') await aiTileSweep(); }catch(e){ console.warn('auto tags',e); }
+      _apStep(0,'done'); _apBar(0.15);
       var sb=document.getElementById('yoloScanBtn');
-      if(sb && !sb.disabled && typeof sb.onclick==='function'){ prog('Auto: finding fittings\u2026'); try{ await sb.onclick(); }catch(e){ console.warn('auto yolo',e); } }
-      prog('Auto: building runs\u2026'); try{ if(window.__buildRunsTrackWalk) window.__buildRunsTrackWalk(); }catch(e){ console.warn('auto build',e); }
+      if(sb && !sb.disabled && typeof sb.onclick==='function'){ phase=1; _apStep(1,'active'); prog('Auto: finding fittings\u2026'); try{ await sb.onclick(); }catch(e){ console.warn('auto yolo',e); } }
+      _apStep(1,'done'); _apBar(0.85);
+      phase=2; _apStep(2,'active'); prog('Auto: building runs\u2026'); try{ if(window.__buildRunsTrackWalk) window.__buildRunsTrackWalk(); }catch(e){ console.warn('auto build',e); }
+      _apStep(2,'done'); _apBar(1.0);
       await new Promise(function(r){ setTimeout(r,600); });
       // AI 'find missing duct' sweep removed from auto takeoff (left big yellow boxes; unused).
       try{ var _mv=document.getElementById('aiMissViz'); if(_mv) _mv.innerHTML=''; }catch(_){}
-      openEdit(); status('Auto takeoff complete \u2014 review, then use the Edit tools.');
-    } finally { setTimeout(function(){ auto.disabled=false; auto.textContent=orig; }, 1400); }
+      openEdit(); status('Auto takeoff complete \u2014 review, then use the Edit tools.'); _apDetail('Complete.');
+    } finally { setTimeout(function(){ _apHide(); auto.disabled=false; auto.textContent=orig; }, 1400); }
   }
   auto.onclick=runAuto;
   var pan=document.createElement('div'); pan.id='wizPanel';
