@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.87</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.90</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -322,7 +322,7 @@
        <div style="margin-top:12px;border-top:1px solid #243;padding-top:10px">
          <div style="font-weight:700;color:#bfe6ff;font-size:13px;margin-bottom:5px">YOLO fitting detection</div>
          <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="yoloShowChk"> Show detection boxes on the print <span style="opacity:.6">(off — detections still feed the builder)</span></label>
-         <div style="font-size:12px;color:#9fb2c8;margin-bottom:6px">Use fittings scoring ≥ <input type="range" id="yoloUseMin" min="0.05" max="0.6" step="0.01" value="0.10" style="width:96px;vertical-align:middle"> <span id="yoloUseMinV" style="font-family:ui-monospace,monospace">0.10</span><div class="hint" style="margin-top:2px">Lower = surface more fittings (incl. low-confidence taps) — you can delete false ones. Filters the boxes and what Build uses. Re-build to apply to the takeoff.</div></div>
+         <div style="font-size:12px;color:#9fb2c8;margin-bottom:6px">Use fittings scoring ≥ <input type="range" id="yoloUseMin" min="0.05" max="1" step="0.01" value="0.10" style="width:96px;vertical-align:middle"> <span id="yoloUseMinV" style="font-family:ui-monospace,monospace">0.10</span><div class="hint" style="margin-top:2px">Lower = surface more fittings (incl. low-confidence taps) — you can delete false ones. Filters the boxes and what Build uses. Re-build to apply to the takeoff.</div></div>
          <div class="row" style="display:flex;gap:6px;align-items:center">
            <button class="btn" id="yoloLoadBtn" style="flex:1">Load best.onnx</button>
            <span id="yoloStatus" style="font-size:11px;opacity:.7">no model</span>
@@ -2084,6 +2084,18 @@ function refreshSel(){
     p.turn = -(p.turn||0) || (p.cid==='e45'?Math.PI/4:Math.PI/2);   // negate; if it was 0/undefined, give it a +90
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Flipped the elbow the other way.'); return true;
   };
+  window.__cycleElbow=function(runId, pieceIdx){          // tap an elbow to spin its corner 90 deg at a time (up->right->down->left); 4 taps = full circle
+    var run=findRun(runId); if(!run) return false; var p=run.pieces[pieceIdx];
+    if(!p||p.kind!=='fitting'||!(p.cid==='e90'||p.cid==='e45'||p._elbow)) return false;
+    window.__pushRunUndo&&window.__pushRunUndo();
+    if(!p.turn) p.turn=(p.cid==='e45'?Math.PI/4:Math.PI/2);              // make sure it's actually bent before we spin it
+    if(pieceIdx===0){                                                    // START elbow: pivot the whole run about run.start (= the elbow vertex), so the corner stays put and just rotates
+      var d=run.dir||[1,0]; run.dir=[-d[1], d[0]];                       // +90 deg on screen: up->right->down->left
+      renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Turned the elbow \u2014 tap again to keep going around.'); return true;
+    }
+    p.turn=-(p.turn);                                                    // mid/end elbow: can't spin all four without moving the duct feeding it, so flip the bend instead
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Flipped the elbow (only start elbows spin all four ways).'); return true;
+  };
   window.__aimElbowAt=function(runId, pieceIdx, ax, ay){    // point an elbow's outgoing leg toward a clicked spot (snap to clean 45/90)
     var run=findRun(runId); if(!run) return false; var p=run.pieces[pieceIdx];
     if(!p||p.kind!=='fitting'||!(p.cid==='e90'||p.cid==='e45'||p._elbow)) return false;
@@ -2278,8 +2290,9 @@ function refreshSel(){
     if(typeof segments==='undefined'||!segments||nx==null) return [];
     var rad=inToPt(radIn||30), bins={};
     for(var i=0;i<segments.length;i++){ var s=segments[i]; if(!s||s.cls!=='duct'||s.x1==null) continue;
-      var mx=(s.x1+s.x2)/2, my=(s.y1+s.y2)/2; if(Math.hypot(mx-nx,my-ny)>rad) continue;
       var dx=s.x2-s.x1, dy=s.y2-s.y1, L=Math.hypot(dx,dy); if(L<1e-4) continue;
+      var tt=((nx-s.x1)*dx+(ny-s.y1)*dy)/(L*L); tt=tt<0?0:(tt>1?1:tt);       // clamp to the segment
+      var cx=s.x1+tt*dx, cy=s.y1+tt*dy; if(Math.hypot(nx-cx,ny-cy)>rad) continue;   // distance to the SEGMENT itself, not its midpoint — a long green leg passing through the sample now counts
       var ang=Math.atan2(dy,dx); if(ang<0) ang+=Math.PI;                 // undirected 0..\u03c0
       var key=Math.round(ang/(Math.PI/18)); (bins[key]=bins[key]||{w:0,s:0}); bins[key].w+=L; bins[key].s+=ang*L; }
     var arr=Object.keys(bins).map(function(k){ var b=bins[k], a=b.s/b.w; return {ang:a,w:b.w,dir:[Math.cos(a),Math.sin(a)]}; });
@@ -4900,7 +4913,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
       var fs=(window.__sizeStepHit)?window.__sizeStepHit(s0[0],s0[1]):null;
       if(fs){ e.stopPropagation(); e.preventDefault(); if(window.__flipSizeStep) window.__flipSizeStep(fs.runId, fs.pieceIdx); try{window.__renderPanel&&window.__renderPanel();}catch(_){} return; }   // tap an existing reducer -> flip its direction
       var eh=(window.__elbowHit)?window.__elbowHit(s0[0],s0[1]):null;
-      if(eh){ e.stopPropagation(); e.preventDefault(); if(window.__flipElbow) window.__flipElbow(eh.runId, eh.pieceIdx); try{window.__renderPanel&&window.__renderPanel();}catch(_){} return; }   // tap an existing elbow -> flip its turn direction
+      if(eh){ e.stopPropagation(); e.preventDefault(); if(window.__cycleElbow) window.__cycleElbow(eh.runId, eh.pieceIdx); else if(window.__flipElbow) window.__flipElbow(eh.runId, eh.pieceIdx); try{window.__renderPanel&&window.__renderPanel();}catch(_){} return; }   // tap an existing elbow -> spin it 90 deg (start elbows cycle all four ways)
       var tgt=(window.__pieceHit)?window.__pieceHit(s0[0],s0[1]):null; if(!tgt) return; e.stopPropagation(); e.preventDefault(); drag={mode:'wheel', target:tgt, cx:e.clientX, cy:e.clientY, sx:s0[0], sy:s0[1]}; showWheel(e.clientX,e.clientY); status('Drag to a fitting, then release. (Tap a reducer to flip it.)'); return; }
     if(m!=='dragsize'&&m!=='draglen'&&m!=='move') return;   // other modes -> let the piece handler (pcHit) run
     var sp=toSvg(e); if(!sp) return; var r=hitRun(sp); if(!r){ return; }
