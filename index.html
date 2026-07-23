@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.94</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.96</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -330,7 +330,20 @@
          <input type="file" id="yoloFile" accept=".onnx" style="display:none">
          <button class="btn go" id="yoloTestBtn" style="width:100%;margin-top:6px;background:#0c1f3a;border-color:#2b6aa0;color:#bfe0ff" disabled>▸ Test detect (visible area)</button>
          <button class="btn go" id="yoloScanBtn" style="width:100%;margin-top:6px;background:#0a2a1f;border-color:#2b9e7a;color:#bfffe6;font-weight:700" disabled>Scan whole sheet (tiled)</button>
-         <div class="hint" style="margin-top:4px">Stage 1: loads your model and runs it on the area you're currently viewing, so we confirm in-browser detection works before scanning the whole sheet. conf <input type="range" id="yoloConf" min="0.05" max="0.6" step="0.05" value="0.10" style="width:70px;vertical-align:middle"> <span id="yoloConfV">0.10</span> · detail <input type="range" id="yoloDetail" min="0.6" max="1.8" step="0.1" value="1.0" style="width:60px;vertical-align:middle"> <span id="yoloDetailV">1.0×</span></div>
+         <div style="margin-top:8px;background:#0c1a28;border:1px solid #22384a;border-radius:8px;padding:8px">
+           <div style="font-size:11px;color:#9fb2c8;margin-bottom:6px">Scan sensitivity — turn up if it's <b>missing fittings</b>:</div>
+           <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+             <span style="font-size:12px;color:#bfe6ff;flex:0 0 82px">Confidence</span>
+             <input type="range" id="yoloConf" min="0.02" max="0.6" step="0.01" value="0.10" style="flex:1;vertical-align:middle">
+             <span id="yoloConfV" style="font-family:ui-monospace,monospace;font-size:11px;flex:0 0 34px;text-align:right">0.10</span>
+           </div>
+           <div style="display:flex;align-items:center;gap:8px">
+             <span style="font-size:12px;color:#bfe6ff;flex:0 0 82px">Zoom / detail</span>
+             <input type="range" id="yoloDetail" min="0.6" max="2.5" step="0.1" value="1.0" style="flex:1;vertical-align:middle">
+             <span id="yoloDetailV" style="font-family:ui-monospace,monospace;font-size:11px;flex:0 0 34px;text-align:right">1.0×</span>
+           </div>
+           <div class="hint" style="margin-top:6px">Both apply to Test detect <b>and</b> the full Scan. <b>Lower Confidence</b> is the main "catch more" knob — it surfaces faint taps/elbows the model is unsure about (you can delete false ones). Raise <b>Zoom</b> only if the sheet is large and fittings render tiny; too high can also hurt, since the model expects a set size. Tile size stays 1024 to match training.</div>
+         </div>
          <div id="yoloOut" style="margin-top:6px"></div>
        </div>
        <label style="display:block;font-size:12px;margin-top:4px"><input type="checkbox" id="runsTagOnly"> Runs only where a size tag matches the width <span style="opacity:.7">(hides empty pockets between ducts)</span></label>
@@ -2554,6 +2567,11 @@ function refreshSel(){
     var nElb = 0; try{ nElb=window.__repairElbowTurns?window.__repairElbowTurns():0; }catch(e){}   // v1.80 behavior: green-primary elbow repair back ON
     sel.clear(); selRun=null; renderItems(); renderPanel();
     setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nElb?(' \u00b7 '+nElb+' elbow(s) turned'):'')+(nDup?(' \u00b7 '+nDup+' doubled run(s) merged'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.'); try{ __ductDiag('joints'); }catch(e){}
+    try{ var _fs=window.__yoloFitStats, _yo=document.getElementById('yoloOut');
+      if(_fs && _yo){ var _dropped=(_fs.skipped_no_run_nearby||0)+(_fs.skipped_no_piece||0);
+        var _msg=(_fs.insertable? ('YOLO fittings: <b>'+_fs.insertable+'</b> detected \u00b7 <b>'+_fs.placed+'</b> placed'+(_dropped?(' \u00b7 <b>'+_dropped+'</b> dropped (sat where no run was built \u2014 corners/edges)'):''))
+                                : 'YOLO found <b>0</b> insertable fittings here \u2014 the model isn\u2019t detecting elbows/taps on this sheet (a training gap, not a threshold you can lower).');
+        _yo.innerHTML='<div class="hint" style="color:'+((_fs.insertable&&_dropped)?'#ffcf8a':(_fs.insertable?'#bfe6ff':'#f5a9a9'))+'">'+_msg+'</div>'; } }catch(e){}
   }
   window.__runsFromPreview=runsFromPreview;
 
