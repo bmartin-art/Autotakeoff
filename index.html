@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.96</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.99</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -339,10 +339,10 @@
            </div>
            <div style="display:flex;align-items:center;gap:8px">
              <span style="font-size:12px;color:#bfe6ff;flex:0 0 82px">Zoom / detail</span>
-             <input type="range" id="yoloDetail" min="0.6" max="2.5" step="0.1" value="1.0" style="flex:1;vertical-align:middle">
+             <input type="range" id="yoloDetail" min="0.6" max="4" step="0.1" value="1.0" style="flex:1;vertical-align:middle">
              <span id="yoloDetailV" style="font-family:ui-monospace,monospace;font-size:11px;flex:0 0 34px;text-align:right">1.0×</span>
            </div>
-           <div class="hint" style="margin-top:6px">Both apply to Test detect <b>and</b> the full Scan. <b>Lower Confidence</b> is the main "catch more" knob — it surfaces faint taps/elbows the model is unsure about (you can delete false ones). Raise <b>Zoom</b> only if the sheet is large and fittings render tiny; too high can also hurt, since the model expects a set size. Tile size stays 1024 to match training.</div>
+           <div class="hint" style="margin-top:6px">The full Scan now auto-sizes fittings from your <b>plan scale</b> so a Scan catches what Test detect catches without cranking anything. Both settings apply to Test detect <b>and</b> the full Scan (and Auto Takeoff). <b>Lower Confidence</b> surfaces faint taps/elbows. <b>Zoom</b> multiplies the auto resolution — raise it if a sheet is still under-catching, lower it if scans are slow. Shortcut: a <b>Work Area</b> scans a region at higher resolution. Tile size stays 1024 to match training.</div>
          </div>
          <div id="yoloOut" style="margin-top:6px"></div>
        </div>
@@ -1144,6 +1144,7 @@ function classify(){
   for(const s of segments){
     if(workArea && !inArea(s)){ s.cls='not'; continue; }                                   // work area always trims everything outside it
     if(s.lock && s._userMark){ s.cls=s.lock; continue; }                                    // YOUR marks this session win over the picker
+    if(s.lock==='not'){ s.cls='not'; continue; }                                            // anything explicitly removed stays removed — the picker can't re-green it
     if(__dropBoxes && s.labelBox){ s.cls='not'; continue; }                                 // boxes drawn around size tags — never duct, in ANY mode
     if(__dropBoxes && s.curved && (s.ulen||0)<26){ s.cls='not'; continue; }                 // round symbols (diffusers, registers, sensors) — never duct, in ANY mode
     if(pickedColors.size || pickedShades.size){ var __d2=false;
@@ -3796,8 +3797,17 @@ function refreshSel(){
       // size the model learned. (Earlier maxSide/4000 skewed tall riser sheets.)
       var un=page.getViewport({scale:1});
       var detail=parseFloat(($('yoloDetail')||{}).value)||1.0;
-      var rScale=Math.min(3.0, 3000/un.width)*detail; if(!(rScale>0.3)) rScale=2.0;
-      console.log('[takeoff build t10] scan render scale =',rScale.toFixed(3),'| page',Math.round(un.width)+'x'+Math.round(un.height),'| detail',detail);
+      // AUTO-RESOLUTION: render so a real inch of duct is a consistent pixel size regardless of sheet size.
+      // pxPerIn(points) = 6*scaleIPF; we target ~3.5 rendered px per real inch (the size the model detects well),
+      // then let the Zoom/detail slider multiply. Falls back to the old page-width formula if scale isn't set.
+      var TARGET_PXIN=3.5, ptPerIn=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0);
+      var rScale = (ptPerIn>0 ? (TARGET_PXIN/ptPerIn) : Math.min(3.0, 3000/un.width)) * detail;
+      if(!(rScale>0.3)) rScale=2.0;
+      rScale=Math.max(0.5, Math.min(8, rScale));
+      var MAXDIM=8000;                                                    // keep the tiled canvas from blowing up memory
+      if(un.width*rScale>MAXDIM) rScale=MAXDIM/un.width;
+      if(un.height*rScale>MAXDIM) rScale=MAXDIM/un.height;
+      console.log('[takeoff build t10] scan render scale =',rScale.toFixed(3),'| page',Math.round(un.width)+'x'+Math.round(un.height),'| detail',detail,'| scaleIPF',(typeof scaleIPF!=='undefined'?scaleIPF:'?'),'| ~px/real-in',(ptPerIn>0?(ptPerIn*rScale).toFixed(1):'n/a'));
       var rvp=page.getViewport({scale:rScale});
       var rc=document.createElement('canvas'), waOX=0, waOY=0;
       if(workArea){
@@ -4801,19 +4811,27 @@ $('nextPg').onclick=()=>{ const a=pagesArr(); const i=a.indexOf(pageNum); if(i>=
 $('pgIn').addEventListener('change',()=>{ let n=parseInt($('pgIn').value)||1; n=Math.max(1,Math.min(pdfDoc.numPages,n));
   pageNum=n; $('pgIn').value=n; selected.clear(); renderPage(); });
 // ---- zoom (to cursor / center) ----
+let _zoomBusy=false, _zoomTarget=null;
 async function zoomTo(newScale, cx, cy){
   const main=document.querySelector('main'); if(!main||!pdfDoc) return;
-  newScale=Math.max(0.2,Math.min(8,newScale));
-  // point under cursor (or viewport center) in CONTENT coords, pre-zoom
-  const rect=main.getBoundingClientRect();
-  const px=(cx==null? rect.width/2 : cx-rect.left);
-  const py=(cy==null? rect.height/2 : cy-rect.top);
-  const contentX=main.scrollLeft+px, contentY=main.scrollTop+py;
-  const ratio=newScale/scale;
-  scale=newScale; $('zLbl').textContent=Math.round(baseScale*scale*100)+'%';
-  await rescaleView();
-  // keep that same content point under the cursor
-  main.scrollLeft=contentX*ratio-px; main.scrollTop=contentY*ratio-py;
+  _zoomTarget={s:Math.max(0.2,Math.min(8,newScale)), cx:cx, cy:cy};
+  if(_zoomBusy) return;                                   // a zoom is mid-render; it'll pick up the latest target
+  _zoomBusy=true;
+  try{
+    while(_zoomTarget){
+      const t=_zoomTarget; _zoomTarget=null;
+      const rect=main.getBoundingClientRect();
+      const px=(t.cx==null? rect.width/2 : t.cx-rect.left);
+      const py=(t.cy==null? rect.height/2 : t.cy-rect.top);
+      // anchor as a FRACTION of the content (robust to canvas rounding), not a raw ratio
+      const oldW=(viewport?viewport.width:main.scrollWidth)||1, oldH=(viewport?viewport.height:main.scrollHeight)||1;
+      const fracX=(main.scrollLeft+px)/oldW, fracY=(main.scrollTop+py)/oldH;
+      scale=t.s; $('zLbl').textContent=Math.round(baseScale*scale*100)+'%';
+      await rescaleView();
+      const newW=(viewport?viewport.width:main.scrollWidth)||1, newH=(viewport?viewport.height:main.scrollHeight)||1;
+      main.scrollLeft=fracX*newW-px; main.scrollTop=fracY*newH-py;   // keep the same content point under the cursor
+    }
+  } finally { _zoomBusy=false; }
 }
 $('zIn').onclick =()=>{ zoomTo(scale*1.25, null, null); };
 $('zOut').onclick=()=>{ zoomTo(scale/1.25, null, null); };
