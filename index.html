@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.90</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.92</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2334,6 +2334,50 @@ function refreshSel(){
     if(typeof setStatus==='function') setStatus(fixed?('Turned '+fixed+' elbow'+(fixed>1?'s':'')+' to follow the green.'):'Elbows already follow the green.');
     return fixed;
   };
+  // ---- DEDUPE: when the wall-pairing lays TWO runs over one duct (one on each wall / on a centerline mark),
+  // collapse them to the one that's actually centered between its green walls. Only fires when the two run
+  // BODIES overlap (perp gap < combined half-width) — genuinely separate parallel ducts are left alone. ----
+  function runChord(r){                                   // straight-run endpoints; null if the run bends
+    for(var i=0;i<r.pieces.length;i++){ var p=r.pieces[i]; if(p.kind==='fitting' && p.turn) return null; }
+    var e=runEnd(r); return {sx:r.start[0], sy:r.start[1], ex:e.x, ey:e.y, ux:r.dir[0], uy:r.dir[1]};
+  }
+  function wallFitScore(r, ch){                            // how well green walls flank this run at +/- its half-width (lower = better centered)
+    var sx=ch.sx, sy=ch.sy, dx=ch.ux, dy=ch.uy, nx=-dy, ny=dx;
+    var L=Math.hypot(ch.ex-sx, ch.ey-sy)||1, half=inToPt((r.widthIn||8)/2), minOff=0.4*half;
+    var bestP=1e9, bestN=1e9;
+    if(typeof segments!=='undefined' && segments){
+      for(var i=0;i<segments.length;i++){ var s=segments[i]; if(!s||s.cls!=='duct'||s.x1==null) continue;
+        var sdx=s.x2-s.x1, sdy=s.y2-s.y1, sl=Math.hypot(sdx,sdy); if(sl<inToPt(5)) continue;
+        if(Math.abs((dx*sdx+dy*sdy)/sl)<0.9) continue;                 // wall must run parallel to the duct
+        var l1=(s.x1-sx)*dx+(s.y1-sy)*dy, l2=(s.x2-sx)*dx+(s.y2-sy)*dy, lo=Math.min(l1,l2), hi=Math.max(l1,l2);
+        if(Math.min(L,hi)-Math.max(0,lo) < L*0.3) continue;            // and run alongside it
+        var perp=(s.x1-sx)*nx+(s.y1-sy)*ny; if(Math.abs(perp)<minOff) continue;   // skip the centerline mark
+        if(perp>=0){ if(perp<bestP) bestP=perp; } else { if(-perp<bestN) bestN=-perp; }
+      }
+    }
+    var eP=(bestP<1e9)?Math.abs(bestP-half):half*2, eN=(bestN<1e9)?Math.abs(bestN-half):half*2;
+    return eP+eN;
+  }
+  function dedupeOverlappingRuns(){
+    var R=window.__runs2d||[], toDrop={}, dropped=0, meta=R.map(runChord);
+    for(var i=0;i<R.length;i++){ if(toDrop[i]||!meta[i]) continue;
+      for(var j=i+1;j<R.length;j++){ if(toDrop[j]||!meta[j]) continue;
+        var A=meta[i], B=meta[j];
+        if(Math.abs(A.ux*B.ux+A.uy*B.uy)<0.98) continue;               // must be near-parallel
+        var nx=-A.uy, ny=A.ux, gap=Math.abs((B.sx-A.sx)*nx+(B.sy-A.sy)*ny);
+        if(gap >= inToPt(((R[i].widthIn||0)+(R[j].widthIn||0))/2)) continue;   // separated -> real distinct ducts
+        var La=Math.hypot(A.ex-A.sx,A.ey-A.sy)||1, Lb=Math.hypot(B.ex-B.sx,B.ey-B.sy)||1;
+        var b0=(B.sx-A.sx)*A.ux+(B.sy-A.sy)*A.uy, b1=(B.ex-A.sx)*A.ux+(B.ey-A.sy)*A.uy;
+        var ov=Math.min(La,Math.max(b0,b1))-Math.max(0,Math.min(b0,b1));
+        if(ov < 0.5*Math.min(La,Lb)) continue;                          // must substantially overlap lengthwise
+        var dropIdx=(wallFitScore(R[i],A) <= wallFitScore(R[j],B)) ? j : i;   // keep the better-centered one
+        toDrop[dropIdx]=true; dropped++;
+      }
+    }
+    if(dropped) window.__runs2d=R.filter(function(_,k){ return !toDrop[k]; });
+    return dropped;
+  }
+  window.__dedupeOverlappingRuns=dedupeOverlappingRuns;
   // ---- RUN UNDO: snapshot window.__runs2d before any destructive edit so a mis-delete/move is recoverable ----
   window.__runSnap=window.__runSnap||[];
   window.__pushRunUndo=function(){ try{ window.__runSnap.push(JSON.stringify(window.__runs2d||[])); if(window.__runSnap.length>40) window.__runSnap.shift(); if(typeof refreshUndoBtn==='function') refreshUndoBtn(); }catch(e){} };
@@ -2503,9 +2547,10 @@ function refreshSel(){
     var nFit = integrateYoloFittings();
     var nCarry = 0;   // DISABLED: a no-tag run keeps its OWN green-line width (was inheriting a nearby tagged run's size, overriding the measured gap). Height stays unknown — set via ✎ resize.
     var nDrop = dropUnsupportedRuns();
+    var nDup = 0; try{ nDup=dedupeOverlappingRuns(); }catch(e){}   // collapse two-runs-over-one-duct into the centered one
     var nElb = 0; try{ nElb=window.__repairElbowTurns?window.__repairElbowTurns():0; }catch(e){}   // v1.80 behavior: green-primary elbow repair back ON
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nElb?(' \u00b7 '+nElb+' elbow(s) turned'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.'); try{ __ductDiag('joints'); }catch(e){}
+    setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nElb?(' \u00b7 '+nElb+' elbow(s) turned'):'')+(nDup?(' \u00b7 '+nDup+' doubled run(s) merged'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.'); try{ __ductDiag('joints'); }catch(e){}
   }
   window.__runsFromPreview=runsFromPreview;
 
@@ -3088,7 +3133,13 @@ function refreshSel(){
             h+='<input type="number" step="0.5" value="'+pc.lenIn+'" onchange="__pcLen(\''+run.id+'\','+i+',this.value)" style="width:54px;padding:3px;border:1px solid #345;border-radius:4px;background:#0b1420;color:#fff"><span style="font-size:10px;opacity:.6">in</span>'
               +'<span style="flex:1;font-size:11px;color:'+(pc._scaled?'#f5b342':'#bfe6ff')+'">'+vh(pc.size)+(pc._scaled?' ~':'')+'</span>';
           } else {
-            h+='<span style="flex:1;font-size:11px;color:#f5b342">\u25c8 '+vh(pc.camduct||pc.cid)+(pc.outW?(' \u2192'+pc.outW+(pc.cid==='s2r'?'\u00f8':'x'+(pc.outD||pc.outW))):'')+'</span>';
+            var _isElb=(pc.cid==='e90'||pc.cid==='e45'||pc._elbow);
+            var _ex=(pc.outW?(' \u2192'+pc.outW+(pc.cid==='s2r'?'\u00f8':'x'+(pc.outD||pc.outW))):'');
+            if(_isElb){
+              h+='<span onclick="__pcElbowEdit(\''+run.id+'\','+i+',event)" title="Click to change angle (45/90) or flip direction" style="flex:1;font-size:11px;color:#f5b342;cursor:pointer;text-decoration:underline dotted #f5b34288">\u25c8 '+vh(pc.camduct||pc.cid)+_ex+' \u25be</span>';
+            } else {
+              h+='<span style="flex:1;font-size:11px;color:#f5b342">\u25c8 '+vh(pc.camduct||pc.cid)+_ex+'</span>';
+            }
           }
           h+='<button onclick="__pcIns(\''+run.id+'\','+i+',event)" style="border:none;background:#243;color:#9f9;border-radius:4px;cursor:pointer;padding:2px 5px">+</button>'
             +'<button onclick="__pcDel(\''+run.id+'\','+i+')" style="border:none;background:#422;color:#f99;border-radius:4px;cursor:pointer;padding:2px 5px">\u00d7</button></div>';
@@ -3115,6 +3166,35 @@ function refreshSel(){
     var sz=p.size||((p.widthIn||r.widthIn)+'\u00d7?');
     var x=(ev&&ev.clientX)||220, y=(ev&&ev.clientY)||160;
     if(window.__fitMenu) window.__fitMenu(id, i, alongIn, sz, x, y); else setStatus('Insert menu unavailable.'); };
+  window.__setElbowAngle=function(id,i,deg){          // switch an elbow between 45 and 90, keeping which way it turns
+    var r=findRun(id); if(!r) return; var p=r.pieces[i]; if(!p) return;
+    if(!(p.cid==='e90'||p.cid==='e45'||p._elbow)) return;
+    window.__pushRunUndo&&window.__pushRunUndo();
+    var mag=(deg===45?Math.PI/4:Math.PI/2), sign=((p.turn||0)<0?-1:1);
+    p.turn=sign*mag; p.cid=(deg===45?'e45':'e90');
+    var rd=(/round/i.test(p.camduct||'')||!!p.round);
+    p.camduct=(deg===45?'45 Elbow':'90 Elbow')+(rd?' (round)':'');
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Changed to a '+deg+'\u00b0 elbow.');
+  };
+  window.__pcElbowEdit=function(id,i,ev){            // click an elbow row in the panel -> tiny menu: change 45/90, flip direction
+    var r=findRun(id); if(!r) return; var p=r.pieces[i]; if(!p) return;
+    if(!(p.cid==='e90'||p.cid==='e45'||p._elbow)) return;
+    try{ if(window.__pcElbowMenuEl){ window.__pcElbowMenuEl.remove(); window.__pcElbowMenuEl=null; } }catch(_){}
+    var is45=(p.cid==='e45'), x=(ev&&ev.clientX)||220, y=(ev&&ev.clientY)||160;
+    if(ev&&ev.stopPropagation) ev.stopPropagation();
+    var m=document.createElement('div');
+    m.style.cssText='position:fixed;z-index:100002;left:'+x+'px;top:'+y+'px;background:#0e1c2b;border:1px solid #2b6aa0;border-radius:8px;padding:6px;box-shadow:0 10px 30px rgba(0,0,0,.5);font:12px system-ui,sans-serif;min-width:158px';
+    function close(){ try{m.remove();}catch(_){} window.__pcElbowMenuEl=null; document.removeEventListener('mousedown',out,true); }
+    function out(e){ if(!m.contains(e.target)) close(); }
+    function btn(label,fn){ var b=document.createElement('button'); b.textContent=label;
+      b.style.cssText='display:block;width:100%;text-align:left;margin:2px 0;padding:7px 9px;border:none;border-radius:5px;background:#12314b;color:#bfe0ff;cursor:pointer';
+      b.onmouseover=function(){b.style.background='#1a4266';}; b.onmouseout=function(){b.style.background='#12314b';};
+      b.onclick=function(e){ e.stopPropagation(); try{fn();}catch(_){} close(); }; return b; }
+    m.appendChild(btn(is45?'Change to 90\u00b0':'Change to 45\u00b0', function(){ window.__setElbowAngle(id,i,is45?90:45); }));
+    m.appendChild(btn('Flip direction', function(){ window.__flipElbow&&window.__flipElbow(id,i); }));
+    document.body.appendChild(m); window.__pcElbowMenuEl=m;
+    setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
+  };
   window.__runAddJoint=function(id){ var r=findRun(id); if(!r)return; var last=r.pieces[r.pieces.length-1]||{widthIn:r.widthIn,depthIn:r.widthIn,size:r.widthIn+'"'}; var rnd=!!last.round; r.pieces.push({kind:'straight',lenIn:(rnd?120:JOINT_DEFAULT),widthIn:last.widthIn,depthIn:last.depthIn,size:last.size,cid:(rnd?'spiral':'st'),camduct:(rnd?'Spiral':'Straight Duct'),round:rnd}); applyReducerDownstream(r); renderItems(); renderPanel(); };
   window.__runDel=function(id){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); if(selRun===id)selRun=null; sel.clear(); renderItems(); renderPanel(); };
   window.__selColor=function(c){ var ids=new Set(); sel.forEach(function(k){ ids.add(k.split(':')[0]); }); ids.forEach(function(id){ var r=findRun(id); if(r)r.color=c; }); renderItems(); renderPanel(); };
