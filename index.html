@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.92</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.94</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -173,7 +173,7 @@
      <label class="adv" style="display:block;font-size:12px;margin-top:5px"><input type="checkbox" id="aiFirst"> <b>AI-first</b> (single-layer) — don’t pre-green; let the AI promote the duct</label>
      <div class="row" style="margin-top:7px"></div>
      <div class="row" style="margin-top:7px"></div>
-     <div class="row" style="margin-top:6px;gap:6px"></div>
+     <div class="row" style="margin-top:6px;gap:6px"><button class="btn" id="simPromote" style="flex:1;font-size:12px">◉ Find similar duct</button><button class="btn notduct" id="simRemove" style="flex:1;font-size:12px">✕ Flag similar</button></div>
      <div class="hint" style="margin-top:3px">Click one object — geometry finds every match and lights up the real lines. <b>Flag similar</b>: click a non-duct thing → matches turn red → click any to keep → remove the rest. <b>Find similar duct</b>: click a missed elbow/run → matches turn green.</div>
      <div class="hint adv" id="sampleInfo">Click a piece of duct on the print - it matches every line like it.</div>
      <div class="adv" style="font-size:12px;margin-top:3px;opacity:.85">Color tol <input type="range" id="mTolD" min="0.05" max="0.7" step="0.02" value="0.30" style="width:90px;vertical-align:middle"> <span id="mTolDV">0.30</span> &nbsp; Thick tol <input type="range" id="mTolW" min="0" max="3" step="0.1" value="3" style="width:80px;vertical-align:middle"> <span id="mTolWV">off</span></div>
@@ -594,9 +594,9 @@ async function renderPage(){
   // Snapshot any manual marks (paint/clean) keyed by geometry, so a zoom or
   // re-render that rebuilds the segments doesn't wipe your edits.
   const lockSnap={};
-  segments.forEach(s=>{ if(s.lock) lockSnap[lockKey(s)]=s.lock; });
+  segments.forEach(s=>{ if(s.lock||s._userMark) lockSnap[lockKey(s)]={l:s.lock||null,u:!!s._userMark}; });
   await extractVectors(page);
-  if(Object.keys(lockSnap).length) segments.forEach(s=>{ const k=lockKey(s); if(lockSnap[k]) s.lock=lockSnap[k]; });
+  if(Object.keys(lockSnap).length) segments.forEach(s=>{ const k=lockKey(s); if(lockSnap[k]){ s.lock=lockSnap[k].l; s._userMark=lockSnap[k].u; } });
   if(window.__autoDimText){ await extractTags(page); }   // OFF by default — auto text-detect grabbed too much junk; use tile sweep / per-run reader instead
   freshScan=true; selectionDone=false; classify();  // features only here (canvas not painted yet); greening waits for 'Run line selection'
   if(!suggestedPages.has(pageNum)){ suggestDuctLayers(); suggestedPages.add(pageNum); }
@@ -1835,7 +1835,7 @@ function refreshSel(){
   window.showQuick=function(x,y){ var w=148,h=36; var px=Math.min(x+12, window.innerWidth-w-8), py=Math.min(y+12, window.innerHeight-h-8);
     q.style.left=Math.max(8,px)+'px'; q.style.top=Math.max(8,py)+'px'; q.style.display='flex'; };
   window.hideQuick=function(){ q.style.display='none'; };
-  function apply(cls){ pushUndo(); var __sel=Array.from(selected); selected.forEach(function(i){ segments[i].lock=cls; }); var __n=addExamplesClustered(__sel,cls,8)||0; classify(); drawOverlay(); selected.clear(); refreshSel(); hideQuick(); setStatus('Marked '+__sel.length+' line(s) '+cls+' \u00b7 taught AI '+__n+' example(s), '+EXAMPLES.length+' learned total'); }
+  function apply(cls){ pushUndo(); var __sel=Array.from(selected); selected.forEach(function(i){ segments[i].lock=cls; segments[i]._userMark=true; }); var __n=addExamplesClustered(__sel,cls,8)||0; classify(); drawOverlay(); selected.clear(); refreshSel(); hideQuick(); setStatus('Marked '+__sel.length+' line(s) '+cls+' \u00b7 taught AI '+__n+' example(s), '+EXAMPLES.length+' learned total'); }
   document.getElementById('qDuct').onclick=function(){ apply('duct'); };
   document.getElementById('qNot').onclick=function(){ apply('not'); };
   document.getElementById('qX').onclick=function(){ hideQuick(); };
@@ -2215,6 +2215,9 @@ function refreshSel(){
     window.__pushRunUndo&&window.__pushRunUndo();
     // project the branch's nearest end (screen frame) onto each straight piece of the trunk -> nearest piece + alongIn
     var bp=endPt(branch,brEnd), bpS=window.__n2s(bp[0],bp[1]); if(!bpS){ if(typeof setStatus==='function')setStatus('Tap: couldn\u2019t map the runs on screen \u2014 try again.'); return false; }
+    // if the user clicked a spot on the TRUNK, tap there instead of at the branch's projected end
+    var _clk=(trunk===A)?window.__connClickA:window.__connClickB;
+    if(_clk && window.__n2s){ var _cs=window.__n2s(_clk[0],_clk[1]); if(_cs) bpS=_cs; }
     var bestI=-1,bestT=0,bestD=1e18,bestP=null;
     for(var i=0;i<trunk.pieces.length;i++){ if(trunk.pieces[i].kind!=='straight') continue;
       var q; try{ q=piecePolyPts(trunk,i); }catch(_){ continue; } if(!q||!q[0]) continue;
@@ -3176,7 +3179,16 @@ function refreshSel(){
     p.camduct=(deg===45?'45 Elbow':'90 Elbow')+(rd?' (round)':'');
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Changed to a '+deg+'\u00b0 elbow.');
   };
-  window.__pcElbowEdit=function(id,i,ev){            // click an elbow row in the panel -> tiny menu: change 45/90, flip direction
+  window.__aimElbowCardinal=function(id,i,dx,dy){    // point an elbow's outgoing leg at a world direction (up/right/down/left)
+    var r=findRun(id); if(!r) return; var p=r.pieces[i]; if(!p) return;
+    if(!(p.cid==='e90'||p.cid==='e45'||p._elbow)) return;
+    var fr=runFrames(r), f=fr[i]; if(!f) return; var inc=[f.ux,f.uy];
+    var dot=inc[0]*dx+inc[1]*dy, crs=inc[0]*dy-inc[1]*dx;     // signed angle from the incoming leg to the chosen world direction
+    window.__pushRunUndo&&window.__pushRunUndo();
+    p.turn=Math.atan2(crs,dot); p._elbow=true;               // rotates the outgoing leg + everything downstream about this elbow's vertex
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Pointed the elbow leg that way.');
+  };
+  window.__pcElbowEdit=function(id,i,ev){            // click an elbow row in the panel -> tiny menu: change 45/90, point leg any of 4 ways
     var r=findRun(id); if(!r) return; var p=r.pieces[i]; if(!p) return;
     if(!(p.cid==='e90'||p.cid==='e45'||p._elbow)) return;
     try{ if(window.__pcElbowMenuEl){ window.__pcElbowMenuEl.remove(); window.__pcElbowMenuEl=null; } }catch(_){}
@@ -3191,7 +3203,17 @@ function refreshSel(){
       b.onmouseover=function(){b.style.background='#1a4266';}; b.onmouseout=function(){b.style.background='#12314b';};
       b.onclick=function(e){ e.stopPropagation(); try{fn();}catch(_){} close(); }; return b; }
     m.appendChild(btn(is45?'Change to 90\u00b0':'Change to 45\u00b0', function(){ window.__setElbowAngle(id,i,is45?90:45); }));
-    m.appendChild(btn('Flip direction', function(){ window.__flipElbow&&window.__flipElbow(id,i); }));
+    var lbl=document.createElement('div'); lbl.textContent='Point leg:'; lbl.style.cssText='font-size:10px;color:#7fa8cf;margin:6px 0 3px';
+    m.appendChild(lbl);
+    var row=document.createElement('div'); row.style.cssText='display:flex;gap:4px';
+    [['\u2191',0,-1,'up'],['\u2192',1,0,'right'],['\u2193',0,1,'down'],['\u2190',-1,0,'left']].forEach(function(a){
+      var b=document.createElement('button'); b.textContent=a[0]; b.title='Point the leg '+a[3];
+      b.style.cssText='flex:1;padding:7px 0;border:none;border-radius:5px;background:#12314b;color:#bfe0ff;cursor:pointer;font-size:15px;line-height:1';
+      b.onmouseover=function(){b.style.background='#1a4266';}; b.onmouseout=function(){b.style.background='#12314b';};
+      b.onclick=function(e){ e.stopPropagation(); try{ window.__aimElbowCardinal(id,i,a[1],a[2]); }catch(_){} close(); };
+      row.appendChild(b);
+    });
+    m.appendChild(row);
     document.body.appendChild(m); window.__pcElbowMenuEl=m;
     setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
   };
@@ -4963,10 +4985,11 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     if(m==='connect'){ var s1=toSvg(e); if(!s1) return; var rr=hitRun(s1); if(!rr) return; e.stopPropagation(); e.preventDefault();
       var pl=window.__runPoly(rr), n=pl.length, sS=n2s(pl[0][0],pl[0][1]), sE=n2s(pl[n-1][0],pl[n-1][1]);
       var end=(Math.hypot(s1[0]-sS[0],s1[1]-sS[1])<Math.hypot(s1[0]-sE[0],s1[1]-sE[1]))?'start':'finish';
-      if(!window.__connA){ window.__connA={runId:rr.id,end:end}; status('First duct picked \u2014 now click the second duct.'); }
+      var clkNvt=(window.__s2n?window.__s2n(s1[0],s1[1]):[s1[0],s1[1]]);   // where on the run they actually clicked
+      if(!window.__connA){ window.__connA={runId:rr.id,end:end}; window.__connClickA=clkNvt; status('First duct picked \u2014 now click the second duct.'); }
       else { var cA=window.__connA;
         if(rr.id===cA.runId){ status('That\u2019s the same run \u2014 click the other duct.'); return; }
-        var cB={runId:rr.id,end:end}; window.__connA=null;
+        var cB={runId:rr.id,end:end}; window.__connClickB=clkNvt; window.__connA=null;
         var old=document.getElementById('connPick'); if(old) old.remove();
         var mnu=document.createElement('div'); mnu.id='connPick';
         mnu.style.cssText='position:fixed;z-index:100000;left:'+Math.min(e.clientX,window.innerWidth-180)+'px;top:'+Math.min(e.clientY,window.innerHeight-140)+'px;width:172px;background:#fff;border:1px solid #dde2e9;border-radius:11px;padding:10px;box-shadow:0 10px 28px rgba(30,40,60,.2);font:12px -apple-system,system-ui,sans-serif;color:#2b3441';
