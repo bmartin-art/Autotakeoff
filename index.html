@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.99</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.01</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3809,7 +3809,7 @@ function refreshSel(){
       if(un.height*rScale>MAXDIM) rScale=MAXDIM/un.height;
       console.log('[takeoff build t10] scan render scale =',rScale.toFixed(3),'| page',Math.round(un.width)+'x'+Math.round(un.height),'| detail',detail,'| scaleIPF',(typeof scaleIPF!=='undefined'?scaleIPF:'?'),'| ~px/real-in',(ptPerIn>0?(ptPerIn*rScale).toFixed(1):'n/a'));
       var rvp=page.getViewport({scale:rScale});
-      var rc=document.createElement('canvas'), waOX=0, waOY=0;
+      var rc=document.createElement('canvas'), waOX=0, waOY=0, W=0, H=0;
       if(workArea){
         // Render ONLY the work area at the (possibly high-detail) scale -> more pixels per symbol for
         // the starved small classes (tee/tap/sizetag), without a memory-blowing full-sheet canvas.
@@ -3821,12 +3821,17 @@ function refreshSel(){
         var rxw=rc.getContext('2d',{willReadFrequently:true}); rxw.fillStyle='#fff'; rxw.fillRect(0,0,rc.width,rc.height);
         await withPageRender(function(){ return page.render({canvasContext:rxw, viewport:rvp, transform:[1,0,0,1,-waOX,-waOY], optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
         console.log('[takeoff] work-area-only render', rc.width+'x'+rc.height,'at rScale',rScale.toFixed(2));
+        W=rc.width; H=rc.height;
       } else {
-        rc.width=Math.ceil(rvp.width); rc.height=Math.ceil(rvp.height);
-        var rxf=rc.getContext('2d',{willReadFrequently:true}); rxf.fillStyle='#fff'; rxf.fillRect(0,0,rc.width,rc.height);
-        await withPageRender(function(){ return page.render({canvasContext:rxf, viewport:rvp, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
+        W=Math.ceil(rvp.width); H=Math.ceil(rvp.height);
+        if(W*H <= 16e6){                                       // small enough to rasterize in one canvas (fast path)
+          rc.width=W; rc.height=H;
+          var rxf=rc.getContext('2d',{willReadFrequently:true}); rxf.fillStyle='#fff'; rxf.fillRect(0,0,W,H);
+          await withPageRender(function(){ return page.render({canvasContext:rxf, viewport:rvp, optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; });
+        } else {                                               // big high-detail sheet: render each tile straight from the PDF so we never allocate a giant canvas (this is what silently failed in v1.99)
+          rc=null; console.log('[takeoff] large render '+W+'x'+H+' — tiling directly from the PDF at rScale',rScale.toFixed(2));
+        }
       }
-      var W=rc.width, H=rc.height;
       var TILE=1024, OV=200, stepT=TILE-OV;
       var WA=null;   // rc is already the work-area crop (or full sheet); detections get offset by waOX/waOY below
       var xs=[], ys=[];
@@ -3850,7 +3855,8 @@ function refreshSel(){
       for(var ti=0;ti<tileList.length;ti++){
         var ox=tileList[ti][0], oy=tileList[ti][1];
         tx.fillStyle='#fff'; tx.fillRect(0,0,TILE,TILE);
-        tx.drawImage(rc, ox,oy,TILE,TILE, 0,0,TILE,TILE);
+        if(rc){ tx.drawImage(rc, ox,oy,TILE,TILE, 0,0,TILE,TILE); }
+        else { await withPageRender(function(){ return page.render({canvasContext:tx, viewport:rvp, transform:[1,0,0,1,-(ox+waOX),-(oy+waOY)], optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; }); }
         var d=tx.getImageData(0,0,TILE,TILE).data; var f=new Float32Array(3*TILE*TILE); var n=TILE*TILE;
         for(var i=0;i<n;i++){ f[i]=d[i*4]/255; f[i+n]=d[i*4+1]/255; f[i+2*n]=d[i*4+2]/255; }
         var t=new ort.Tensor('float32',f,[1,3,TILE,TILE]); var feeds={}; feeds[session.inputNames[0]]=t;
@@ -4994,7 +5000,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   }
   function closeWheel(){ if(wheel){ try{wheel.remove();}catch(_){}} wheel=null; }
   // ---- right-click radial TOOL picker (switch edit tool without the sidebar) ----
-  var TOOLS=[{m:'insert',t:'Insert'},{m:'connect',t:'Connect'},{m:'addstraight',t:'Add straight'},{m:'split',t:'Split'},{m:'move',t:'Move'},{m:'rotate',t:'Rotate'},{m:'aimelbow',t:'Aim elbow'},{m:'flipelbow',t:'Flip elbow'},{m:'delete',t:'Del run'},{m:'delpiece',t:'Del piece'}];
+  var TOOLS=[{m:'insert',t:'Insert'},{m:'connect',t:'Connect'},{m:'addstraight',t:'Add straight'},{m:'split',t:'Split'},{m:'move',t:'Move'},{m:'dragsize',t:'Drag width'},{m:'draglen',t:'Drag end'},{m:'delete',t:'Del run'},{m:'delpiece',t:'Del piece'}];
   var twSel=-1;
   function showToolWheel(cx,cy){ closeWheel(); twSel=-1;
     wheel=document.createElement('div'); wheel.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;z-index:100000;pointer-events:none';
