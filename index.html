@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.80</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v1.81</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2556,19 +2556,14 @@ function refreshSel(){
         else { name=target; }   // transition/reducer/s2r from a fine model fall through as-is
       }
       var fitLenIn = (target==='e90'||target==='sqt'||target==='ec'||target==='reo')?0:(target==='__size__'?12:6);
-      // ELBOW TURN — SIMPLE & DETERMINISTIC: find the OTHER duct leg at the corner and bend to follow where it runs.
+      // ELBOW TURN from raw PDF lines: pick the duct direction near the detection that is most
+      // perpendicular to the run heading, and turn toward whichever side it lies on.
       var turnV=0;
       if(target==='e90'){
         var inc=(run.dir&&Math.hypot(run.dir[0],run.dir[1])>1e-6)?run.dir:[1,0];
-        var dirs=(window.__ductDirAt?window.__ductDirAt(d.nx,d.ny,30):[]), out=null, bestW=0;
-        dirs.forEach(function(dd){ var al=Math.abs(inc[0]*dd.dir[0]+inc[1]*dd.dir[1]); if(al<0.7 && dd.w>bestW){ bestW=dd.w; out=dd.dir; } });   // strongest leg that runs differently from the incoming duct
-        if(out){
-          var ductAlong=function(h){ var w=0, st=[10,20,30], i; for(i=0;i<st.length;i++){ var dd=inToPt(st[i]), near=(window.__ductDirAt?window.__ductDirAt(d.nx+h[0]*dd, d.ny+h[1]*dd, 12):[]); near.forEach(function(x){ var al=Math.abs(h[0]*x.dir[0]+h[1]*x.dir[1]); if(al>0.7) w+=x.w*al; }); } return w; };
-          var wPos=ductAlong(out), wNeg=ductAlong([-out[0],-out[1]]);
-          var leg=(wPos>=wNeg)?out:[-out[0],-out[1]];                 // whichever way the duct actually extends from the corner
-          var dot=inc[0]*leg[0]+inc[1]*leg[1], crs=inc[0]*leg[1]-inc[1]*leg[0];
-          turnV=(Math.atan2(crs,dot)>=0?1:-1)*Math.PI/2;              // bend inc -> that leg (snap 90)
-        }
+        var dirs=(window.__ductDirAt?window.__ductDirAt(d.nx,d.ny,30):[]), out=null, bestPerp=0.6;
+        dirs.forEach(function(dd){ var dot=Math.abs(inc[0]*dd.dir[0]+inc[1]*dd.dir[1]); if(dot<bestPerp){ bestPerp=dot; out=dd.dir; } });
+        if(out) turnV=((inc[0]*out[1]-inc[1]*out[0])>=0?1:-1)*Math.PI/2;
       }
       // split the straight piece at 'into'
       var mkFit=function(){ var o={kind:'fitting',cid:cid,camduct:name,round:isRound,lenIn:fitLenIn,widthIn:piece.widthIn,depthIn:piece.depthIn,fromYolo:true,score:d.score}; if(target==='e90'&&turnV){ o.turn=turnV; o._elbow=true; } return o; };
