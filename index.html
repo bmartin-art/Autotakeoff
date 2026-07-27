@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.11</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.12</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3436,11 +3436,9 @@ function refreshSel(){
               var s=ev.size, depth=s.round?s.w:s.h, rcc='tr',rn='Transition'; if(prevRound!==null&&prevRound!==s.round){rcc='s2r';rn='Sq to Round';} else if(s.round){rcc='reducer';rn='Reducer';}
               pieces.push({kind:'fitting',cid:rcc,camduct:rn,round:s.round,lenIn:TRLEN,widthIn:s.w,depthIn:depth,size:s.str,inW:curSize.w,outW:s.w,_sizeStep:true}); trans++;
               cursorIn=ev.posIn+TRLEN/2; curSize=s;
-            } else if(ev.type==='elbow'){                                  // ELBOW — turn the heading toward the continuing fragment
+            } else if(ev.type==='elbow'){                                  // ELBOW placeholder — do NOT turn the run. The green spine already sets direction; auto-turning toward a "continuing fragment" swung runs down branches. Drops an inline marker; the user turns real corners by hand.
               emitStraight(ev.posIn, curSize);
-              var dir2=ev.cf?ev.cf.dir:null, turn=0;
-              if(dir2){ var dot=axisDir[0]*dir2[0]+axisDir[1]*dir2[1], crs=axisDir[0]*dir2[1]-axisDir[1]*dir2[0]; turn=Math.atan2(crs,dot); }
-              pieces.push({kind:'fitting',cid:'e90',camduct:'90 Elbow',round:curSize.round,lenIn:0,turn:turn,widthIn:curSize.w,depthIn:(curSize.round?curSize.w:curSize.h),size:curSize.str,_elbow:true}); elbows++;
+              pieces.push({kind:'fitting',cid:'e90',camduct:'90 Elbow',round:curSize.round,lenIn:0,turn:0,widthIn:curSize.w,depthIn:(curSize.round?curSize.w:curSize.h),size:curSize.str,_elbow:true,fromYolo:true}); elbows++;
             } else {                                                       // TAP / TEE / off-shape branch — trunk continues, branch off the side
               emitStraight(ev.posIn, curSize);
               var bt=ev.bt||ev.bsz||{w:curSize.w,h:curSize.h,round:curSize.round,str:curSize.str};
