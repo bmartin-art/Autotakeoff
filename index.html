@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.10</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.11</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2612,7 +2612,7 @@ function refreshSel(){
     var nCarry = 0;   // DISABLED: a no-tag run keeps its OWN green-line width (was inheriting a nearby tagged run's size, overriding the measured gap). Height stays unknown — set via ✎ resize.
     var nDrop = dropUnsupportedRuns();
     var nDup = 0; try{ nDup=dedupeOverlappingRuns(); }catch(e){}   // collapse two-runs-over-one-duct into the centered one
-    var nElb = 0; try{ nElb=window.__repairElbowTurns?window.__repairElbowTurns():0; }catch(e){}   // v1.80 behavior: green-primary elbow repair back ON
+    var nElb = 0;   // AUTO elbow-turning is OFF: the green trace already sets each run's direction, and auto-turning kept swinging straight runs sideways. Elbows stay inline; turn the real corners by hand (click the placeholder / panel arrows). __repairElbowTurns still exists for an optional manual "snap elbows to green".
     sel.clear(); selRun=null; renderItems(); renderPanel();
     setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nElb?(' \u00b7 '+nElb+' elbow(s) turned'):'')+(nDup?(' \u00b7 '+nDup+' doubled run(s) merged'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.'); try{ __ductDiag('joints'); }catch(e){}
     try{ var _fs=window.__yoloFitStats, _yo=document.getElementById('yoloOut');
