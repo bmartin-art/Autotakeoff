@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.06</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.10</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -214,6 +214,7 @@
      <label style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="heavyOnly"> <b>Heavy lines only</b> — hide light background lineweight</label>
      <div style="font-size:12px;margin-top:3px;opacity:.85">Line-weight cutoff <input type="range" id="lwThresh" min="0" max="3" step="0.05" value="0.5" style="width:120px;vertical-align:middle"> <span id="lwThreshV">0.50</span> pt <span id="lwCounts" style="opacity:.7"></span></div>
      <label class="adv" style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="dropTagBoxes" checked> <b>Drop boxes around tags & round symbols</b> — strip the rectangles around size labels and diffuser/damper circles, in every mode</label>
+     <label style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="killText" checked> <b>Hide text from trace</b> — reads the PDF's text layer and drops any linework that sits inside a text label (the AI still reads the dims separately)</label>
      <label style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="blackOnly"> <b>Black lines only</b> — hide gray background (duct is often pure black)</label>
      <div style="font-size:12px;margin-top:3px;opacity:.85">Darkness cutoff <input type="range" id="blkThresh" min="0" max="1" step="0.02" value="0.45" style="width:120px;vertical-align:middle"> <span id="blkThreshV">0.45</span> <span id="blkCounts" style="opacity:.7"></span></div>
      <div class="adv" style="font-size:12px;margin-top:3px;opacity:.85">Min length <input type="range" id="blkMinLen" min="0" max="200" step="2" value="10" style="width:120px;vertical-align:middle"> <span id="blkMinV">10</span> pt <span style="opacity:.6">(raise to drop short grid / cross lines)</span></div>
@@ -616,6 +617,7 @@ async function renderPage(){
   const lockSnap={};
   segments.forEach(s=>{ if(s.lock||s._userMark) lockSnap[lockKey(s)]={l:s.lock||null,u:!!s._userMark}; });
   await extractVectors(page);
+  try{ window.__textBoxes = await collectTextBoxes(page); }catch(_){ window.__textBoxes=[]; }
   if(Object.keys(lockSnap).length) segments.forEach(s=>{ const k=lockKey(s); if(lockSnap[k]){ s.lock=lockSnap[k].l; s._userMark=lockSnap[k].u; } });
   if(window.__autoDimText){ await extractTags(page); }   // OFF by default — auto text-detect grabbed too much junk; use tile sweep / per-run reader instead
   freshScan=true; selectionDone=false; classify();  // features only here (canvas not painted yet); greening waits for 'Run line selection'
@@ -709,6 +711,35 @@ function suggestDuctLayers(){
   if(!any) ids.forEach(id=>{ layers[id].isDuct=false; layers[id].visible=true; });
 }
 
+// Read the PDF's TEXT LAYER and turn each label into a device-space box (nvt frame, same as segments).
+// Used only to keep text OUT of the trace — the AI reads the actual dims separately.
+async function collectTextBoxes(page){
+  var boxes=[];
+  try{
+    var tc=await page.getTextContent();
+    var nvt=window.__nvt||page.getViewport({scale:1}).transform;
+    (tc.items||[]).forEach(function(it){
+      if(!it || !it.str || !it.str.trim() || !it.transform) return;
+      var t=it.transform;
+      var ang=Math.atan2(nvt[1]*t[0]+nvt[3]*t[1], nvt[0]*t[0]+nvt[2]*t[1]);
+      var W=it.width||0;
+      var Hh=it.height||Math.hypot(nvt[0]*t[2]+nvt[2]*t[3], nvt[1]*t[2]+nvt[3]*t[3])||8;
+      var ox=nvt[0]*t[4]+nvt[2]*t[5]+nvt[4], oy=nvt[1]*t[4]+nvt[3]*t[5]+nvt[5];   // baseline origin, nvt device coords
+      var ex=ox+W*Math.cos(ang), ey=oy+W*Math.sin(ang);                           // run end
+      var pxu=-Math.sin(ang)*Hh*0.75, pyu=Math.cos(ang)*Hh*0.75, pad=1.5;         // band thickness around the baseline
+      var xs=[ox+pxu,ox-pxu,ex+pxu,ex-pxu], ys=[oy+pyu,oy-pyu,ey+pyu,ey-pyu];
+      boxes.push({x0:Math.min.apply(null,xs)-pad, y0:Math.min.apply(null,ys)-pad, x1:Math.max.apply(null,xs)+pad, y1:Math.max.apply(null,ys)+pad});
+    });
+  }catch(e){ console.warn('text layer unavailable', e); }
+  return boxes;
+}
+function inTextBox(s){                        // true only if the WHOLE segment sits inside a label (a duct crossing a label survives)
+  var B=window.__textBoxes; if(!B||!B.length||s.nx1==null) return false;
+  for(var i=0;i<B.length;i++){ var b=B[i];
+    if(s.nx1>=b.x0&&s.nx1<=b.x1&&s.ny1>=b.y0&&s.ny1<=b.y1 &&
+       s.nx2>=b.x0&&s.nx2<=b.x1&&s.ny2>=b.y0&&s.ny2<=b.y1) return true; }
+  return false;
+}
 async function extractVectors(page){
   segments=[]; pageLayersUsed=new Set();
   let opList;
@@ -1151,6 +1182,7 @@ function classify(){
   for(const s of segments){
     if(workArea && !inArea(s)){ s.cls='not'; continue; }                                   // work area always trims everything outside it
     if(s.lock && s._userMark){ s.cls=s.lock; continue; }                                    // YOUR marks this session win over the picker
+    if(window.__killText!==false && inTextBox(s)){ s.cls='not'; continue; }                  // linework fully inside a PDF text label -> never duct
     if(s.lock==='not'){ s.cls='not'; continue; }                                            // anything explicitly removed stays removed — the picker can't re-green it
     if(__dropBoxes && s.labelBox){ s.cls='not'; continue; }                                 // boxes drawn around size tags — never duct, in ANY mode
     if(__dropBoxes && s.curved && (s.ulen||0)<26){ s.cls='not'; continue; }                 // round symbols (diffusers, registers, sensors) — never duct, in ANY mode
@@ -2327,6 +2359,7 @@ function refreshSel(){
     runs.forEach(function(run){
       for(var i=0;i<run.pieces.length;i++){ var p=run.pieces[i];
         if(p.kind!=='fitting' || !(p.cid==='e90'||p.cid==='e45'||p._elbow)) continue;
+        if(p.fromYolo) continue;                                          // YOLO elbows stay inline — never auto-turned (user turns the few that need it)
         var fr=runFrames(run), f=fr[i]; if(!f) continue;                 // fresh frames (accounts for earlier fixes)
         var inc=[f.ux,f.uy], mag=(p.cid==='e45'?Math.PI/4:Math.PI/2);
         function headAfter(sign){ var a=sign*mag,c=Math.cos(a),s=Math.sin(a); return [inc[0]*c-inc[1]*s, inc[0]*s+inc[1]*c]; }
@@ -2345,13 +2378,18 @@ function refreshSel(){
               var al=Math.abs(q[2]*h[0]+q[3]*h[1]); if(al<0.7) continue; var sc=al+(1-wd/2.5)*0.4; if(sc>best) best=sc; } }
           return best; }
         var hP=headAfter(1), hN=headAfter(-1);
-        var gP=greenAlong(hP), gN=greenAlong(hN), want=0, mx=Math.max(gP,gN);
-        if(mx>0 && Math.abs(gP-gN) > mx*0.12){ want=(gP>gN)?1:-1; }        // GREEN decides — turn where the trace runs
-        else { var nP=neighborToward(hP), nN=neighborToward(hN); if(nP>0||nN>0) want=(nP>=nN)?1:-1; }   // near-tie -> matching-size neighbor
+        var gS=greenAlong(inc), gP=greenAlong(hP), gN=greenAlong(hN), mx=Math.max(gP,gN), want=0;
+        // ONLY bend if a perpendicular leg clearly beats the trace continuing STRAIGHT. If the run's own
+        // green keeps going straight (a tee/branch, or a mis-detected elbow), keep it straight so the run
+        // sticks to its trace instead of shooting off sideways.
+        if(mx>0 && mx > gS*1.3){
+          if(Math.abs(gP-gN) > mx*0.12){ want=(gP>gN)?1:-1; }             // GREEN decides — turn where the trace runs
+          else { var nP=neighborToward(hP), nN=neighborToward(hN); want=(nP>0||nN>0)?((nP>=nN)?1:-1):((gP>=gN)?1:-1); }   // near-tie -> matching-size neighbor
+        }
         var cur=(p.turn>0.08?1:(p.turn<-0.08?-1:0));
-        if(want!==0){ if(cur!==want){ p.turn=want*mag; fixed++; } p._elbow=true; if(!p.camduct)p.camduct=(p.cid==='e45'?'45 Elbow':'90 Elbow'); }
-        else if(cur===0){ var cr=inc[0]*(-inc[1])-inc[1]*inc[0]; p.turn=mag; p._elbow=true; if(!p.camduct)p.camduct='90 Elbow'; fixed++; }  // no signal + flat: default bend (rare)
-        // else: ambiguous AND already bent -> leave it as the user/builder had it
+        if(want!==0){ if(cur!==want){ p.turn=want*mag; fixed++; } }
+        else { if(cur!==0){ p.turn=0; fixed++; } }                        // straight-through: unbend so it doesn't shoot off the trace
+        p._elbow=true; if(!p.camduct) p.camduct=(p.cid==='e45'?'45 Elbow':'90 Elbow');
       }
     });
     if(fixed){ try{renderItems();}catch(_){} try{renderPanel();}catch(_){} }
@@ -2418,7 +2456,7 @@ function refreshSel(){
     if(!p||p.kind!=='straight'){ if(typeof setStatus==='function') setStatus('Pick a straight length of duct to insert into.'); return false; }
     window.__pushRunUndo&&window.__pushRunUndo();
     var L=p.lenIn||0, a=Math.max(0,Math.min(L, alongIn||0));
-    if(spec.type==='elbow90'||spec.type==='elbow45') a=L;   // an elbow attaches at the END of the clicked duct; the existing leg keeps its angle, a NEW leg goes off at the elbow's angle
+    if(spec.type==='elbow90'||spec.type==='elbow45') a=(a < L/2 ? 0 : L);   // attach at the END of the clicked duct NEAREST where you clicked
     var w=p.widthIn, dep=(p.depthIn!=null?p.depthIn:null), rr=!!p.round, sz=p.size;
     function mkS(len){ return {kind:'straight',lenIn:rnd(Math.max(0,len)),widthIn:w,depthIn:dep,size:sz,cid:rr?'spiral':'st',camduct:rr?'Spiral':'Straight Duct',round:rr}; }
     var before=mkS(a), after=mkS(L-a), t=spec.type;
@@ -2451,6 +2489,7 @@ function refreshSel(){
     } else { return false; }
     var flen=fit.lenIn||0; if(flen>0){ if((after.lenIn||0)>=flen) after.lenIn=rnd(after.lenIn-flen); else if((before.lenIn||0)>=flen) before.lenIn=rnd(before.lenIn-flen); }
     pieces.splice(pieceIdx,1,before,fit,after);
+    for(var zi=pieces.length-1; zi>=0; zi--){ var zp=pieces[zi]; if(zp!==fit && zp.kind==='straight' && (zp.lenIn||0)<=0.4) pieces.splice(zi,1); }   // drop zero-length stubs from an end-snapped insert
     if(fit._sizeStep){ var toEnd2=(fit._newSide==='end');
       if(toEnd2){ for(var k=pieceIdx+2;k<pieces.length;k++){ var q=pieces[k]; if(q.kind==='straight'){ q.widthIn=fit._newW; q.depthIn=fit._newD; q.round=fit._newR; q.size=fit._newS; q.cid=fit._newR?'spiral':'st'; q.camduct=fit._newR?'Spiral':'Straight Duct'; } } }
       else { for(var k2=0;k2<pieceIdx+1;k2++){ var q2=pieces[k2]; if(q2.kind==='straight'){ q2.widthIn=fit._newW; q2.depthIn=fit._newD; q2.round=fit._newR; q2.size=fit._newS; q2.cid=fit._newR?'spiral':'st'; q2.camduct=fit._newR?'Spiral':'Straight Duct'; } } if(pieceIdx>=0){ run.widthIn=fit._newW; } }
@@ -2648,24 +2687,9 @@ function refreshSel(){
       var fitLenIn = (target==='e90'||target==='sqt'||target==='ec'||target==='reo')?0:(target==='__size__'?12:6);
       // ELBOW TURN (v1.80): find the OTHER duct leg at the corner and bend to follow where it actually runs.
       var turnV=0;
-      if(target==='e90'){
-        var inc=(run.dir&&Math.hypot(run.dir[0],run.dir[1])>1e-6)?run.dir:[1,0];
-        var dirs=(window.__ductDirAt?window.__ductDirAt(d.nx,d.ny,30):[]), out=null, bestW=0;
-        dirs.forEach(function(dd){ var al=Math.abs(inc[0]*dd.dir[0]+inc[1]*dd.dir[1]); if(al<0.7 && dd.w>bestW){ bestW=dd.w; out=dd.dir; } });
-        if(out){
-          var ductAlong=function(h){ var w=0, st=[10,20,30], i; for(i=0;i<st.length;i++){ var dd=inToPt(st[i]), near=(window.__ductDirAt?window.__ductDirAt(d.nx+h[0]*dd, d.ny+h[1]*dd, 12):[]); near.forEach(function(x){ var al=Math.abs(h[0]*x.dir[0]+h[1]*x.dir[1]); if(al>0.7) w+=x.w*al; }); } return w; };
-          var wPos=ductAlong(out), wNeg=ductAlong([-out[0],-out[1]]);
-          var wStraight=ductAlong(inc), perpBest=Math.max(wPos,wNeg);
-          // ONLY bend if the run's OWN trace actually stops going straight and a perpendicular leg takes over.
-          // If green keeps running straight ahead (a tee/branch, or a mis-detected elbow), leave it straight so
-          // the run sticks to its green instead of shooting off down the branch.
-          if(perpBest>0 && perpBest > wStraight*1.3){
-            var leg=(wPos>=wNeg)?out:[-out[0],-out[1]];
-            var dot=inc[0]*leg[0]+inc[1]*leg[1], crs=inc[0]*leg[1]-inc[1]*leg[0];
-            turnV=(Math.atan2(crs,dot)>=0?1:-1)*Math.PI/2;
-          }
-        }
-      }
+      // YOLO elbows are dropped in INLINE — they do NOT auto-turn the run. The run's path already follows the
+      // green trace; letting a detected elbow impose its own 90 turn was jumbling straight runs. Real corners
+      // are handled by the run geometry / run-joins; the user turns the occasional inline elbow by hand.
       // split the straight piece at 'into'
       var mkFit=function(){ var o={kind:'fitting',cid:cid,camduct:name,round:isRound,lenIn:fitLenIn,widthIn:piece.widthIn,depthIn:piece.depthIn,fromYolo:true,score:d.score}; if(target==='e90'&&turnV){ o.turn=turnV; o._elbow=true; } return o; };
       var newPieces=[];
@@ -3017,6 +3041,24 @@ function refreshSel(){
     var lay=document.getElementById('itemLayer'); if(!lay) return; lay.innerHTML='';
     (window.__runs2d||[]).forEach(function(run){
       run.pieces.forEach(function(p,i){
+        if(p.kind==='fitting' && (p.cid==='e90'||p.cid==='e45'||p._elbow) && !p.turn){
+          // INLINE elbow placeholder: YOLO saw an elbow but the run runs straight through it. Draw a visible
+          // marker where it was detected; click it to turn the elbow and connect the two sections.
+          var frp=runFrames(run), fp=frp[i]; if(fp){ var sp=n2s(fp.x,fp.y);
+            if(sp){ var sz=7, dm=document.createElementNS(ns,'rect');
+              dm.setAttribute('x',(sp[0]-sz).toFixed(1)); dm.setAttribute('y',(sp[1]-sz).toFixed(1));
+              dm.setAttribute('width',sz*2); dm.setAttribute('height',sz*2); dm.setAttribute('rx','2');
+              dm.setAttribute('transform','rotate(45 '+sp[0].toFixed(1)+' '+sp[1].toFixed(1)+')');
+              dm.setAttribute('fill','rgba(245,158,11,0.85)'); dm.setAttribute('stroke','#b45309'); dm.setAttribute('stroke-width','1.5');
+              dm.style.cursor='pointer';
+              (function(rid,idx){ dm.addEventListener('mousedown',function(e){ e.stopPropagation();
+                selRun=rid; try{window.__selRunId=rid;}catch(_){} try{window.__showRunPanel&&window.__showRunPanel();}catch(_){}
+                try{ window.__pcElbowEdit&&window.__pcElbowEdit(rid, idx, e); }catch(_){}
+              }); })(run.id, i);
+              lay.appendChild(dm);
+            } }
+          return;   // placeholder only — no bent-elbow polygon while it's inline
+        }
         var pts=piecePolyPts(run,i); if(pts.some(function(q){return !q;})) return;
         var key=run.id+':'+i, on=sel.has(key);
         var fill,stroke;
@@ -4753,6 +4795,7 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ selected.clear();
 ['showDuct','showMaybe','showNot','runsView'].forEach(id=>{var el=document.getElementById(id); if(el) el.addEventListener('change',drawOverlay);});
 (function(){var af=document.getElementById('aiFirst'); if(af) af.addEventListener('change',function(){classify();drawOverlay();});})();
 (function(){var db=document.getElementById('dropTagBoxes'); if(db) db.addEventListener('change',function(){ if(!selectionDone)selectionDone=true; classify(); drawOverlay(); var n=segments.filter(function(s){return s.cls==='duct';}).length; setStatus((db.checked?'Tag boxes & round symbols dropped':'Tag boxes & symbols kept')+' \u2014 '+n+' duct lines.'); });})();
+(function(){var kt=document.getElementById('killText'); if(kt){ window.__killText=kt.checked; kt.addEventListener('change',function(){ window.__killText=kt.checked; if(!selectionDone)selectionDone=true; classify(); drawOverlay(); var n=segments.filter(function(s){return s.cls==='duct';}).length; setStatus((kt.checked?'Text hidden from the trace':'Text kept in the trace')+' \u2014 '+n+' duct lines \u00b7 '+((window.__textBoxes||[]).length)+' labels found.'); }); }})();
 (function(){var sb=document.getElementById('strictBlack'); if(sb) sb.addEventListener('change',function(){ if(!selectionDone)selectionDone=true; classify(); drawOverlay(); var __dm=document.getElementById('darkMap'); if(__dm&&__dm.checked){ try{buildShadePalette();}catch(e){} } var n=segments.filter(function(s){return s.cls==='duct';}).length; setStatus((sb.checked?'True-black only \u2014 judging by ink color':'Using on-screen darkness')+' \u2014 '+n+' duct lines.'); });})();
 (function(){var ho=document.getElementById('heavyOnly'), lt=document.getElementById('lwThresh');
   function upd(){ var v=parseFloat(lt&&lt.value)||0; var el=document.getElementById('lwThreshV'); if(el) el.textContent=v.toFixed(2); var hv=0,lg=0; segments.forEach(function(s){ if((s.lw||0)>=v) hv++; else lg++; }); var c=document.getElementById('lwCounts'); if(c) c.textContent='\u00b7 '+hv+' heavy / '+lg+' light'; classify(); drawOverlay(); }
