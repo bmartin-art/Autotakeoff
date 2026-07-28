@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.20</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.23</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3236,6 +3236,11 @@ function refreshSel(){
       h+='<div class="aicard" style="border-color:'+run.color+'33">'
         +'<div class="h" style="cursor:pointer" onclick="__runOpen(\''+run.id+'\')"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+run.color+';margin-right:5px"></span>'+(run.label?vh(run.label)+' \u00b7 ':'')+run.axis+' run'+(run._flag==='mismatch'?' <span style="color:#e0a92a">\u26a0 size?</span>':run._flag==='1-wall'?' <span style="color:#e0a92a">\u26a0 1-wall</span>':'')+(run._needH?' <span style="color:#e0a92a">\u26a0 H?</span>':'')+' \u00b7 '+run.pieces.length+' pc \u00b7 '+fmtFt(runLenIn(run))+'</div>';
       if(open){
+        h+='<div style="background:#0e1c2b;border:1px solid #23425e;border-radius:7px;padding:7px;margin:5px 0">'
+          +'<div style="display:flex;gap:5px;margin-bottom:5px;align-items:center"><span style="font-size:10px;opacity:.7;width:56px">Section</span><input value="'+vh(run.sectionLabel||'')+'" placeholder="e.g. RTU 2" onchange="__setRunAttr(\''+run.id+'\',\'sectionLabel\',this.value)" style="flex:1;padding:4px 6px;border:1px solid #345;border-radius:5px;background:#0b1420;color:#fff;font-size:11px"></div>'
+          +'<div style="display:flex;gap:5px;margin-bottom:5px;align-items:center"><span style="font-size:10px;opacity:.7;width:56px">Pressure</span><select onchange="__setRunAttr(\''+run.id+'\',\'pressureClass\',this.value)" style="flex:1;padding:4px;border:1px solid #345;border-radius:5px;background:#0b1420;color:#fff;font-size:11px">'+PCLASS.map(function(o){return '<option'+((run.pressureClass||'2\" w.g.')===o?' selected':'')+'>'+o+'</option>';}).join('')+'</select></div>'
+          +'<div style="display:flex;gap:5px;align-items:center"><span style="font-size:10px;opacity:.7;width:56px">Liner</span><select onchange="__setRunAttr(\''+run.id+'\',\'liner\',this.value)" style="flex:1;padding:4px;border:1px solid #345;border-radius:5px;background:#0b1420;color:#fff;font-size:11px">'+LINER.map(function(o){return '<option'+((run.liner||'None')===o?' selected':'')+'>'+o+'</option>';}).join('')+'</select></div>'
+          +'</div>';
         run.pieces.forEach(function(pc,i){
           var key=run.id+':'+i, on=sel.has(key);
           h+='<div style="display:flex;align-items:center;gap:5px;margin:3px 0;padding:4px;border-radius:5px;background:'+(on?'rgba(34,211,238,.12)':'#0e1722')+'">'
@@ -3336,6 +3341,81 @@ function refreshSel(){
   };
   window.__runAddJoint=function(id){ var r=findRun(id); if(!r)return; var last=r.pieces[r.pieces.length-1]||{widthIn:r.widthIn,depthIn:r.widthIn,size:r.widthIn+'"'}; var rnd=!!last.round; r.pieces.push({kind:'straight',lenIn:(rnd?120:JOINT_DEFAULT),widthIn:last.widthIn,depthIn:last.depthIn,size:last.size,cid:(rnd?'spiral':'st'),camduct:(rnd?'Spiral':'Straight Duct'),round:rnd}); applyReducerDownstream(r); renderItems(); renderPanel(); };
   window.__runDel=function(id){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); if(selRun===id)selRun=null; sel.clear(); renderItems(); renderPanel(); };
+  var PCLASS=['1/2" w.g.','1" w.g.','2" w.g.','3" w.g.','4" w.g.','6" w.g.','10" w.g.'];
+  var LINER=['None','1/2"','1"','1.5"','2"','Elastomeric'];
+  window.__setRunAttr=function(id,key,val){                 // set pressure class / liner / section name — across the whole section if this run is in one
+    var r=findRun(id); if(!r) return;
+    var targets = r.sectionId ? (window.__runs2d||[]).filter(function(x){return x.sectionId===r.sectionId;}) : [r];
+    targets.forEach(function(x){ x[key]=val; });
+    if(key==='sectionLabel'){                                // show the section name once, on the biggest run of the section
+      var big=targets.slice().sort(function(a,b){return (b.pieces||[]).length-(a.pieces||[]).length;})[0];
+      targets.forEach(function(x){ x.label = (x===big && val) ? val : null; });
+    }
+    renderItems(); renderPanel();
+  };
+  // ===== CAMduct CSV Job Import export (mirrors the Brookstone CAMduct CSV) =====
+  var CAM_HDR=["Customer ID","Project Name","Job File Name","Date","Time","Epicor Group","Entry","Qty","Item Tag","Item Spool","Item Alias","Double Wall","CID","Item Description","Size - End 1","Size - End 2","Size - End 3","Size - End 4","Length","Material","Wire Gauge","Base Weight","Insulation Material","Insulation Thickness","Insulation Area","DW Skin Material","DW Skin Gauge","DW Skin Weight","WELD Time (mins)","PRFB Time (mins)","BURN Time (mins)","COIL Time (mins)","SPIR Time (mins)","Non Galv","Company email","Number Cut Sheets","Drawing Numbers","Spec Sections","Addendums","MAJ File Name","Sent Via","Pressure Class","PSTT Time","Company","Plant","INSL Time (mins)","RECT Time (mins)","ROND Time (mins)","Connector #1","Connector Install Time #1","Connector #2","Connector Install Time #2","Connector #3","Connector Install Time #3","Connector #4","Connector Install Time #4","STRC Time (mins)"];
+  var CAM_NUM=new Set(["Entry","Qty","CID","Size - End 1","Size - End 2","Size - End 3","Size - End 4","Length","Wire Gauge","Base Weight","Insulation Thickness","Insulation Area","DW Skin Weight","DW Skin Gauge","WELD Time (mins)","PRFB Time (mins)","BURN Time (mins)","COIL Time (mins)","SPIR Time (mins)","PSTT Time","INSL Time (mins)","RECT Time (mins)","ROND Time (mins)","Connector Install Time #1","Connector Install Time #2","Connector Install Time #3","Connector Install Time #4","STRC Time (mins)","Number Cut Sheets"]);
+  // Shop constants + fill-ins. Round CIDs are confirmed from your sample; rect CIDs blank (matched by description until you send a rect sample). Liner codes: PC-59=1" confirmed, rest to fill.
+  var CAM_CFG={ company:'BROO44', plant:'MfgSys', material:'GAL-60', gauge:'26', specBase:'Brookstone: ', specSuffix:'Multiple', sectionCol:'Item Tag',
+    liner:{ '1/2"':{mat:'',th:'0.5'}, '1"':{mat:'PC-59',th:'1.0'}, '1.5"':{mat:'',th:'1.5'}, '2"':{mat:'',th:'2.0'}, 'Elastomeric':{mat:'',th:''} } };
+  var CAM_PAT={
+    st:     { rect:{d:'Straight Duct',cid:'866',eg:'RCTDUCT'},      round:{d:'Spiral',cid:'',eg:'RONDFIT'} },
+    e90:    { rect:{d:'Square Elbow - Vanes',cid:'3',eg:'RCTFITT'}, round:{d:'90o Fixed Elbow LR',cid:'61',eg:'RONDFIT'} },
+    e45:    { rect:{d:'Angled Elbow',cid:'20',eg:'RCTFITT'},        round:{d:'45o Fixed Elbow',cid:'61',eg:'RONDFIT'} },
+    tr:     { rect:{d:'Transition',cid:'2',eg:'RCTFITT'},           round:{d:'Reducer',cid:'51',eg:'RONDFIT'} },
+    s2r:    { rect:{d:'Square to Round - 2pc',cid:'8',eg:'RONDFIT'},round:{d:'Square to Round - 2pc',cid:'8',eg:'RONDFIT'} },
+    stap:   { rect:{d:'Straight Tap',cid:'1',eg:'RCTFITT'},         round:{d:'90o Tap on Round - Skirt',cid:'875',eg:'RONDFIT'} },
+    sqt:    { rect:{d:'Square Tee',cid:'',eg:'RCTFITT'},            round:{d:'90o Tee - Collar',cid:'',eg:'RONDFIT'} },
+    offset: { rect:{d:'Rect Offset',cid:'30',eg:'RCTFITT'},         round:{d:'Round Offset',cid:'',eg:'RONDFIT'} },
+    cap:    { rect:{d:'End Cap - Connector',cid:'31',eg:'RCTFITT'}, round:{d:'End Cap - SE',cid:'',eg:'RONDFIT'} }
+  };
+  function camKey(p){ if(p.kind==='straight')return 'st'; var c=p.cid;
+    if(c==='e45')return 'e45'; if(c==='e90'||c==='e90r'||p._elbow)return 'e90';
+    if(c==='s2r')return 's2r'; if(c==='tr'||c==='reducer'||c==='reo')return 'tr';
+    if(c==='stap'||c==='rtap'||p._tap)return 'stap'; if(c==='sqt'||c==='rtee')return 'sqt';
+    if(c==='offset'||c==='roff')return 'offset'; if(c==='cap'||c==='ec'||c==='ecr')return 'cap'; return null; }
+  function camF3(v){ return (Math.round((v||0)*1000)/1000).toFixed(3); }
+  function camEnd(round,w,h){ return round? camF3(w) : (camF3(w)+'x'+camF3(h)); }
+  function camSpec(pc){ var n=(pc||'2" w.g.').replace(/\s*w\.g\.?/i,'').replace(/"/g,'in').trim(); return CAM_CFG.specBase+'+'+n+' '+CAM_CFG.specSuffix; }
+  function camBuildRows(runs){ var rows=[], entry=0;
+    runs.forEach(function(r){ var pcls=camSpec(r.pressureClass), sect=r.sectionLabel||'', lin=CAM_CFG.liner[r.liner]||null;
+      (r.pieces||[]).forEach(function(p){ var key=camKey(p); if(!key)return; var pat=CAM_PAT[key]; if(!pat)return;
+        var isRound=!!p.round, pd=(key==='s2r')?pat.round:(isRound?pat.round:pat.rect);
+        var w=p.widthIn||r.widthIn||0, h=(p.depthIn!=null?p.depthIn:w), e1='',e2='',e3='',len='';
+        if(key==='st'){ e1=e2=camEnd(isRound,w,h); len=camF3(p.lenIn); }
+        else if(key==='e90'||key==='e45'){ e1=e2=camEnd(isRound,w,h); if(isRound) e3=e1; }   // round fixed elbow lists 3 ends; rect square/angled elbow lists 2
+        else if(key==='tr'){ var iw=p.inW||w, ih=(p.inD!=null?p.inD:h), ow=p.outW||w, od=(p.outD!=null?p.outD:ow); e1=camEnd(isRound,iw,ih); e2=camEnd(isRound,ow,od); len=camF3(p.lenIn); }
+        else if(key==='s2r'){ var iw2=p.inW||w, ih2=(p.inD!=null?p.inD:h), od2=p.outW||w; e1=camF3(iw2)+'x'+camF3(ih2); e2=camF3(od2); len=camF3(p.lenIn); }
+        else if(key==='stap'){ var bw=p.branchW||w; if(isRound){ e1=e2=camF3(w); e3=camF3(bw); } else { e1=e2=camF3(bw)+'x'+camF3(bw); } }   // round tap: main dia x2 + branch; rect straight tap: branch size both ends
+        else if(key==='sqt'){ e1=e2=camEnd(isRound,w,h); var bw2=p.branchW||w; e3=isRound?camF3(bw2):(camF3(bw2)+'x'+camF3(bw2)); }
+        else if(key==='offset'){ e1=e2=camEnd(isRound,w,h); len=camF3(p.lenIn); }
+        else if(key==='cap'){ e1=camEnd(isRound,w,h); }
+        entry++; var row={}; CAM_HDR.forEach(function(c){row[c]='';});
+        row['Job File Name']='takeoff'; try{ row['Date']=new Date().toLocaleDateString('en-US'); }catch(_){ row['Date']=''; }
+        row['Epicor Group']=pd.eg; row['Entry']=entry; row['Qty']=1;
+        row[CAM_CFG.sectionCol]=sect; row['CID']=pd.cid||''; row['Item Description']=pd.d;
+        row['Size - End 1']=e1; row['Size - End 2']=e2; row['Size - End 3']=e3; row['Length']=len;
+        row['Material']=CAM_CFG.material; row['Wire Gauge']=CAM_CFG.gauge;
+        if(lin&&lin.mat){ row['Insulation Material']=lin.mat; row['Insulation Thickness']=lin.th; }
+        row['Pressure Class']=pcls; row['Company']=CAM_CFG.company; row['Plant']=CAM_CFG.plant;
+        rows.push(row); });
+    });
+    return rows; }
+  function camToCSV(rows){ function cell(c,v){ v=(v==null?'':String(v)); return CAM_NUM.has(c)?v:('"'+v.replace(/"/g,'""')+'"'); }
+    var out=[CAM_HDR.map(function(c){return '"'+c+'"';}).join(',')];
+    rows.forEach(function(r){ out.push(CAM_HDR.map(function(c){return cell(c,r[c]);}).join(',')); });
+    return out.join('\r\n')+'\r\n'; }
+  window.__exportCamCSV=function(){
+    var runs=window.__runs2d||[]; if(!runs.length){ alert('No takeoff to export yet — build the runs first.'); return; }
+    var rows=camBuildRows(runs); if(!rows.length){ alert('Nothing exportable found in the runs.'); return; }
+    var jn='takeoff'; for(var i=0;i<runs.length;i++){ if(runs[i].sectionLabel){ jn=runs[i].sectionLabel; break; } }
+    var fname=jn.replace(/[^\w.-]+/g,'_')+'_camduct.csv';
+    var blob=new Blob([camToCSV(rows)],{type:'text/csv'}), a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=fname; document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },1000);
+    if(typeof setStatus==='function') setStatus('Exported '+rows.length+' item(s) to '+fname+' \u2014 round CIDs confirmed; rect matched by description (spot-check on import).');
+  };
   window.__joinRuns=function(ids){                 // JOIN SECTION: collapse in-line segments, then group everything picked as ONE labeled section
     var R=window.__runs2d||[]; var runs=ids.map(function(id){return R.find(function(r){return r.id===id;});}).filter(Boolean);
     if(runs.length<2){ if(typeof setStatus==='function') setStatus('Pick at least two runs to join.'); return false; }
@@ -5123,6 +5203,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
    <button id="dtUndo" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#fff4e6;border:1px solid #ffd9a8;color:#b5641a;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:700;font-size:12px">↶ Undo last change</button>
    <button id="dtFixElbows" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#eafaf0;border:1px solid #a9e0c0;color:#1b7a45;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">↰ Straighten elbows from trace</button>
    <button id="dtFittings" onclick="window.__toggleFitPanel&&window.__toggleFitPanel()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#e6fbff;border:1px solid #a5e4ef;color:#0e7490;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">◎ Review fittings by type</button>
+   <button id="dtCamExport" onclick="window.__exportCamCSV&&window.__exportCamCSV()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#eef7ee;border:1px solid #a9d3a0;color:#2f6b2a;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⬇ Export CAMduct CSV</button>
    <div id="fitList"></div>
    <button class="dtTool" data-mode="dragsize" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-resize width</button>
    <button class="dtTool" data-mode="draglen" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-end (length)</button>
