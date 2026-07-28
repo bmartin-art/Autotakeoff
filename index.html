@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.14</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.16</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3169,7 +3169,8 @@ function refreshSel(){
           var f=fr[i]; if(!f) return; var sp=n2s(f.x,f.y); if(!sp) return;
           var ring=document.createElementNS(ns,'circle');
           ring.setAttribute('cx',sp[0].toFixed(1)); ring.setAttribute('cy',sp[1].toFixed(1)); ring.setAttribute('r','16');
-          ring.setAttribute('fill','rgba(34,211,238,0.16)'); ring.setAttribute('stroke','#06b6d4'); ring.setAttribute('stroke-width','3'); ring.setAttribute('pointer-events','none');
+          ring.setAttribute('fill','rgba(34,211,238,0.16)'); ring.setAttribute('stroke','#06b6d4'); ring.setAttribute('stroke-width','3'); ring.style.cursor='pointer';
+          (function(rid){ ring.addEventListener('mousedown',function(ev){ ev.stopPropagation(); selRun=rid; try{window.__selRunId=rid;}catch(_){} try{window.__showRunPanel&&window.__showRunPanel();}catch(_){} try{renderPanel();}catch(_){} }); })(run.id);
           lay.appendChild(ring);
         });
       });
@@ -3329,7 +3330,7 @@ function refreshSel(){
     var cursorIn=0;
     para.forEach(function(r){
       var startIn=(proj(r.start)-proj(start))/ppi, gap=startIn-cursorIn;
-      if(gap>1){ var p0=(r.pieces&&r.pieces[0])||{}; merged.pieces.push({kind:'straight',cid:p0.round?'spiral':'st',camduct:p0.round?'Spiral':'Straight Duct',round:!!p0.round,lenIn:rnd(gap),widthIn:r.widthIn,depthIn:(p0.depthIn!=null?p0.depthIn:r.widthIn),size:(p0.size||'')}); cursorIn+=gap; }   // bridge the gap where the runs were split
+      if(gap>1){ var p0=(r.pieces&&r.pieces[0])||{}; merged.pieces.push({kind:'straight',cid:p0.round?'spiral':'st',camduct:p0.round?'Spiral':'Straight Duct',round:!!p0.round,lenIn:Math.round(gap*10)/10,widthIn:r.widthIn,depthIn:(p0.depthIn!=null?p0.depthIn:r.widthIn),size:(p0.size||'')}); cursorIn+=gap; }   // bridge the gap where the runs were split
       (r.pieces||[]).forEach(function(p){ merged.pieces.push(Object.assign({},p)); });
       cursorIn=Math.max(cursorIn, startIn+runLenIn(r));
     });
@@ -3364,21 +3365,23 @@ function refreshSel(){
     if(c==='cap'||c==='ec') return 'End caps';
     return 'Other';
   };
+  window.__toggleFitPanel=function(){ window.__fitPanelOpen=!window.__fitPanelOpen;
+    if(!window.__fitPanelOpen){ window.__fitReview=null; var el=document.getElementById('fitList'); if(el) el.innerHTML=''; renderItems(); }
+    else window.__showFitPanel();
+  };
   window.__showFitPanel=function(){
+    var host=document.getElementById('fitList'); if(!host) return;
+    if(!window.__fitPanelOpen){ host.innerHTML=''; return; }
     var counts={}; (window.__runs2d||[]).forEach(function(r){ (r.pieces||[]).forEach(function(p){ var c=window.__fitCat(p); if(c) counts[c]=(counts[c]||0)+1; }); });
     var order=['Elbows','Transitions','Taps','Tees','Offsets','End caps','Other'];
-    var old=document.getElementById('fitPanel'); if(old) old.remove();
-    var panel=document.createElement('div'); panel.id='fitPanel';
-    panel.style.cssText='position:fixed;top:120px;right:222px;z-index:100002;background:#fff;border:1px solid #dde2e9;border-radius:11px;padding:11px;box-shadow:-3px 3px 16px rgba(30,40,60,.16);width:198px;font:12px -apple-system,system-ui,sans-serif;color:#2b3441';
-    var html='<div style="font-weight:700;margin-bottom:8px">Review fittings</div>', any=false;
+    var html='<div style="border:1px solid #a5e4ef;border-radius:8px;background:#f2fdff;padding:8px;margin-bottom:8px"><div style="font-weight:700;font-size:11px;color:#0e7490;margin-bottom:6px">Fittings \u2014 click a type to highlight</div>', any=false;
     order.forEach(function(c){ if(!counts[c]) return; any=true; var a=(window.__fitReview===c);
-      html+='<button data-cat="'+c+'" style="display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:5px;padding:8px 10px;border-radius:8px;border:1px solid '+(a?'#06b6d4':'#dde2e9')+';background:'+(a?'#e6fbff':'#f5f7fa')+';color:'+(a?'#0e7490':'#2b3441')+';cursor:pointer;font-weight:600"><span>'+c+'</span><span style="font-variant-numeric:tabular-nums">'+counts[c]+'</span></button>';
+      html+='<button data-cat="'+c+'" style="display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:4px;padding:7px 9px;border-radius:7px;border:1px solid '+(a?'#06b6d4':'#dde2e9')+';background:'+(a?'#e6fbff':'#fff')+';color:'+(a?'#0e7490':'#2b3441')+';cursor:pointer;font-weight:600;font-size:12px"><span>'+c+'</span><span style="font-variant-numeric:tabular-nums;opacity:.75">'+counts[c]+'</span></button>';
     });
-    if(!any) html+='<div style="color:#8a93a1;font-size:11.5px">No fittings yet \u2014 build a takeoff first.</div>';
-    html+='<button id="fitClose" style="display:block;width:100%;margin-top:4px;padding:7px;border-radius:8px;border:1px solid #dde2e9;background:#eef1f5;color:#6b7482;cursor:pointer;font-size:11.5px">'+(window.__fitReview?'Clear highlight':'Close')+'</button>';
-    panel.innerHTML=html; document.body.appendChild(panel);
-    panel.querySelectorAll('button[data-cat]').forEach(function(b){ b.onclick=function(){ var c=b.getAttribute('data-cat'); window.__fitReview=(window.__fitReview===c?null:c); renderItems(); window.__showFitPanel(); if(window.__fitReview && typeof setStatus==='function') setStatus('Highlighting '+counts[c]+' '+c.toLowerCase()+' on the plan \u2014 review them.'); }; });
-    var cl=document.getElementById('fitClose'); if(cl) cl.onclick=function(){ if(window.__fitReview){ window.__fitReview=null; renderItems(); window.__showFitPanel(); } else { var pp=document.getElementById('fitPanel'); if(pp)pp.remove(); } };
+    if(!any) html+='<div style="color:#8a93a1;font-size:11px">No fittings yet \u2014 build a takeoff first.</div>';
+    html+='</div>';
+    host.innerHTML=html;
+    host.querySelectorAll('button[data-cat]').forEach(function(b){ b.onclick=function(){ var c=b.getAttribute('data-cat'); window.__fitReview=(window.__fitReview===c?null:c); renderItems(); window.__showFitPanel(); if(window.__fitReview&&typeof setStatus==='function') setStatus('Highlighting '+counts[c]+' '+c.toLowerCase()+' \u2014 click a ring to jump to its run.'); }; });
   };
   window.__selColor=function(c){ var ids=new Set(); sel.forEach(function(k){ ids.add(k.split(':')[0]); }); ids.forEach(function(id){ var r=findRun(id); if(r)r.color=c; }); renderItems(); renderPanel(); };
   window.__selName=function(){ var el=document.getElementById('selLabel'); if(!el)return; var nm=el.value; var ids=new Set(); sel.forEach(function(k){ ids.add(k.split(':')[0]); }); ids.forEach(function(id){ var r=findRun(id); if(r)r.label=nm; }); renderItems(); renderPanel(); setStatus('Labeled '+ids.size+' run(s).'); };
@@ -5083,7 +5086,8 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
    <div style="font-size:10px;color:#8a93a1;margin:0 0 8px 2px;letter-spacing:.4px;text-transform:uppercase;font-weight:600">Duct editing</div>
    <button id="dtUndo" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#fff4e6;border:1px solid #ffd9a8;color:#b5641a;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:700;font-size:12px">↶ Undo last change</button>
    <button id="dtFixElbows" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#eafaf0;border:1px solid #a9e0c0;color:#1b7a45;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">↰ Straighten elbows from trace</button>
-   <button id="dtFittings" onclick="window.__showFitPanel&&window.__showFitPanel()" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#e6fbff;border:1px solid #a5e4ef;color:#0e7490;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">◎ Review fittings by type</button>
+   <button id="dtFittings" onclick="window.__toggleFitPanel&&window.__toggleFitPanel()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#e6fbff;border:1px solid #a5e4ef;color:#0e7490;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">◎ Review fittings by type</button>
+   <div id="fitList"></div>
    <button class="dtTool" data-mode="dragsize" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-resize width</button>
    <button class="dtTool" data-mode="draglen" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-end (length)</button>
    <button class="dtTool" data-mode="move" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Move run</button>
@@ -5164,6 +5168,24 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   overlay.addEventListener('contextmenu', function(e){ e.preventDefault(); }, true);   // right-click drives the tool wheel, not the browser menu
   overlay.addEventListener('mousedown', function(e){
     if(e.button===2){ if(window.__brushOn) return; e.preventDefault(); e.stopPropagation(); drag={mode:'toolwheel', cx:e.clientX, cy:e.clientY}; showToolWheel(e.clientX,e.clientY); status('Drag to a tool, release to switch.'); return; }   // brush active -> let its right-drag paint not-duct
+    if(e.button===0 && window.__editMode==='join'){                       // JOIN: click a run to toggle it, or drag a box to grab several
+      var sj=toSvg(e); if(!sj) return; e.stopPropagation(); e.preventDefault();
+      var startX=e.clientX, startY=e.clientY, sx0=sj[0], sy0=sj[1], moved=false, rb=null, IL=document.getElementById('itemLayer');
+      function mv(ev){ if(Math.abs(ev.clientX-startX)+Math.abs(ev.clientY-startY)>4) moved=true;
+        if(moved && IL){ var s1=toSvg(ev); if(!s1) return;
+          if(!rb){ rb=document.createElementNS('http://www.w3.org/2000/svg','rect'); rb.setAttribute('fill','rgba(232,56,245,0.10)'); rb.setAttribute('stroke','#e838f5'); rb.setAttribute('stroke-dasharray','5 4'); rb.setAttribute('stroke-width','1.5'); rb.setAttribute('pointer-events','none'); IL.appendChild(rb); }
+          rb.setAttribute('x',Math.min(sx0,s1[0])); rb.setAttribute('y',Math.min(sy0,s1[1])); rb.setAttribute('width',Math.abs(s1[0]-sx0)); rb.setAttribute('height',Math.abs(s1[1]-sy0)); } }
+      function up(ev){ document.removeEventListener('mousemove',mv,true); document.removeEventListener('mouseup',up,true);
+        if(rb&&rb.parentNode) rb.parentNode.removeChild(rb);
+        window.__joinSet=window.__joinSet||[];
+        if(!moved){ var r=hitRun(sj); if(r){ var ji=window.__joinSet.indexOf(r.id); if(ji>=0) window.__joinSet.splice(ji,1); else window.__joinSet.push(r.id); } }
+        else { var s2=toSvg(ev)||[sx0,sy0]; var bx0=Math.min(sx0,s2[0]),by0=Math.min(sy0,s2[1]),bx1=Math.max(sx0,s2[0]),by1=Math.max(sy0,s2[1]);
+          (window.__runs2d||[]).forEach(function(r){ var pl=polyS(r); var hit=pl.some(function(pt){ return pt[0]>=bx0&&pt[0]<=bx1&&pt[1]>=by0&&pt[1]<=by1; }); if(hit && window.__joinSet.indexOf(r.id)<0) window.__joinSet.push(r.id); }); }
+        try{window.__renderItems&&window.__renderItems();}catch(_){}
+        try{window.__showJoinBar&&window.__showJoinBar();}catch(_){}
+      }
+      document.addEventListener('mousemove',mv,true); document.addEventListener('mouseup',up,true); return;
+    }
   }, true);
   overlay.addEventListener('mousedown', function(e){
     var m=window.__editMode; if(e.button!==0) return;
