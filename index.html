@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.25</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.27</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3456,7 +3456,7 @@ function refreshSel(){
     var runs=window.__runs2d||[]; if(!runs.length){ alert('No takeoff to export yet — build the runs first.'); return; }
     var NL='\r\n', L=[]; function kv(k,v){ L.push(k); L.push('  '+(v==null?'':String(v))); }
     function f3(v){ return (Math.round((v||0)*1000)/1000).toFixed(3); }
-    var S=1000000, C=1000002;
+    var S=1000000, C=1000002, THROAT=6, COLLAR=4, EXT=4;   // 1000000/1000002 = CAMduct auto/central (Btm Width, offset align); throats/collars/extensions need a real value, not the sentinel
     L.push('JOBHEADER_START'); var jn='takeoff'; for(var z=0;z<runs.length;z++){ if(runs[z].sectionLabel){ jn=runs[z].sectionLabel; break; } }
     kv('JOB_NAME',jn); try{ kv('JOB_DATE', new Date().toLocaleDateString('en-US')); }catch(_){}
     L.push('JOBHEADER_END');
@@ -3468,19 +3468,21 @@ function refreshSel(){
         var w=p.widthIn||r.widthIn||0, h=(p.depthIn!=null?p.depthIn:w), inW=p.inW||w, inD=(p.inD!=null?p.inD:h), ow=p.outW||w, od=(p.outD!=null?p.outD:ow), bw=p.branchW||Math.max(6,Math.round(w/2));
         var dims=[], opts=null, eg=pd.eg;
         if(key==='st'){ dims=isR?[f3(w),f3(p.lenIn)]:[f3(w),f3(h),f3(p.lenIn)]; if(!isR)opts=[2,0,0,0]; }
-        else if(key==='e90'){ dims=isR?[f3(w),f3(90),S]:[f3(w),f3(h),S,S,S]; }              // throats auto
-        else if(key==='e45'){ dims=isR?[f3(w),f3(45),S]:[f3(w),f3(h),S,f3(45),S,S]; }
+        else if(key==='e90'){ dims=isR?[f3(w),f3(90),S]:[f3(w),f3(h),S,f3(THROAT),f3(THROAT)]; }              // Btm Width = Equal (S); throats default 6"
+        else if(key==='e45'){ dims=isR?[f3(w),f3(45),S]:[f3(w),f3(h),S,f3(45),f3(THROAT),f3(THROAT)]; }
         else if(key==='tr'){ dims=isR?[f3(inW),f3(ow),f3(p.lenIn)]:[f3(inW),f3(inD),f3(ow),f3(od),f3(p.lenIn),f3(0),f3(0),C,C]; }
-        else if(key==='s2r'){ dims=[f3(inW),f3(inD),f3(ow),f3(p.lenIn),C,C,S]; opts=[0,3,0,3]; eg='RONDFIT'; }
+        else if(key==='s2r'){ dims=[f3(inW),f3(inD),f3(ow),f3(p.lenIn),C,C,f3(COLLAR)]; opts=[0,3,0,3]; eg='RONDFIT'; }
         else if(key==='stap'){ dims=isR?[f3(w),f3(bw),f3(p.lenIn||6)]:[f3(bw),f3(bw),f3(p.lenIn||6)]; opts=[1]; }
-        else if(key==='offset'){ dims=isR?[f3(w),f3(p.lenIn),S]:[f3(w),f3(h),f3(p.lenIn),S,S,S,S,S]; }
+        else if(key==='offset'){ dims=isR?[f3(w),f3(p.lenIn),S]:[f3(w),f3(h),f3(p.lenIn),f3(EXT),f3(EXT),f3(p.offsetIn||w),S,S]; }
         else if(key==='cap'){ dims=isR?[f3(w)]:[f3(w),f3(h)]; }
         else return;
         if(isR && key!=='s2r') verify[pd.d]=1;
         entry++;
         L.push('ITEM_START'); L.push('ITEMHEADER_START');
         kv('ITEMFILE',pallet+pd.d+'.ITM'); kv('ITEM_NUMBER',entry+' '+pd.d); kv('SPEC',spec); kv('MATERIAL','GAL-60'); kv('QUANTITY',1);
-        L.push('ITEMHEADER_END'); L.push('CUSTOM_DATA_START'); L.push('  Epicor Group='+eg); if(r.sectionLabel) L.push('  Item Tag='+r.sectionLabel); L.push('CUSTOM_DATA_END');
+        if(r.sectionLabel) kv('NOTES', r.sectionLabel);                          // section name (e.g. RTU 2) -> CAMduct item Notes field
+        var _lin=(typeof CAM_CFG!=='undefined'&&CAM_CFG.liner)?CAM_CFG.liner[r.liner]:null; if(_lin&&_lin.mat){ kv('INSULATION_MATERIAL',_lin.mat); kv('INSULATION_GAUGE',_lin.th); }   // liner: confirmed PC-59 = 1"
+        L.push('ITEMHEADER_END'); L.push('CUSTOM_DATA_START'); L.push('  Epicor Group='+eg); L.push('CUSTOM_DATA_END');
         L.push('DIMS_START'); dims.forEach(function(d){ L.push('  '+d); }); L.push('DIMS_END');
         if(opts){ L.push('OPTIONS_START'); opts.forEach(function(o){ L.push('  '+f3(o)); }); L.push('OPTIONS_END'); }
         L.push('ITEM_END');
