@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.12</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.14</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3061,14 +3061,19 @@ function refreshSel(){
         }
         var pts=piecePolyPts(run,i); if(pts.some(function(q){return !q;})) return;
         var key=run.id+':'+i, on=sel.has(key);
+        var inJoin=(window.__joinSet&&window.__joinSet.indexOf(run.id)>=0);
         var fill,stroke;
         if(p.kind==='straight'){ fill=hexA(run.color,on?0.45:0.26); stroke=run.color; }
         else { fill='rgba(245,158,11,'+(on?0.55:0.34)+')'; stroke='#f59e0b'; }
+        if(inJoin) stroke='#e838f5';
         var d='M'+pts.map(function(q){return q[0].toFixed(1)+' '+q[1].toFixed(1);}).join('L')+'Z';
         var poly=document.createElementNS(ns,'path'); poly.setAttribute('d',d);
-        poly.setAttribute('fill',fill); poly.setAttribute('stroke',stroke); poly.setAttribute('stroke-width',on?'3':'1.5'); poly.style.cursor='pointer';
+        poly.setAttribute('fill',fill); poly.setAttribute('stroke',stroke); poly.setAttribute('stroke-width',inJoin?'4':(on?'3':'1.5')); poly.style.cursor='pointer';
         var pcHit=function(e){ e.stopPropagation();
           var m=window.__editMode;
+          if(m==='join'){ window.__joinSet=window.__joinSet||[]; var ji=window.__joinSet.indexOf(run.id);
+            if(ji>=0) window.__joinSet.splice(ji,1); else window.__joinSet.push(run.id);
+            renderItems(); window.__showJoinBar&&window.__showJoinBar(); return; }
           if(e.button!==2){ selRun=run.id; try{window.__selRunId=run.id;}catch(_){} try{window.__showRunPanel&&window.__showRunPanel();}catch(_){} }   // any left-click on a run shows it in the run view
           if(m==='delete'){ window.__pushRunUndo&&window.__pushRunUndo(); window.__runs2d=(window.__runs2d||[]).filter(function(r){return r.id!==run.id;}); sel.clear(); selRun=null; renderItems(); renderPanel(); setStatus('Deleted run. (Undo with the Undo button or Ctrl+Z.)'); return; }
           if(m==='size'){ var v=prompt('Size for this piece (e.g. 20x8 or 12\u00f8):', p.size||''); if(v==null||!v.trim()) return;
@@ -3155,6 +3160,20 @@ function refreshSel(){
       });
       if(run.label){ var s0=n2s(run.start[0],run.start[1]); if(s0){ var lt=document.createElementNS(ns,'text'); lt.setAttribute('x',s0[0]); lt.setAttribute('y',s0[1]-6); lt.setAttribute('font-size','12'); lt.setAttribute('font-weight','800'); lt.setAttribute('fill',run.color); lt.setAttribute('stroke','#0a0f16'); lt.setAttribute('stroke-width','3'); lt.setAttribute('paint-order','stroke'); lt.textContent=run.label; lay.appendChild(lt); } }
     });
+    // FITTING REVIEW — ring every fitting of the type being reviewed so it's easy to eyeball on the plan
+    if(window.__fitReview){
+      (window.__runs2d||[]).forEach(function(run){
+        var fr; try{ fr=runFrames(run); }catch(_){ return; }
+        run.pieces.forEach(function(p,i){
+          if(!window.__fitCat || window.__fitCat(p)!==window.__fitReview) return;
+          var f=fr[i]; if(!f) return; var sp=n2s(f.x,f.y); if(!sp) return;
+          var ring=document.createElementNS(ns,'circle');
+          ring.setAttribute('cx',sp[0].toFixed(1)); ring.setAttribute('cy',sp[1].toFixed(1)); ring.setAttribute('r','16');
+          ring.setAttribute('fill','rgba(34,211,238,0.16)'); ring.setAttribute('stroke','#06b6d4'); ring.setAttribute('stroke-width','3'); ring.setAttribute('pointer-events','none');
+          lay.appendChild(ring);
+        });
+      });
+    }
     // ELBOW BRIDGES — render each recorded run-to-run elbow as connecting duct-width bands through the
     // corner, so the two duct sections visibly join (runs themselves stay put — bridge is new geometry).
     (window.__elbowJoins||[]).forEach(function(j){
@@ -3294,6 +3313,73 @@ function refreshSel(){
   };
   window.__runAddJoint=function(id){ var r=findRun(id); if(!r)return; var last=r.pieces[r.pieces.length-1]||{widthIn:r.widthIn,depthIn:r.widthIn,size:r.widthIn+'"'}; var rnd=!!last.round; r.pieces.push({kind:'straight',lenIn:(rnd?120:JOINT_DEFAULT),widthIn:last.widthIn,depthIn:last.depthIn,size:last.size,cid:(rnd?'spiral':'st'),camduct:(rnd?'Spiral':'Straight Duct'),round:rnd}); applyReducerDownstream(r); renderItems(); renderPanel(); };
   window.__runDel=function(id){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); if(selRun===id)selRun=null; sel.clear(); renderItems(); renderPanel(); };
+  window.__joinRuns=function(ids){                 // merge several in-line runs into ONE run you can label as a single duct
+    var R=window.__runs2d||[]; var runs=ids.map(function(id){return R.find(function(r){return r.id===id;});}).filter(Boolean);
+    if(runs.length<2) return false;
+    var dir=runs[0].dir.slice();
+    var para=runs.filter(function(r){ return Math.abs(r.dir[0]*dir[0]+r.dir[1]*dir[1])>0.7; });   // keep the ones lined up with the first (a trunk)
+    if(para.length<2){ if(typeof setStatus==='function') setStatus('Pick runs that line up in the same direction to join.'); return false; }
+    window.__pushRunUndo&&window.__pushRunUndo();
+    var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
+    function proj(pt){ return pt[0]*dir[0]+pt[1]*dir[1]; }
+    para.sort(function(a,b){ return proj(a.start)-proj(b.start); });
+    var base=para[0], start=base.start.slice();
+    function runLenIn(r){ var t=0; (r.pieces||[]).forEach(function(p){ t+=(p.lenIn||0); }); return t; }
+    var merged={ id:base.id, axis:base.axis, dir:dir.slice(), start:start.slice(), widthIn:base.widthIn, color:base.color||'#5b8def', pieces:[] };
+    var cursorIn=0;
+    para.forEach(function(r){
+      var startIn=(proj(r.start)-proj(start))/ppi, gap=startIn-cursorIn;
+      if(gap>1){ var p0=(r.pieces&&r.pieces[0])||{}; merged.pieces.push({kind:'straight',cid:p0.round?'spiral':'st',camduct:p0.round?'Spiral':'Straight Duct',round:!!p0.round,lenIn:rnd(gap),widthIn:r.widthIn,depthIn:(p0.depthIn!=null?p0.depthIn:r.widthIn),size:(p0.size||'')}); cursorIn+=gap; }   // bridge the gap where the runs were split
+      (r.pieces||[]).forEach(function(p){ merged.pieces.push(Object.assign({},p)); });
+      cursorIn=Math.max(cursorIn, startIn+runLenIn(r));
+    });
+    var keep=para.map(function(r){return r.id;});
+    window.__runs2d = R.filter(function(r){ return keep.indexOf(r.id)<0; }); window.__runs2d.push(merged);
+    window.__joinSet=[]; selRun=merged.id; try{window.__selRunId=merged.id;}catch(_){} window.__editMode=null;
+    renderItems(); renderPanel();
+    if(typeof setStatus==='function') setStatus('Joined '+para.length+' runs into one \u2014 label it in the run panel.');
+    return merged.id;
+  };
+  window.__showJoinBar=function(){
+    var n=(window.__joinSet||[]).length, bar=document.getElementById('joinBar');
+    if(window.__editMode!=='join'){ if(bar) bar.remove(); return; }
+    if(!bar){ bar=document.createElement('div'); bar.id='joinBar';
+      bar.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:100002;background:#0e1c2b;border:1px solid #e838f5;border-radius:10px;padding:9px 12px;box-shadow:0 10px 30px rgba(0,0,0,.5);font:12px system-ui,sans-serif;color:#eecbff;display:flex;gap:9px;align-items:center';
+      document.body.appendChild(bar); }
+    bar.innerHTML='';
+    var lbl=document.createElement('span'); lbl.textContent=(n?('Join runs: '+n+' picked'):'Click each duct run to join'); bar.appendChild(lbl);
+    var jb=document.createElement('button'); jb.textContent='Join'; jb.style.cssText='background:#e838f5;border:none;color:#fff;border-radius:6px;padding:6px 13px;cursor:pointer;font-weight:700'; if(n<2){jb.disabled=true;jb.style.opacity='0.45';jb.style.cursor='default';}
+    jb.onclick=function(){ window.__joinRuns((window.__joinSet||[]).slice()); var b=document.getElementById('joinBar'); if(b)b.remove(); };
+    bar.appendChild(jb);
+    var cb=document.createElement('button'); cb.textContent='Cancel'; cb.style.cssText='background:#20344a;border:none;color:#bfe0ff;border-radius:6px;padding:6px 10px;cursor:pointer';
+    cb.onclick=function(){ window.__joinSet=[]; window.__editMode=null; var b=document.getElementById('joinBar'); if(b)b.remove(); renderItems(); };
+    bar.appendChild(cb);
+  };
+  window.__fitCat=function(p){ if(!p||p.kind!=='fitting') return null; var c=p.cid||'';
+    if(c==='e90'||c==='e45'||c==='e90r'||p._elbow) return 'Elbows';
+    if(c==='tr'||c==='reducer'||c==='s2r'||c==='reo'||c==='ecr'||p._sizeStep) return 'Transitions';
+    if(c==='stap'||c==='rtap'||p._tap) return 'Taps';
+    if(c==='sqt'||c==='rtee') return 'Tees';
+    if(c==='offset'||c==='roff') return 'Offsets';
+    if(c==='cap'||c==='ec') return 'End caps';
+    return 'Other';
+  };
+  window.__showFitPanel=function(){
+    var counts={}; (window.__runs2d||[]).forEach(function(r){ (r.pieces||[]).forEach(function(p){ var c=window.__fitCat(p); if(c) counts[c]=(counts[c]||0)+1; }); });
+    var order=['Elbows','Transitions','Taps','Tees','Offsets','End caps','Other'];
+    var old=document.getElementById('fitPanel'); if(old) old.remove();
+    var panel=document.createElement('div'); panel.id='fitPanel';
+    panel.style.cssText='position:fixed;top:120px;right:222px;z-index:100002;background:#fff;border:1px solid #dde2e9;border-radius:11px;padding:11px;box-shadow:-3px 3px 16px rgba(30,40,60,.16);width:198px;font:12px -apple-system,system-ui,sans-serif;color:#2b3441';
+    var html='<div style="font-weight:700;margin-bottom:8px">Review fittings</div>', any=false;
+    order.forEach(function(c){ if(!counts[c]) return; any=true; var a=(window.__fitReview===c);
+      html+='<button data-cat="'+c+'" style="display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:5px;padding:8px 10px;border-radius:8px;border:1px solid '+(a?'#06b6d4':'#dde2e9')+';background:'+(a?'#e6fbff':'#f5f7fa')+';color:'+(a?'#0e7490':'#2b3441')+';cursor:pointer;font-weight:600"><span>'+c+'</span><span style="font-variant-numeric:tabular-nums">'+counts[c]+'</span></button>';
+    });
+    if(!any) html+='<div style="color:#8a93a1;font-size:11.5px">No fittings yet \u2014 build a takeoff first.</div>';
+    html+='<button id="fitClose" style="display:block;width:100%;margin-top:4px;padding:7px;border-radius:8px;border:1px solid #dde2e9;background:#eef1f5;color:#6b7482;cursor:pointer;font-size:11.5px">'+(window.__fitReview?'Clear highlight':'Close')+'</button>';
+    panel.innerHTML=html; document.body.appendChild(panel);
+    panel.querySelectorAll('button[data-cat]').forEach(function(b){ b.onclick=function(){ var c=b.getAttribute('data-cat'); window.__fitReview=(window.__fitReview===c?null:c); renderItems(); window.__showFitPanel(); if(window.__fitReview && typeof setStatus==='function') setStatus('Highlighting '+counts[c]+' '+c.toLowerCase()+' on the plan \u2014 review them.'); }; });
+    var cl=document.getElementById('fitClose'); if(cl) cl.onclick=function(){ if(window.__fitReview){ window.__fitReview=null; renderItems(); window.__showFitPanel(); } else { var pp=document.getElementById('fitPanel'); if(pp)pp.remove(); } };
+  };
   window.__selColor=function(c){ var ids=new Set(); sel.forEach(function(k){ ids.add(k.split(':')[0]); }); ids.forEach(function(id){ var r=findRun(id); if(r)r.color=c; }); renderItems(); renderPanel(); };
   window.__selName=function(){ var el=document.getElementById('selLabel'); if(!el)return; var nm=el.value; var ids=new Set(); sel.forEach(function(k){ ids.add(k.split(':')[0]); }); ids.forEach(function(id){ var r=findRun(id); if(r)r.label=nm; }); renderItems(); renderPanel(); setStatus('Labeled '+ids.size+' run(s).'); };
   window.__pcSel=function(id,i){ var k=id+':'+i; if(sel.has(k)) sel.delete(k); else sel.add(k); renderPanel(); };
@@ -4997,6 +5083,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
    <div style="font-size:10px;color:#8a93a1;margin:0 0 8px 2px;letter-spacing:.4px;text-transform:uppercase;font-weight:600">Duct editing</div>
    <button id="dtUndo" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#fff4e6;border:1px solid #ffd9a8;color:#b5641a;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:700;font-size:12px">↶ Undo last change</button>
    <button id="dtFixElbows" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#eafaf0;border:1px solid #a9e0c0;color:#1b7a45;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">↰ Straighten elbows from trace</button>
+   <button id="dtFittings" onclick="window.__showFitPanel&&window.__showFitPanel()" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#e6fbff;border:1px solid #a5e4ef;color:#0e7490;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">◎ Review fittings by type</button>
    <button class="dtTool" data-mode="dragsize" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-resize width</button>
    <button class="dtTool" data-mode="draglen" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-end (length)</button>
    <button class="dtTool" data-mode="move" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Move run</button>
@@ -5019,7 +5106,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   function status(s){ try{ if(typeof setStatus==='function') setStatus(s); }catch(_){} }
   function openBar(){ if(body.style.display==='none'){ body.style.display='block'; tog.textContent='Edit ‹'; } }
   tog.onclick=function(){ var open=body.style.display!=='none'; body.style.display=open?'none':'block'; tog.textContent=open?'Edit ›':'Edit ‹'; if(!open) status('Edit mode — click a duct to select, or pick a tool.'); };
-  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',move:'Drag anywhere on a run to move the whole run.',rotate:'Drag to spin the run around its start — hold Shift to snap to 15°.',connect:'Click one duct, then another — then choose Elbow (corner) or Tap (into the side).',stamp:'Copy pieces first (tick them in the panel → Copy as stamp), then click on the plan to drop a copy. Keep clicking to place more.',insert:'Press on a duct and drag to a fitting on the wheel, then release.',size:'Click a piece and type its size.',delete:'Click a run to delete it.'};
+  var HINTS={dragsize:'Drag across a duct — release at the printed wall to set its width.',draglen:'Grab a duct END and drag to set its length (grow or shrink).',move:'Drag anywhere on a run to move the whole run.',rotate:'Drag to spin the run around its start — hold Shift to snap to 15°.',connect:'Click one duct, then another — then choose Elbow (corner) or Tap (into the side).',stamp:'Copy pieces first (tick them in the panel → Copy as stamp), then click on the plan to drop a copy. Keep clicking to place more.',insert:'Press on a duct and drag to a fitting on the wheel, then release.',size:'Click a piece and type its size.',delete:'Click a run to delete it.',join:'Click each in-line run to add it, then press Join — they become one run you can label as a single duct.'};
   function refl(){ Array.prototype.forEach.call(document.querySelectorAll('.dtTool'),function(b){ var on=(b.getAttribute('data-mode')===window.__editMode), isDel=(b.getAttribute('data-mode')==='delete');
       b.style.background=on?'#dbe7ff':(isDel?'#fdf2f2':'#f5f7fa'); b.style.borderColor=on?'#9dbcff':(isDel?'#f2d4d4':'#dde2e9'); b.style.color=on?'#3562c4':(isDel?'#c0484d':'#2b3441'); });
     if(hint) hint.textContent=window.__editMode?(HINTS[window.__editMode]||''):''; }
@@ -5059,7 +5146,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   }
   function closeWheel(){ if(wheel){ try{wheel.remove();}catch(_){}} wheel=null; }
   // ---- right-click radial TOOL picker (switch edit tool without the sidebar) ----
-  var TOOLS=[{m:'insert',t:'Insert'},{m:'connect',t:'Connect'},{m:'addstraight',t:'Add straight'},{m:'split',t:'Split'},{m:'move',t:'Move'},{m:'dragsize',t:'Drag width'},{m:'draglen',t:'Drag end'},{m:'delete',t:'Del run'},{m:'delpiece',t:'Del piece'}];
+  var TOOLS=[{m:'insert',t:'Insert'},{m:'connect',t:'Connect'},{m:'addstraight',t:'Add straight'},{m:'split',t:'Split'},{m:'move',t:'Move'},{m:'dragsize',t:'Drag width'},{m:'draglen',t:'Drag end'},{m:'join',t:'Join runs'},{m:'delete',t:'Del run'},{m:'delpiece',t:'Del piece'}];
   var twSel=-1;
   function showToolWheel(cx,cy){ closeWheel(); twSel=-1;
     wheel=document.createElement('div'); wheel.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;z-index:100000;pointer-events:none';
@@ -5218,6 +5305,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
           else { status('Right-click near a run END to add a straight leg.'); window.__editMode=null; }
         } else {
           window.__editMode=tm; status('Tool: '+TOOLS[tsel].t+'.');
+          if(tm==='join'){ window.__joinSet=[]; try{window.__showJoinBar&&window.__showJoinBar();}catch(_){} }
           try{ var t=document.getElementById('dtBarToggle'), body=document.getElementById('dtBarBody'); if(t&&body&&body.style.display==='none') t.click(); }catch(_){}   // open the edit toolbar so the active tool shows
           try{ if(typeof refl==='function') refl(); }catch(_){}
         }
