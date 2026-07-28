@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.16</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.20</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2527,6 +2527,19 @@ function refreshSel(){
       }
       assign[ti]=best;
     }
+    // RESCUE orphaned ROUND (ø) tags: a round duct is often a single centerline that never paired into a run,
+    // so its diameter tag lands on nothing and the nearby run defaults to a rectangle. Attach each unassigned
+    // ø tag to the nearest UNTAGGED run it sits over, so the run comes out round with that diameter.
+    var _taken={}; for(var a2=0;a2<assign.length;a2++) if(assign[a2]>=0) _taken[assign[a2]]=1;
+    for(var tr=0; tr<tags.length; tr++){ if(assign[tr]!==-1) continue; var tgr=tags[tr]; if(!tgr||tgr.nx==null) continue; var pdr=parseTagDims(tgr.text); if(!pdr||!pdr.round) continue;
+      var rb=-1, rbPerp=1e9;
+      for(var rgi=0; rgi<geom.length; rgi++){ var gg=geom[rgi]; if(!gg||_taken[rgi]) continue;   // untagged runs only
+        var al=(tgr.nx-gg.sx)*gg.ux+(tgr.ny-gg.sy)*gg.uy, pe=Math.abs((tgr.nx-gg.sx)*gg.pnx+(tgr.ny-gg.sy)*gg.pny);
+        if(al < -gg.Lpt*0.25 || al > gg.Lpt*1.25) continue;
+        if(pe > Math.max(gg.wpx*1.5, 60)) continue;
+        if(pe < rbPerp){ rbPerp=pe; rb=rgi; } }
+      if(rb>=0){ assign[tr]=rb; _taken[rb]=1; }
+    }
     return assign;
   }
   function runsFromPreview(){
@@ -3214,6 +3227,7 @@ function refreshSel(){
       +'<div style="display:flex;gap:5px;margin-bottom:5px"><input id="selLabel" placeholder="label run" style="flex:1;padding:5px;border:1px solid #345;border-radius:5px;background:#0e1923;color:#fff"><button onclick="__selName()" style="padding:5px 9px;border:none;border-radius:5px;background:#15a;color:#fff;cursor:pointer">Set</button></div>'
       +'<div style="display:flex;gap:5px"><input id="selSize" placeholder="new size e.g. 28x8 or 10\u00f8" style="flex:1;padding:5px;border:1px solid #345;border-radius:5px;background:#0e1923;color:#fff"><button onclick="__selSize()" style="padding:5px 9px;border:none;border-radius:5px;background:#1b8a4a;color:#fff;cursor:pointer;font-weight:600">Set size</button></div>'
       +'<button onclick="__copyStamp()" style="width:100%;margin-top:5px;padding:6px;border:1px solid #7a5cc0;border-radius:5px;background:#2a2140;color:#d9c9ff;cursor:pointer;font-weight:600">\u29c9 Copy as stamp</button>'
+      +'<button onclick="__selDelPieces()" style="width:100%;margin-top:5px;padding:6px;border:1px solid #a44;border-radius:5px;background:#3a2020;color:#fbb;cursor:pointer;font-weight:600">\u00d7 Delete selected piece(s)</button>'
       +'</div>'; }
     if(!selRun){ h+='<div class="hint" style="opacity:.75">Click a duct run on the plan to view &amp; edit it here.</div>'; }
     runs.forEach(function(run){
@@ -3259,6 +3273,14 @@ function refreshSel(){
   window.__runOpen=function(id){ selRun=(selRun===id?null:id); renderPanel(); };
   window.__pcLen=function(id,i,v){ var r=findRun(id); if(!r)return; r.pieces[i].lenIn=Math.max(0.5,parseFloat(v)||r.pieces[i].lenIn); renderItems(); renderPanel(); setStatus('Run now '+fmtFt(runLenIn(r))+'.'); };
   window.__pcDel=function(id,i){ var r=findRun(id); if(!r)return; window.__pushRunUndo&&window.__pushRunUndo(); r.pieces.splice(i,1); if(!r.pieces.length){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); selRun=null; } else applyReducerDownstream(r); sel.clear(); renderItems(); renderPanel(); };
+  window.__selDelPieces=function(){                 // delete the piece(s) you clicked on the plan, pulling the run in (same as the row's red x)
+    if(!sel.size) return; var byRun={}; sel.forEach(function(k){ var pp=k.split(':'); (byRun[pp[0]]=byRun[pp[0]]||[]).push(+pp[1]); });
+    window.__pushRunUndo&&window.__pushRunUndo();
+    Object.keys(byRun).forEach(function(id){ var r=findRun(id); if(!r) return;
+      byRun[id].sort(function(a,b){return b-a;}).forEach(function(i){ r.pieces.splice(i,1); });   // descending so earlier splices don't shift later indices
+      if(!r.pieces.length){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); if(selRun===id) selRun=null; } else applyReducerDownstream(r); });
+    sel.clear(); renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Deleted the piece(s).');
+  };
   window.__pcIns=function(id,i,ev){ var r=findRun(id); if(!r)return; var p=r.pieces[i]||{};
     var alongIn=(p.kind==='straight')?(p.lenIn||0):0;                 // insert at the end of this piece
     var sz=p.size||((p.widthIn||r.widthIn)+'\u00d7?');
@@ -3314,32 +3336,46 @@ function refreshSel(){
   };
   window.__runAddJoint=function(id){ var r=findRun(id); if(!r)return; var last=r.pieces[r.pieces.length-1]||{widthIn:r.widthIn,depthIn:r.widthIn,size:r.widthIn+'"'}; var rnd=!!last.round; r.pieces.push({kind:'straight',lenIn:(rnd?120:JOINT_DEFAULT),widthIn:last.widthIn,depthIn:last.depthIn,size:last.size,cid:(rnd?'spiral':'st'),camduct:(rnd?'Spiral':'Straight Duct'),round:rnd}); applyReducerDownstream(r); renderItems(); renderPanel(); };
   window.__runDel=function(id){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); if(selRun===id)selRun=null; sel.clear(); renderItems(); renderPanel(); };
-  window.__joinRuns=function(ids){                 // merge several in-line runs into ONE run you can label as a single duct
+  window.__joinRuns=function(ids){                 // JOIN SECTION: collapse in-line segments, then group everything picked as ONE labeled section
     var R=window.__runs2d||[]; var runs=ids.map(function(id){return R.find(function(r){return r.id===id;});}).filter(Boolean);
-    if(runs.length<2) return false;
-    var dir=runs[0].dir.slice();
-    var para=runs.filter(function(r){ return Math.abs(r.dir[0]*dir[0]+r.dir[1]*dir[1])>0.7; });   // keep the ones lined up with the first (a trunk)
-    if(para.length<2){ if(typeof setStatus==='function') setStatus('Pick runs that line up in the same direction to join.'); return false; }
-    window.__pushRunUndo&&window.__pushRunUndo();
+    if(runs.length<2){ if(typeof setStatus==='function') setStatus('Pick at least two runs to join.'); return false; }
     var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
-    function proj(pt){ return pt[0]*dir[0]+pt[1]*dir[1]; }
-    para.sort(function(a,b){ return proj(a.start)-proj(b.start); });
-    var base=para[0], start=base.start.slice();
-    function runLenIn(r){ var t=0; (r.pieces||[]).forEach(function(p){ t+=(p.lenIn||0); }); return t; }
-    var merged={ id:base.id, axis:base.axis, dir:dir.slice(), start:start.slice(), widthIn:base.widthIn, color:base.color||'#5b8def', pieces:[] };
-    var cursorIn=0;
-    para.forEach(function(r){
-      var startIn=(proj(r.start)-proj(start))/ppi, gap=startIn-cursorIn;
-      if(gap>1){ var p0=(r.pieces&&r.pieces[0])||{}; merged.pieces.push({kind:'straight',cid:p0.round?'spiral':'st',camduct:p0.round?'Spiral':'Straight Duct',round:!!p0.round,lenIn:Math.round(gap*10)/10,widthIn:r.widthIn,depthIn:(p0.depthIn!=null?p0.depthIn:r.widthIn),size:(p0.size||'')}); cursorIn+=gap; }   // bridge the gap where the runs were split
-      (r.pieces||[]).forEach(function(p){ merged.pieces.push(Object.assign({},p)); });
-      cursorIn=Math.max(cursorIn, startIn+runLenIn(r));
+    function perpToLine(a,b){ var nx=-a.dir[1], ny=a.dir[0]; return Math.abs((b.start[0]-a.start[0])*nx+(b.start[1]-a.start[1])*ny); }
+    var clusters=[];                                 // cluster picked runs by which lie on the SAME line (trunk segments group; each branch line groups)
+    runs.forEach(function(r){ var placed=false;
+      for(var i=0;i<clusters.length;i++){ var c=clusters[i][0];
+        if(Math.abs(c.dir[0]*r.dir[0]+c.dir[1]*r.dir[1])>0.9 && perpToLine(c,r) < ppi*Math.max(c.widthIn||12,r.widthIn||12)){ clusters[i].push(r); placed=true; break; } }
+      if(!placed) clusters.push([r]);
     });
-    var keep=para.map(function(r){return r.id;});
-    window.__runs2d = R.filter(function(r){ return keep.indexOf(r.id)<0; }); window.__runs2d.push(merged);
-    window.__joinSet=[]; selRun=merged.id; try{window.__selRunId=merged.id;}catch(_){} window.__editMode=null;
+    window.__pushRunUndo&&window.__pushRunUndo();
+    function mergeCluster(group){
+      if(group.length<2) return group[0];
+      var dir=group[0].dir.slice(); function proj(pt){ return pt[0]*dir[0]+pt[1]*dir[1]; }
+      group.sort(function(a,b){ return proj(a.start)-proj(b.start); });
+      var base=group[0], start=base.start.slice();
+      function runLenIn(r){ var t=0; (r.pieces||[]).forEach(function(p){ t+=(p.lenIn||0); }); return t; }
+      var merged={ id:base.id, axis:base.axis, dir:dir.slice(), start:start.slice(), widthIn:base.widthIn, color:base.color, pieces:[] };
+      var cursorIn=0;
+      group.forEach(function(r){ var startIn=(proj(r.start)-proj(start))/ppi, gap=startIn-cursorIn;
+        if(gap>1){ var p0=(r.pieces&&r.pieces[0])||{}; merged.pieces.push({kind:'straight',cid:p0.round?'spiral':'st',camduct:p0.round?'Spiral':'Straight Duct',round:!!p0.round,lenIn:Math.round(gap*10)/10,widthIn:r.widthIn,depthIn:(p0.depthIn!=null?p0.depthIn:r.widthIn),size:(p0.size||'')}); cursorIn+=gap; }
+        (r.pieces||[]).forEach(function(p){ merged.pieces.push(Object.assign({},p)); });
+        cursorIn=Math.max(cursorIn, startIn+runLenIn(r));
+      });
+      return merged;
+    }
+    var resultRuns=clusters.map(mergeCluster);
+    var allSel=runs.map(function(r){return r.id;});
+    var sectionId='sec_'+Date.now().toString(36)+Math.floor(Math.random()*1000);
+    var color=resultRuns[0].color||'#5b8def';
+    resultRuns.forEach(function(r){ r.sectionId=sectionId; r.color=color; });     // one color = one section
+    var biggest=resultRuns.slice().sort(function(a,b){return (b.pieces||[]).length-(a.pieces||[]).length;})[0];
+    var lbl=null; try{ lbl=prompt('Label this section (e.g. RTU-2 SA):', (biggest&&biggest.label)||''); }catch(_){}
+    if(lbl && lbl.trim()){ lbl=lbl.trim(); resultRuns.forEach(function(r){ r.sectionLabel=lbl; r.label=null; }); if(biggest) biggest.label=lbl; }   // show one label on the biggest piece; tag all for quantity
+    window.__runs2d = R.filter(function(r){ return allSel.indexOf(r.id)<0; }).concat(resultRuns);
+    window.__joinSet=[]; selRun=(biggest||resultRuns[0]).id; try{window.__selRunId=selRun;}catch(_){} window.__editMode=null;
     renderItems(); renderPanel();
-    if(typeof setStatus==='function') setStatus('Joined '+para.length+' runs into one \u2014 label it in the run panel.');
-    return merged.id;
+    if(typeof setStatus==='function') setStatus('Section joined \u2014 '+runs.length+' runs into '+resultRuns.length+' piece(s), one color'+(lbl?(' labeled \u201c'+lbl+'\u201d'):'')+'.');
+    return sectionId;
   };
   window.__showJoinBar=function(){
     var n=(window.__joinSet||[]).length, bar=document.getElementById('joinBar');
@@ -3350,7 +3386,7 @@ function refreshSel(){
     bar.innerHTML='';
     var lbl=document.createElement('span'); lbl.textContent=(n?('Join runs: '+n+' picked'):'Click each duct run to join'); bar.appendChild(lbl);
     var jb=document.createElement('button'); jb.textContent='Join'; jb.style.cssText='background:#e838f5;border:none;color:#fff;border-radius:6px;padding:6px 13px;cursor:pointer;font-weight:700'; if(n<2){jb.disabled=true;jb.style.opacity='0.45';jb.style.cursor='default';}
-    jb.onclick=function(){ window.__joinRuns((window.__joinSet||[]).slice()); var b=document.getElementById('joinBar'); if(b)b.remove(); };
+    jb.onclick=function(){ try{ window.__joinRuns((window.__joinSet||[]).slice()); }catch(err){ if(typeof setStatus==='function') setStatus('Join error: '+((err&&err.message)||err)); } var b=document.getElementById('joinBar'); if(b)b.remove(); };
     bar.appendChild(jb);
     var cb=document.createElement('button'); cb.textContent='Cancel'; cb.style.cssText='background:#20344a;border:none;color:#bfe0ff;border-radius:6px;padding:6px 10px;cursor:pointer';
     cb.onclick=function(){ window.__joinSet=[]; window.__editMode=null; var b=document.getElementById('joinBar'); if(b)b.remove(); renderItems(); };
