@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.43</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.46</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3300,6 +3300,17 @@ function refreshSel(){
         if(A&&B){ var cl=document.createElementNS(ns,'line'); cl.setAttribute('x1',A[0]);cl.setAttribute('y1',A[1]);cl.setAttribute('x2',B[0]);cl.setAttribute('y2',B[1]); cl.setAttribute('stroke','#c0392b'); cl.setAttribute('stroke-width','4'); cl.setAttribute('stroke-linecap','round'); lay.appendChild(cl); }
       });
     });
+    (window.__runs2d||[]).forEach(function(run){                     // STAMP MARKS (damper/cap) drawn ON the duct, no cut
+      var kfr=runFrames(run);
+      run.pieces.forEach(function(p,i){ if(p.kind!=='straight'||!p.marks||!p.marks.length) return; var f=kfr[i]; if(!f) return;
+        p.marks.forEach(function(mk){ var t=inToPt(mk.alongIn||0), cx=f.x+f.ux*t, cy=f.y+f.uy*t, half=inToPt((mk.widthIn||p.widthIn||12)/2);
+          var A=n2s(cx-f.nx*half,cy-f.ny*half), B=n2s(cx+f.nx*half,cy+f.ny*half);
+          if(mk.type==='cap'){ if(A&&B){ var cl=document.createElementNS(ns,'line'); cl.setAttribute('x1',A[0]);cl.setAttribute('y1',A[1]);cl.setAttribute('x2',B[0]);cl.setAttribute('y2',B[1]); cl.setAttribute('stroke','#c0392b'); cl.setAttribute('stroke-width','4'); cl.setAttribute('stroke-linecap','round'); lay.appendChild(cl); } }
+          else { if(A&&B){ var bl=document.createElementNS(ns,'line'); bl.setAttribute('x1',A[0]);bl.setAttribute('y1',A[1]);bl.setAttribute('x2',B[0]);bl.setAttribute('y2',B[1]); bl.setAttribute('stroke','#d98a1a'); bl.setAttribute('stroke-width','3.5'); lay.appendChild(bl); }
+            var rp=inToPt(4), C=n2s(cx,cy), Rp=n2s(cx+f.nx*(half+rp),cy+f.ny*(half+rp));
+            if(C&&Rp){ var rd=document.createElementNS(ns,'line'); rd.setAttribute('x1',C[0]);rd.setAttribute('y1',C[1]);rd.setAttribute('x2',Rp[0]);rd.setAttribute('y2',Rp[1]); rd.setAttribute('stroke','#d98a1a'); rd.setAttribute('stroke-width','2'); lay.appendChild(rd);
+              var kn=document.createElementNS(ns,'circle'); kn.setAttribute('cx',Rp[0]);kn.setAttribute('cy',Rp[1]);kn.setAttribute('r','3.2'); kn.setAttribute('fill','#d98a1a'); lay.appendChild(kn); } }
+        }); }); });
     // ELBOW BRIDGES — render each recorded run-to-run elbow as connecting duct-width bands through the
     // corner, so the two duct sections visibly join (runs themselves stay put — bridge is new geometry).
     (window.__elbowJoins||[]).forEach(function(j){
@@ -3360,7 +3371,7 @@ function refreshSel(){
             +'<span style="flex:0 0 16px;font-size:10px;opacity:.6">'+(i+1)+'</span>';
           if(pc.kind==='straight'){
             h+='<input type="number" step="0.5" value="'+pc.lenIn+'" onchange="__pcLen(\''+run.id+'\','+i+',this.value)" style="width:54px;padding:3px;border:1px solid #345;border-radius:4px;background:#0b1420;color:#fff"><span style="font-size:10px;opacity:.6">in</span>'
-              +'<span style="flex:1;font-size:11px;color:'+(pc._scaled?'#f5b342':'#bfe6ff')+'">'+vh(pc.size)+(pc._scaled?' ~':'')+'</span>';
+              +'<span style="flex:1;font-size:11px;color:'+(pc._scaled?'#f5b342':'#bfe6ff')+'">'+vh(pc.size)+(pc._scaled?' ~':'')+(pc.marks&&pc.marks.length?(' <span style=\"color:#d98a1a\">\u25c8'+pc.marks.map(function(mk){return mk.type==='cap'?'cap':'damper';}).join(',')+'</span>'):'')+'</span>';
           } else {
             var _isElb=(pc.cid==='e90'||pc.cid==='e45'||pc._elbow);
             var _ex=(pc.outW?(' \u2192'+pc.outW+(pc.cid==='s2r'?'\u00f8':'x'+(pc.outD||pc.outW))):'');
@@ -3397,6 +3408,13 @@ function refreshSel(){
       var px=f.x+f.ux*t, py=f.y+f.uy*t, d=Math.hypot(nvx-px,nvy-py), half=inToPt((p.widthIn||r.widthIn||12)/2)+5;
       if(d<=half && (!best||d<best.d)){ best={d:d, runId:r.id, i:i, alongIn:ptToIn(t)}; } }); });
     return best; };
+  window.__stampMark=function(runId, i, alongIn, type){ var r=findRun(runId); if(!r) return false; var p=r.pieces[i]; if(!p||p.kind!=='straight') return false;   // stamp ON the duct — no cutting
+    window.__pushRunUndo&&window.__pushRunUndo();
+    var rr=!!p.round, w=p.widthIn||r.widthIn||12, d=(p.depthIn!=null?p.depthIn:w);
+    p.marks=p.marks||[]; var mk={type:type, alongIn:Math.round((alongIn||0)*10)/10, round:rr, widthIn:w, depthIn:d, size:p.size};
+    if(type==='damper') mk.rodIn=Math.round((w+4)*10)/10;
+    p.marks.push(mk);
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus(type==='damper'?('Damper stamped on '+(p.size||'')+' \u00b7 rod '+mk.rodIn+'\u2033 (duct not cut).'):('End cap stamped on '+(p.size||'')+' (duct not cut).')); return true; };
   window.__pcLen=function(id,i,v){ var r=findRun(id); if(!r)return; r.pieces[i].lenIn=Math.max(0.5,parseFloat(v)||r.pieces[i].lenIn); renderItems(); renderPanel(); setStatus('Run now '+fmtFt(runLenIn(r))+'.'); };
   window.__pcDel=function(id,i){ var r=findRun(id); if(!r)return; window.__pushRunUndo&&window.__pushRunUndo(); r.pieces.splice(i,1); if(!r.pieces.length){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); selRun=null; } else applyReducerDownstream(r); sel.clear(); renderItems(); renderPanel(); };
   window.__selDelPieces=function(){                 // delete the piece(s) you clicked on the plan, pulling the run in (same as the row's red x)
@@ -3542,6 +3560,13 @@ function refreshSel(){
           crow['Material']=CAM_CFG.material; crow['Wire Gauge']=CAM_CFG.gauge;
           if(lin&&lin.mat){ crow['Insulation Material']=lin.mat; crow['Insulation Thickness']=lin.th; }
           crow['Pressure Class']=pcls; crow['Company']=CAM_CFG.company; crow['Plant']=CAM_CFG.plant; rows.push(crow); }
+        if(p.marks && p.marks.length) p.marks.forEach(function(mk){ var mkey=(mk.type==='cap')?'cap':'damper', mpat=CAM_PAT[mkey]; if(!mpat) return; var mR=!!mk.round, mpd=mR?mpat.round:mpat.rect;
+          entry++; var mrow={}; CAM_HDR.forEach(function(c){mrow[c]='';});
+          mrow['Job File Name']=row['Job File Name']; mrow['Date']=row['Date']; mrow['Epicor Group']=mpd.eg; mrow['Entry']=entry; mrow['Qty']=1;
+          mrow[CAM_CFG.sectionCol]=sect; mrow['CID']=mpd.cid||''; mrow['Item Description']=mpd.d;
+          mrow['Size - End 1']=mR?camF3(mk.widthIn):(camF3(mk.widthIn)+'x'+camF3(mk.depthIn!=null?mk.depthIn:mk.widthIn));
+          mrow['Material']=CAM_CFG.material; mrow['Wire Gauge']=CAM_CFG.gauge; mrow['Pressure Class']=pcls; mrow['Company']=CAM_CFG.company; mrow['Plant']=CAM_CFG.plant;
+          if(lin&&lin.mat){ mrow['Insulation Material']=lin.mat; mrow['Insulation Thickness']=lin.th; } rows.push(mrow); });
       });
     });
     return rows; }
@@ -3568,7 +3593,7 @@ function refreshSel(){
     kv('JOB_NAME',jn); try{ kv('JOB_DATE', new Date().toLocaleDateString('en-US')); }catch(_){}
     L.push('JOBHEADER_END');
     var entry=0, verify={};
-    runs.forEach(function(r){ var spec='Brookstone: +'+((r.pressureClass||'2" w.g.').replace(/\s*w\.g\.?/i,'').replace(/"/g,'in').trim())+' Multiple';
+    runs.forEach(function(r){ var spec='+'+((r.pressureClass||'2" w.g.').replace(/\s*w\.g\.?/i,'').replace(/"/g,'in').trim())+' Multiple';   // spec NAME only (e.g. "+2in Multiple") — CAMduct matches on this, not the "Brookstone:" table prefix
       (r.pieces||[]).forEach(function(p,idx){ if(p._tapRef) return; var key=camKey(p); if(!key) return; var pat=CAM_PAT[key]; if(!pat) return;
         var isR=camPieceRound(r.pieces,idx), pd=(key==='s2r')?pat.round:(isR?pat.round:pat.rect);
         var pallet=(pd.eg==='RONDFIT'||isR)?'./Item Catalog/Round Pallet/Fab/':'./Item Catalog/Rectangular Pallet/';
@@ -3601,6 +3626,13 @@ function refreshSel(){
           L.push('ITEMHEADER_END'); L.push('CUSTOM_DATA_START'); L.push('  Epicor Group=RONDFIT'); L.push('CUSTOM_DATA_END');
           L.push('DIMS_START'); [f3(w),f3(w),f3(4)].forEach(function(d){ L.push('  '+d); }); L.push('DIMS_END');
           L.push('ITEM_END'); }
+        if(p.marks && p.marks.length) p.marks.forEach(function(mk){ var mkey=(mk.type==='cap')?'cap':'damper', mpat=CAM_PAT[mkey]; if(!mpat) return; var mR=!!mk.round, mpd=mR?mpat.round:mpat.rect;
+          var mpallet=(mpd.eg==='RONDFIT'||mR)?'./Item Catalog/Round Pallet/Fab/':'./Item Catalog/Rectangular Pallet/', mdims=mR?[f3(mk.widthIn)]:[f3(mk.widthIn),f3(mk.depthIn!=null?mk.depthIn:mk.widthIn)];
+          entry++; L.push('ITEM_START'); L.push('ITEMHEADER_START');
+          kv('ITEMFILE',mpallet+mpd.d+'.ITM'); kv('ITEM_NUMBER',entry+' '+mpd.d); kv('SPEC',spec); kv('MATERIAL','GAL-60'); kv('QUANTITY',1);
+          if(r.sectionLabel) kv('NOTES', r.sectionLabel);
+          L.push('ITEMHEADER_END'); L.push('CUSTOM_DATA_START'); L.push('  Epicor Group='+mpd.eg); L.push('CUSTOM_DATA_END');
+          L.push('DIMS_START'); mdims.forEach(function(d){ L.push('  '+d); }); L.push('DIMS_END'); L.push('ITEM_END'); });
       });
     });
     if(!entry){ alert('Nothing exportable found in the runs.'); return; }
@@ -5466,9 +5498,10 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   setInterval(function(){ if(window.refreshUndoBtn) window.refreshUndoBtn(); },700);
   var tapBtn=document.getElementById('dtTapBtn'); if(tapBtn) tapBtn.onclick=function(){ window.__editMode=null; refl(); var real=document.getElementById('tapToolBtn'); if(real){ real.click(); status('Tap tool on — click the duct to drop taps (style/size/direction in its panel).'); } else status('Tap tool not available.'); };
   document.getElementById('dtOff').onclick=function(){ window.__editMode=null; window.__tapMain=null; refl(); status('Edit off — click a duct to select.'); };
-  window.__addDuctStart=function(){ var v=prompt('New straight duct size (e.g. 20x10 rectangular, or 12\u00f8 round):','12x12'); if(v==null) return;
-    var raw=String(v).trim(), round=/[o\u00f8]/i.test(raw)||/round/i.test(raw), nums=raw.match(/\d+(\.\d+)?/g);
-    if(!nums||!nums.length){ alert('Couldn\u2019t read that size \u2014 try like 20x10 or 12\u00f8.'); return; }
+  window.__addDuctStart=function(){ var v=prompt('New straight duct size — 12 = round \u00f8, 20x10 = rect:','12'); if(v==null) return;
+    var raw=String(v).trim(), explicitRound=/[o\u00f8]/i.test(raw)||/round/i.test(raw), explicitRect=/\d\s*[x\u00d7\/]\s*\d/i.test(raw), nums=raw.match(/\d+(\.\d+)?/g);
+    if(!nums||!nums.length){ alert('Couldn\u2019t read that size \u2014 try like 12 (round) or 20x10 (rect).'); return; }
+    var round=explicitRound?true:(explicitRect?false:(nums.length<2));
     var w=parseFloat(nums[0]), d=round?w:(nums[1]?parseFloat(nums[1]):w);
     window.__addDuct={w:w,d:d,round:round}; window.__editMode='addduct'; try{refl();}catch(_){}
     status('Add duct: click on the plan to drop a '+(round?('\u00f8'+w):(w+'\u00d7'+d))+' run. Esc to stop.'); };
@@ -5550,13 +5583,13 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
       var nvD=window.__s2n?window.__s2n(sdD[0],sdD[1]):null; if(!nvD){ status('Could not map that point.'); return; }
       var hit=window.__hitPiece?window.__hitPiece(nvD[0],nvD[1]):null;
       if(!hit){ status('Damper stamp: click directly on a duct run.'); return; }
-      if(window.__doInsert) window.__doInsert(hit.runId, hit.i, hit.alongIn, {type:'damper'});
+      if(window.__stampMark) window.__stampMark(hit.runId, hit.i, hit.alongIn, 'damper');
       return; }
     if(m==='endcap'){ var sdE=toSvg(e); if(!sdE) return; e.stopPropagation(); e.preventDefault();
       var nvE=window.__s2n?window.__s2n(sdE[0],sdE[1]):null; if(!nvE){ status('Could not map that point.'); return; }
       var hitE=window.__hitPiece?window.__hitPiece(nvE[0],nvE[1]):null;
       if(!hitE){ status('End-cap stamp: click directly on a duct run.'); return; }
-      if(window.__doInsert) window.__doInsert(hitE.runId, hitE.i, hitE.alongIn, {type:'endcap'});
+      if(window.__stampMark) window.__stampMark(hitE.runId, hitE.i, hitE.alongIn, 'cap');
       return; }
     if(m==='addduct'){ var sd=toSvg(e); if(!sd) return; e.stopPropagation(); e.preventDefault();
       var nv=window.__s2n?window.__s2n(sd[0],sd[1]):null; if(!nv){ status('Could not map that point on the plan.'); return; }
