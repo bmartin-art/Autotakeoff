@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.23</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.25</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2295,6 +2295,42 @@ function refreshSel(){
     var shared=trunk.color||branch.color||'#5b8def'; trunk.color=shared; branch.color=shared;
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus((shopTap?'Shop-tapped':'Tapped')+' the branch into the trunk \u2014 both now one color.'); return true;
   };
+  window.__connectCrossTap=function(trunkId, endA, crossId, endB){    // trunk passes through; crossing run becomes two branches, one tap each side
+    var trunk=findRun(trunkId), cross=findRun(crossId); if(!trunk||!cross||trunk===cross) return false;
+    var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
+    var T0=trunk.start, Td=trunk.dir, C0=cross.start, Cd=cross.dir;
+    var det=Td[0]*(-Cd[1])-(-Cd[0])*Td[1];
+    if(Math.abs(det)<1e-9){ if(typeof setStatus==='function')setStatus('Cross-tap needs a run that crosses the trunk (these look parallel).'); return false; }
+    var bx=C0[0]-T0[0], by=C0[1]-T0[1], s=(bx*(-Cd[1])-(-Cd[0])*by)/det;
+    var P=[T0[0]+Td[0]*s, T0[1]+Td[1]*s];
+    // trunk piece + alongIn at P
+    var fr=runFrames(trunk), pi=-1, aIn=0, bestD=1e18;
+    for(var i=0;i<trunk.pieces.length;i++){ var pp=trunk.pieces[i]; if(pp.kind!=='straight') continue; var f=fr[i]; var Lp=inToPt(pp.lenIn||0);
+      var t=(P[0]-f.x)*f.ux+(P[1]-f.y)*f.uy; if(t<-1e-6||t>Lp+1e-6) continue;
+      var px=f.x+f.ux*t, py=f.y+f.uy*t, d=Math.hypot(P[0]-px,P[1]-py);
+      if(d<bestD){ bestD=d; pi=i; aIn=ptToIn(t); } }
+    if(pi<0){ if(typeof setStatus==='function')setStatus('Cross-tap: the crossing point isn\u2019t on the trunk\u2019s length \u2014 extend the trunk through it first.'); return false; }
+    window.__pushRunUndo&&window.__pushRunUndo();
+    var w=trunk.pieces[pi].widthIn, dep=trunk.pieces[pi].depthIn, rr=!!trunk.pieces[pi].round, sz=trunk.pieces[pi].size;
+    var bW=cross.widthIn||Math.max(6,Math.round(w/2)), bRound=!!(cross.pieces[0]&&cross.pieces[0].round), bD=(bRound?bW:((cross.pieces[0]&&cross.pieces[0].depthIn)||null));
+    var bSize=bRound?('\u00f8'+bW):(bW+'\u00d7'+(bD!=null?bD:bW));
+    var tn=[-trunk.dir[1],trunk.dir[0]], color=trunk.color||cross.color||'#5b8def';
+    var Ce=runEnd(cross), ends=[[cross.start[0],cross.start[1]],[Ce.x,Ce.y]];
+    var branches=[], sides=[];
+    ends.forEach(function(ep){ var len=Math.hypot(ep[0]-P[0],ep[1]-P[1])/ppi; if(len<1) return;
+      var side=((ep[0]-P[0])*tn[0]+(ep[1]-P[1])*tn[1])>=0?1:-1; sides.push(side);
+      branches.push({ id:'br'+Date.now().toString(36)+Math.floor(Math.random()*1e4), start:[P[0],P[1]], dir:[tn[0]*side,tn[1]*side], widthIn:bW, color:color, sectionId:trunk.sectionId, sectionLabel:trunk.sectionLabel, pressureClass:trunk.pressureClass, liner:trunk.liner,
+        pieces:[{kind:'straight',lenIn:Math.round(len*10)/10,widthIn:bW,depthIn:bD,size:bSize,cid:bRound?'spiral':'st',camduct:bRound?'Spiral':'Straight Duct',round:bRound}], _branch:true, _tapRunId:trunk.id }); });
+    if(!sides.length){ if(typeof setStatus==='function')setStatus('Cross-tap: couldn\u2019t find arms on either side of the trunk.'); return false; }
+    var L=trunk.pieces[pi].lenIn||0, a=Math.max(0,Math.min(L,aIn));
+    function mkS(len){ return {kind:'straight',lenIn:Math.round(Math.max(0,len)*10)/10,widthIn:w,depthIn:dep,size:sz,cid:rr?'spiral':'st',camduct:rr?'Spiral':'Straight Duct',round:rr}; }
+    function mkTap(side){ return {kind:'fitting',cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:w,depthIn:dep,size:sz,_tap:true,branchSide:side,branchW:bW,branchLenIn:10,throatIn:10,mainRound:rr,branchRound:bRound}; }
+    var ins=[mkS(a)]; sides.forEach(function(sd){ ins.push(mkTap(sd)); }); ins.push(mkS(L-a));
+    trunk.pieces.splice.apply(trunk.pieces,[pi,1].concat(ins)); trunk.color=color;
+    window.__runs2d=(window.__runs2d||[]).filter(function(r){return r.id!==cross.id;}).concat(branches);
+    selRun=trunk.id; try{window.__selRunId=trunk.id;}catch(_){}
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Cross-tap: '+sides.length+' tap(s) into the trunk, crossing run split into '+branches.length+' branch(es).'); return true;
+  };
   window.__runSideAt=function(runId,pieceIdx,alongIn,sx,sy){   // +1/-1: which side of the run centerline a screen point is on (page-space)
     var run=findRun(runId); if(!run) return 1; var fr=runFrames(run), f=fr[pieceIdx]; if(!f) return 1;
     var cx=f.x+f.ux*inToPt(alongIn||0), cy=f.y+f.uy*inToPt(alongIn||0);
@@ -3415,6 +3451,47 @@ function refreshSel(){
     a.href=URL.createObjectURL(blob); a.download=fname; document.body.appendChild(a); a.click();
     setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },1000);
     if(typeof setStatus==='function') setStatus('Exported '+rows.length+' item(s) to '+fname+' \u2014 round CIDs confirmed; rect matched by description (spot-check on import).');
+  };
+  window.__exportCamASCII=function(){                 // CAMduct Job ASCII (.txt) — the format you import via File > Import > CAD/JCM Items
+    var runs=window.__runs2d||[]; if(!runs.length){ alert('No takeoff to export yet — build the runs first.'); return; }
+    var NL='\r\n', L=[]; function kv(k,v){ L.push(k); L.push('  '+(v==null?'':String(v))); }
+    function f3(v){ return (Math.round((v||0)*1000)/1000).toFixed(3); }
+    var S=1000000, C=1000002;
+    L.push('JOBHEADER_START'); var jn='takeoff'; for(var z=0;z<runs.length;z++){ if(runs[z].sectionLabel){ jn=runs[z].sectionLabel; break; } }
+    kv('JOB_NAME',jn); try{ kv('JOB_DATE', new Date().toLocaleDateString('en-US')); }catch(_){}
+    L.push('JOBHEADER_END');
+    var entry=0, verify={};
+    runs.forEach(function(r){ var spec='Brookstone: +'+((r.pressureClass||'2" w.g.').replace(/\s*w\.g\.?/i,'').replace(/"/g,'in').trim())+' Multiple';
+      (r.pieces||[]).forEach(function(p){ var key=camKey(p); if(!key) return; var pat=CAM_PAT[key]; if(!pat) return;
+        var isR=!!p.round, pd=(key==='s2r')?pat.round:(isR?pat.round:pat.rect);
+        var pallet=(pd.eg==='RONDFIT'||isR)?'./Item Catalog/Round Pallet/Fab/':'./Item Catalog/Rectangular Pallet/';
+        var w=p.widthIn||r.widthIn||0, h=(p.depthIn!=null?p.depthIn:w), inW=p.inW||w, inD=(p.inD!=null?p.inD:h), ow=p.outW||w, od=(p.outD!=null?p.outD:ow), bw=p.branchW||Math.max(6,Math.round(w/2));
+        var dims=[], opts=null, eg=pd.eg;
+        if(key==='st'){ dims=isR?[f3(w),f3(p.lenIn)]:[f3(w),f3(h),f3(p.lenIn)]; if(!isR)opts=[2,0,0,0]; }
+        else if(key==='e90'){ dims=isR?[f3(w),f3(90),S]:[f3(w),f3(h),S,S,S]; }              // throats auto
+        else if(key==='e45'){ dims=isR?[f3(w),f3(45),S]:[f3(w),f3(h),S,f3(45),S,S]; }
+        else if(key==='tr'){ dims=isR?[f3(inW),f3(ow),f3(p.lenIn)]:[f3(inW),f3(inD),f3(ow),f3(od),f3(p.lenIn),f3(0),f3(0),C,C]; }
+        else if(key==='s2r'){ dims=[f3(inW),f3(inD),f3(ow),f3(p.lenIn),C,C,S]; opts=[0,3,0,3]; eg='RONDFIT'; }
+        else if(key==='stap'){ dims=isR?[f3(w),f3(bw),f3(p.lenIn||6)]:[f3(bw),f3(bw),f3(p.lenIn||6)]; opts=[1]; }
+        else if(key==='offset'){ dims=isR?[f3(w),f3(p.lenIn),S]:[f3(w),f3(h),f3(p.lenIn),S,S,S,S,S]; }
+        else if(key==='cap'){ dims=isR?[f3(w)]:[f3(w),f3(h)]; }
+        else return;
+        if(isR && key!=='s2r') verify[pd.d]=1;
+        entry++;
+        L.push('ITEM_START'); L.push('ITEMHEADER_START');
+        kv('ITEMFILE',pallet+pd.d+'.ITM'); kv('ITEM_NUMBER',entry+' '+pd.d); kv('SPEC',spec); kv('MATERIAL','GAL-60'); kv('QUANTITY',1);
+        L.push('ITEMHEADER_END'); L.push('CUSTOM_DATA_START'); L.push('  Epicor Group='+eg); if(r.sectionLabel) L.push('  Item Tag='+r.sectionLabel); L.push('CUSTOM_DATA_END');
+        L.push('DIMS_START'); dims.forEach(function(d){ L.push('  '+d); }); L.push('DIMS_END');
+        if(opts){ L.push('OPTIONS_START'); opts.forEach(function(o){ L.push('  '+f3(o)); }); L.push('OPTIONS_END'); }
+        L.push('ITEM_END');
+      });
+    });
+    if(!entry){ alert('Nothing exportable found in the runs.'); return; }
+    var blob=new Blob([L.join(NL)+NL],{type:'text/plain'}), a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=jn.replace(/[^\w.-]+/g,'_')+'_camduct.txt'; document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },1000);
+    var vr=Object.keys(verify);
+    if(typeof setStatus==='function') setStatus('Exported '+entry+' item(s) to Job ASCII. Import via File > Import > CAD/JCM Items. Rectangular = confirmed; round '+(vr.length?('('+vr.join(', ')+') '):'')+'= best-effort, verify on import.');
   };
   window.__joinRuns=function(ids){                 // JOIN SECTION: collapse in-line segments, then group everything picked as ONE labeled section
     var R=window.__runs2d||[]; var runs=ids.map(function(id){return R.find(function(r){return r.id===id;});}).filter(Boolean);
@@ -5203,7 +5280,8 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
    <button id="dtUndo" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#fff4e6;border:1px solid #ffd9a8;color:#b5641a;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:700;font-size:12px">↶ Undo last change</button>
    <button id="dtFixElbows" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#eafaf0;border:1px solid #a9e0c0;color:#1b7a45;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">↰ Straighten elbows from trace</button>
    <button id="dtFittings" onclick="window.__toggleFitPanel&&window.__toggleFitPanel()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#e6fbff;border:1px solid #a5e4ef;color:#0e7490;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">◎ Review fittings by type</button>
-   <button id="dtCamExport" onclick="window.__exportCamCSV&&window.__exportCamCSV()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#eef7ee;border:1px solid #a9d3a0;color:#2f6b2a;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⬇ Export CAMduct CSV</button>
+   <button id="dtCamExport" onclick="window.__exportCamCSV&&window.__exportCamCSV()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#eef7ee;border:1px solid #a9d3a0;color:#2f6b2a;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⬇ Export CAMduct CSV (report)</button>
+   <button id="dtCamAscii" onclick="window.__exportCamASCII&&window.__exportCamASCII()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#e9f2ff;border:1px solid #a9c4ff;color:#2b53a8;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⬇ Export CAMduct Job ASCII (.txt)</button>
    <div id="fitList"></div>
    <button class="dtTool" data-mode="dragsize" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-resize width</button>
    <button class="dtTool" data-mode="draglen" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-end (length)</button>
@@ -5324,6 +5402,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
           +'<button id="cpElbow" style="width:100%;margin-bottom:5px;background:#eef4ff;border:1px solid #a9c4ff;color:#3562c4;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">↰ Elbow (corner)</button>'
           +'<button id="cpTap" style="width:100%;margin-bottom:5px;background:#f3effc;border:1px solid #cdbdf0;color:#5a3fa0;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">⌐ Tap (into side)</button>'
           +'<button id="cpShopTap" style="width:100%;margin-bottom:5px;background:#f3effc;border:1px solid #cdbdf0;color:#5a3fa0;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">⌐ Shop tap (angled collar)</button>'
+          +'<button id="cpCross" style="width:100%;margin-bottom:5px;background:#eef4ff;border:1px solid #a9c4ff;color:#3562c4;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">✛ Cross taps (both sides)</button>'
           +'<button id="cpReducer" style="width:100%;margin-bottom:5px;background:#eafaf0;border:1px solid #a9e0c0;color:#1b7a45;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">⇥ Reducer / transition (in-line)</button>'
           +'<button id="cpOffset" style="width:100%;margin-bottom:5px;background:#fff4e6;border:1px solid #ffd9a8;color:#b5641a;border-radius:8px;padding:8px;cursor:pointer;font-weight:600">⟋ Offset (two 45s + straight)</button>'
           +'<button id="cpCancel" style="width:100%;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:6px;cursor:pointer">Cancel</button>';
@@ -5333,6 +5412,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
         mnu.querySelector('#cpElbow').onclick=function(){ done(window.__connectElbow,'elbow'); };
         mnu.querySelector('#cpTap').onclick=function(){ done(window.__connectTap,'tap',false); };
         mnu.querySelector('#cpShopTap').onclick=function(){ done(window.__connectTap,'tap',true); };
+        mnu.querySelector('#cpCross').onclick=function(){ done(window.__connectCrossTap,'cross-tap'); };
         mnu.querySelector('#cpReducer').onclick=function(){ done(window.__connectReducer,'reduce'); };
         mnu.querySelector('#cpOffset').onclick=function(){ done(window.__connectOffset,'offset'); };
         mnu.querySelector('#cpCancel').onclick=function(){ try{mnu.remove();}catch(_){} status('Connect cancelled.'); };
