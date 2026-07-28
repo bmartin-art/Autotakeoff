@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.27</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.33</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -511,6 +511,7 @@ async function loadFile(file){
   try{
     pdfDoc=await pdfjsLib.getDocument({data:buf}).promise;
   }catch(err){ setStatus('Failed to open PDF'); console.error(err); return; }
+  try{ if(window.__yoloNudge) setTimeout(window.__yoloNudge, 500); }catch(_){}   // prompt for best.onnx on every PDF load until a model is loaded
   try{ ocConfig=await pdfDoc.getOptionalContentConfig(); }catch(_){ ocConfig=null; }
   $('drop').classList.add('hide');
   $('pgTot').textContent='/ '+pdfDoc.numPages;
@@ -2531,6 +2532,8 @@ function refreshSel(){
       else { for(var k2=0;k2<pieceIdx+1;k2++){ var q2=pieces[k2]; if(q2.kind==='straight'){ q2.widthIn=fit._newW; q2.depthIn=fit._newD; q2.round=fit._newR; q2.size=fit._newS; q2.cid=fit._newR?'spiral':'st'; q2.camduct=fit._newR?'Spiral':'Straight Duct'; } } if(pieceIdx>=0){ run.widthIn=fit._newW; } }
       try{ applyReducerDownstream(run); }catch(_){}
     }
+    if(t==='elbow90'||t==='elbow45'){ var _ei=pieces.indexOf(fit);   // ask the direction right after inserting, instead of leaving it as-dropped
+      if(_ei>=0 && window.__pcElbowEdit) setTimeout(function(){ try{ window.__pcElbowEdit(run.id,_ei,{clientX:(spec.cx||240),clientY:(spec.cy||170),stopPropagation:function(){}}); }catch(_){} }, 50); }
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Inserted '+fit.camduct+(fit._sizeStep?(' \u2192 '+fit._newS):'')+'.'); return true;
   };
   function fmtFt(inch){ var f=Math.floor(inch/12), i=Math.round(inch-f*12); if(i>=12){f++;i-=12;} return (f>0?f+"'":'')+(i?i+'"':(f>0?'':'0"')); }
@@ -3305,13 +3308,16 @@ function refreshSel(){
     if(joins.length){ h+='<div class="aicard" style="border-color:#f59e0b55"><div class="h">\u25c8 '+joins.length+' elbow connection(s)</div>';
       joins.forEach(function(j,k){ var tr=findRun(j.trunkId); var sz=(tr&&tr.widthIn)||j.widthIn||''; h+='<div style="font-size:11px;color:#f5b342;padding:2px 6px">'+(k+1)+'. '+(j.round?'Round ':'')+'90\u00b0 Elbow'+(sz?(' \u00b7 '+sz+'\u2033'):'')+'</div>'; });
       h+='</div>'; }
+    var _keepSize=(document.getElementById('selSize')||{}).value||'';    // preserve what the user typed across the re-render a checkbox toggle triggers
+    var _keepLabel=(document.getElementById('selLabel')||{}).value||'';
     p.innerHTML=h;
-    var sl=document.getElementById('selLabel'); if(sl) sl.onkeydown=function(e){ if(e.key==='Enter')window.__selName(); };
-    var ss=document.getElementById('selSize'); if(ss) ss.onkeydown=function(e){ if(e.key==='Enter')window.__selSize(); };
+    var sl=document.getElementById('selLabel'); if(sl){ if(_keepLabel) sl.value=_keepLabel; sl.onkeydown=function(e){ if(e.key==='Enter')window.__selName(); }; }
+    var ss=document.getElementById('selSize'); if(ss){ if(_keepSize) ss.value=_keepSize; ss.onkeydown=function(e){ if(e.key==='Enter')window.__selSize(); }; }
   }
   window.__renderItemPanel=renderPanel;
 
   window.__runOpen=function(id){ selRun=(selRun===id?null:id); renderPanel(); };
+  window.__selectRun=function(id){ selRun=id; try{window.__selRunId=id;}catch(_){} renderItems(); renderPanel(); };
   window.__pcLen=function(id,i,v){ var r=findRun(id); if(!r)return; r.pieces[i].lenIn=Math.max(0.5,parseFloat(v)||r.pieces[i].lenIn); renderItems(); renderPanel(); setStatus('Run now '+fmtFt(runLenIn(r))+'.'); };
   window.__pcDel=function(id,i){ var r=findRun(id); if(!r)return; window.__pushRunUndo&&window.__pushRunUndo(); r.pieces.splice(i,1); if(!r.pieces.length){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); selRun=null; } else applyReducerDownstream(r); sel.clear(); renderItems(); renderPanel(); };
   window.__selDelPieces=function(){                 // delete the piece(s) you clicked on the plan, pulling the run in (same as the row's red x)
@@ -3363,10 +3369,13 @@ function refreshSel(){
     m.appendChild(btn(is45?'Change to 90\u00b0':'Change to 45\u00b0', function(){ window.__setElbowAngle(id,i,is45?90:45); }));
     var lbl=document.createElement('div'); lbl.textContent='Point leg:'; lbl.style.cssText='font-size:10px;color:#7fa8cf;margin:6px 0 3px';
     m.appendChild(lbl);
-    var row=document.createElement('div'); row.style.cssText='display:flex;gap:4px';
-    [['\u2191',0,-1,'up'],['\u2192',1,0,'right'],['\u2193',0,1,'down'],['\u2190',-1,0,'left']].forEach(function(a){
+    var row=document.createElement('div'); row.style.cssText='display:grid;grid-template-columns:repeat(4,1fr);gap:4px';
+    var dirs = is45
+      ? [['\u2191',0,-1,'up'],['\u2197',0.7071,-0.7071,'up-right'],['\u2192',1,0,'right'],['\u2198',0.7071,0.7071,'down-right'],['\u2193',0,1,'down'],['\u2199',-0.7071,0.7071,'down-left'],['\u2190',-1,0,'left'],['\u2196',-0.7071,-0.7071,'up-left']]   // 45 elbow: 45 increments
+      : [['\u2191',0,-1,'up'],['\u2192',1,0,'right'],['\u2193',0,1,'down'],['\u2190',-1,0,'left']];                                                                                                                                                          // 90 elbow: 90 increments
+    dirs.forEach(function(a){
       var b=document.createElement('button'); b.textContent=a[0]; b.title='Point the leg '+a[3];
-      b.style.cssText='flex:1;padding:7px 0;border:none;border-radius:5px;background:#12314b;color:#bfe0ff;cursor:pointer;font-size:15px;line-height:1';
+      b.style.cssText='padding:7px 0;border:none;border-radius:5px;background:#12314b;color:#bfe0ff;cursor:pointer;font-size:15px;line-height:1';
       b.onmouseover=function(){b.style.background='#1a4266';}; b.onmouseout=function(){b.style.background='#12314b';};
       b.onclick=function(e){ e.stopPropagation(); try{ window.__aimElbowCardinal(id,i,a[1],a[2]); }catch(_){} close(); };
       row.appendChild(b);
@@ -3411,13 +3420,22 @@ function refreshSel(){
     if(c==='s2r')return 's2r'; if(c==='tr'||c==='reducer'||c==='reo')return 'tr';
     if(c==='stap'||c==='rtap'||p._tap)return 'stap'; if(c==='sqt'||c==='rtee')return 'sqt';
     if(c==='offset'||c==='roff')return 'offset'; if(c==='cap'||c==='ec'||c==='ecr')return 'cap'; return null; }
+  function camPieceRound(pieces, idx){ var p=pieces[idx];                 // a fitting is round if the duct it sits on is round (fitting round-flags are unreliable)
+    if(p.kind==='straight') return !!p.round;
+    if(p._tap||p.cid==='stap'||p.cid==='rtap'){ if(p.mainRound!=null) return !!p.mainRound; }   // tap follows the MAIN it taps
+    var behind=null, ahead=null, k;
+    for(k=idx-1;k>=0;k--){ if(pieces[k].kind==='straight'){ behind=!!pieces[k].round; break; } }
+    for(k=idx+1;k<pieces.length;k++){ if(pieces[k].kind==='straight'){ ahead=!!pieces[k].round; break; } }
+    if(behind===null && ahead===null) return !!p.round;
+    return behind===true || ahead===true;   // round if EITHER neighbor is round (real rect<->round change only happens at a square-to-round, so a plain fitting's sides agree; this rescues glitchy stubs)
+  }
   function camF3(v){ return (Math.round((v||0)*1000)/1000).toFixed(3); }
   function camEnd(round,w,h){ return round? camF3(w) : (camF3(w)+'x'+camF3(h)); }
   function camSpec(pc){ var n=(pc||'2" w.g.').replace(/\s*w\.g\.?/i,'').replace(/"/g,'in').trim(); return CAM_CFG.specBase+'+'+n+' '+CAM_CFG.specSuffix; }
   function camBuildRows(runs){ var rows=[], entry=0;
     runs.forEach(function(r){ var pcls=camSpec(r.pressureClass), sect=r.sectionLabel||'', lin=CAM_CFG.liner[r.liner]||null;
-      (r.pieces||[]).forEach(function(p){ var key=camKey(p); if(!key)return; var pat=CAM_PAT[key]; if(!pat)return;
-        var isRound=!!p.round, pd=(key==='s2r')?pat.round:(isRound?pat.round:pat.rect);
+      (r.pieces||[]).forEach(function(p,idx){ var key=camKey(p); if(!key)return; var pat=CAM_PAT[key]; if(!pat)return;
+        var isRound=camPieceRound(r.pieces,idx), pd=(key==='s2r')?pat.round:(isRound?pat.round:pat.rect);
         var w=p.widthIn||r.widthIn||0, h=(p.depthIn!=null?p.depthIn:w), e1='',e2='',e3='',len='';
         if(key==='st'){ e1=e2=camEnd(isRound,w,h); len=camF3(p.lenIn); }
         else if(key==='e90'||key==='e45'){ e1=e2=camEnd(isRound,w,h); if(isRound) e3=e1; }   // round fixed elbow lists 3 ends; rect square/angled elbow lists 2
@@ -3462,8 +3480,8 @@ function refreshSel(){
     L.push('JOBHEADER_END');
     var entry=0, verify={};
     runs.forEach(function(r){ var spec='Brookstone: +'+((r.pressureClass||'2" w.g.').replace(/\s*w\.g\.?/i,'').replace(/"/g,'in').trim())+' Multiple';
-      (r.pieces||[]).forEach(function(p){ var key=camKey(p); if(!key) return; var pat=CAM_PAT[key]; if(!pat) return;
-        var isR=!!p.round, pd=(key==='s2r')?pat.round:(isR?pat.round:pat.rect);
+      (r.pieces||[]).forEach(function(p,idx){ var key=camKey(p); if(!key) return; var pat=CAM_PAT[key]; if(!pat) return;
+        var isR=camPieceRound(r.pieces,idx), pd=(key==='s2r')?pat.round:(isR?pat.round:pat.rect);
         var pallet=(pd.eg==='RONDFIT'||isR)?'./Item Catalog/Round Pallet/Fab/':'./Item Catalog/Rectangular Pallet/';
         var w=p.widthIn||r.widthIn||0, h=(p.depthIn!=null?p.depthIn:w), inW=p.inW||w, inD=(p.inD!=null?p.inD:h), ow=p.outW||w, od=(p.outD!=null?p.outD:ow), bw=p.branchW||Math.max(6,Math.round(w/2));
         var dims=[], opts=null, eg=pd.eg;
@@ -4004,16 +4022,17 @@ function refreshSel(){
     try{renderYolo();}catch(e){} };
   $('yoloUseMin') && ($('yoloUseMin').oninput=function(){ window.__yoloMinScore=parseFloat(this.value)||0; var v=$('yoloUseMinV'); if(v)v.textContent=(window.__yoloMinScore).toFixed(2); window.__applyYoloFilter(); if(typeof setStatus==='function'){ var n=(window.__yoloDets||[]).length, tot=(window.__yoloAll||[]).length; setStatus('Showing '+n+' of '+tot+' detections (score \u2265 '+window.__yoloMinScore.toFixed(2)+'). Re-build to apply to the takeoff.'); } });
   // First-run nudge: prompt to load the fitting model if none is loaded yet
-  setTimeout(function(){ try{
+  window.__yoloNudge=function(){ try{
     if(session) return;
-    if(localStorage.getItem('yoloPromptSeen')) return;
-    var b=document.createElement('div');
+    if(document.getElementById('yoloNudgeBox')) return;
+    var b=document.createElement('div'); b.id='yoloNudgeBox';
     b.style.cssText='position:fixed;left:50%;top:66px;transform:translateX(-50%);z-index:100001;background:#fff;border:1px solid #b6d2ef;border-radius:12px;padding:14px 16px;box-shadow:0 12px 34px rgba(30,40,60,.22);font:13px -apple-system,system-ui,sans-serif;color:#2b3441;max-width:390px;text-align:center';
     b.innerHTML='<div style="font-weight:800;margin-bottom:6px;color:#2f6fb0">Load your fitting model</div><div style="font-size:12px;color:#5b6674;margin-bottom:10px">Add your YOLO model (<b>best.onnx</b>) so the takeoff can auto-detect elbows, taps and tees on the print.</div><div style="display:flex;gap:8px;justify-content:center"><button id="ynpLoad" style="background:#5b8def;border:none;color:#fff;font-weight:700;border-radius:8px;padding:8px 16px;cursor:pointer">Load best.onnx</button><button id="ynpLater" style="background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:8px 14px;cursor:pointer">Later</button></div>';
     document.body.appendChild(b);
     b.querySelector('#ynpLoad').onclick=function(){ try{localStorage.setItem('yoloPromptSeen','1');}catch(_){} b.remove(); var f=document.getElementById('yoloFile'); if(f) f.click(); };
     b.querySelector('#ynpLater').onclick=function(){ try{localStorage.setItem('yoloPromptSeen','1');}catch(_){} b.remove(); };
-  }catch(e){} }, 1600);
+  }catch(e){} };
+  setTimeout(function(){ try{ if(!localStorage.getItem('yoloPromptSeen')) window.__yoloNudge(); }catch(_){} }, 1600);
   $('yoloFile') && ($('yoloFile').onchange=async function(e){
     var f=e.target.files[0]; if(!f) return; setY('loading…');
     if(!window.ort){ setY('onnxruntime not loaded'); setStatus('onnxruntime-web did not load (CDN/network).'); return; }
@@ -5281,6 +5300,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
    <div style="font-size:10px;color:#8a93a1;margin:0 0 8px 2px;letter-spacing:.4px;text-transform:uppercase;font-weight:600">Duct editing</div>
    <button id="dtUndo" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#fff4e6;border:1px solid #ffd9a8;color:#b5641a;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:700;font-size:12px">↶ Undo last change</button>
    <button id="dtFixElbows" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#eafaf0;border:1px solid #a9e0c0;color:#1b7a45;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">↰ Straighten elbows from trace</button>
+   <button id="dtAddDuct" onclick="window.__addDuctStart&&window.__addDuctStart()" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#eef4ff;border:1px solid #a9c4ff;color:#2b53a8;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">＋ Add duct run (click to drop)</button>
    <button id="dtFittings" onclick="window.__toggleFitPanel&&window.__toggleFitPanel()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#e6fbff;border:1px solid #a5e4ef;color:#0e7490;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">◎ Review fittings by type</button>
    <button id="dtCamExport" onclick="window.__exportCamCSV&&window.__exportCamCSV()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#eef7ee;border:1px solid #a9d3a0;color:#2f6b2a;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⬇ Export CAMduct CSV (report)</button>
    <button id="dtCamAscii" onclick="window.__exportCamASCII&&window.__exportCamASCII()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#e9f2ff;border:1px solid #a9c4ff;color:#2b53a8;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⬇ Export CAMduct Job ASCII (.txt)</button>
@@ -5318,6 +5338,18 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   setInterval(function(){ if(window.refreshUndoBtn) window.refreshUndoBtn(); },700);
   var tapBtn=document.getElementById('dtTapBtn'); if(tapBtn) tapBtn.onclick=function(){ window.__editMode=null; refl(); var real=document.getElementById('tapToolBtn'); if(real){ real.click(); status('Tap tool on — click the duct to drop taps (style/size/direction in its panel).'); } else status('Tap tool not available.'); };
   document.getElementById('dtOff').onclick=function(){ window.__editMode=null; window.__tapMain=null; refl(); status('Edit off — click a duct to select.'); };
+  window.__addDuctStart=function(){ var v=prompt('New straight duct size (e.g. 20x10 rectangular, or 12\u00f8 round):','12x12'); if(v==null) return;
+    var raw=String(v).trim(), round=/[o\u00f8]/i.test(raw)||/round/i.test(raw), nums=raw.match(/\d+(\.\d+)?/g);
+    if(!nums||!nums.length){ alert('Couldn\u2019t read that size \u2014 try like 20x10 or 12\u00f8.'); return; }
+    var w=parseFloat(nums[0]), d=round?w:(nums[1]?parseFloat(nums[1]):w);
+    window.__addDuct={w:w,d:d,round:round}; window.__editMode='addduct'; try{refl();}catch(_){}
+    status('Add duct: click on the plan to drop a '+(round?('\u00f8'+w):(w+'\u00d7'+d))+' run. Esc to stop.'); };
+  document.addEventListener('keydown',function(e){ if(e.key!=='Escape') return;      // Esc clears any active edit tool + in-progress selection
+    var had=window.__editMode||window.__connA||window.__tapMain||(window.__joinSet&&window.__joinSet.length)||window.__aimTarget||window.__addDuct;
+    window.__editMode=null; window.__tapMain=null; window.__connA=null; window.__connClickA=null; window.__connClickB=null; window.__joinSet=[]; window.__aimTarget=null; window.__addDuct=null;
+    var mp=document.getElementById('connPick'); if(mp) mp.remove(); var jb=document.getElementById('joinBar'); if(jb) jb.remove();
+    try{ refl(); }catch(_){} try{ window.__renderItems&&window.__renderItems(); }catch(_){}
+    if(had) status('Tools off \u2014 click a duct to select.'); });
   setInterval(refl,500);   // stay in sync if a left-panel edit button changes the mode
   var _lastSel=null;
   setInterval(function(){ var s=window.__selRunId; if(s && s!==_lastSel){ _lastSel=s; if(body.style.display==='none'){ body.style.display='block'; tog.textContent='Edit ‹'; } } if(!s) _lastSel=null; }, 400);   // clicking a run surfaces the edit tools
@@ -5386,6 +5418,15 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
   }, true);
   overlay.addEventListener('mousedown', function(e){
     var m=window.__editMode; if(e.button!==0) return;
+    if(m==='addduct'){ var sd=toSvg(e); if(!sd) return; e.stopPropagation(); e.preventDefault();
+      var nv=window.__s2n?window.__s2n(sd[0],sd[1]):null; if(!nv){ status('Could not map that point on the plan.'); return; }
+      var a=window.__addDuct||{w:12,d:12,round:false}, sz=a.round?('\u00f8'+a.w):(a.w+'\u00d7'+a.d);
+      var rid='run'+Date.now().toString(36)+Math.floor(Math.random()*1e4), col='hsl('+(((window.__runs2d||[]).length*67)%360)+',70%,55%)';
+      window.__pushRunUndo&&window.__pushRunUndo();
+      (window.__runs2d=window.__runs2d||[]).push({ id:rid, start:[nv[0],nv[1]], dir:[1,0], widthIn:a.w, color:col, axis:'horizontal',
+        pieces:[{kind:'straight',lenIn:48,widthIn:a.w,depthIn:a.d,size:sz,cid:a.round?'spiral':'st',camduct:a.round?'Spiral':'Straight Duct',round:a.round}] });
+      try{ if(window.__selectRun) window.__selectRun(rid); else window.__renderItems&&window.__renderItems(); }catch(_){ try{window.__renderItems&&window.__renderItems();}catch(__){} }
+      status('Dropped a '+sz+' run \u2014 drag its end for length, or rotate/move it. Click again for another, Esc to stop.'); return; }
     if(m==='stamp'){ var sst=toSvg(e); if(!sst) return; e.stopPropagation(); e.preventDefault();
       var nv=window.__s2n?window.__s2n(sst[0],sst[1]):null; if(!nv){ status('Could not map that point.'); return; }
       if(window.__pasteStamp) window.__pasteStamp(nv[0],nv[1]); return; }
