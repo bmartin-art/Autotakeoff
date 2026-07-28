@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.33</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.35</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -3227,6 +3227,19 @@ function refreshSel(){
         });
       });
     }
+    if(window.__dimReview){                          // FINAL REVIEW — highlight rect straights that never got a real size
+      (window.__runs2d||[]).forEach(function(run){
+        run.pieces.forEach(function(p,i){
+          if(!missingDim(p)) return;
+          var q; try{ q=piecePolyPts(run,i); }catch(_){ return; } if(!q||!q[0]) return;
+          var poly=document.createElementNS(ns,'polygon');
+          poly.setAttribute('points', q.map(function(pt){return pt[0].toFixed(1)+','+pt[1].toFixed(1);}).join(' '));
+          poly.setAttribute('fill','rgba(245,158,11,0.30)'); poly.setAttribute('stroke','#f59e0b'); poly.setAttribute('stroke-width','2.5'); poly.style.cursor='pointer';
+          (function(rid){ poly.addEventListener('mousedown',function(ev){ ev.stopPropagation(); selRun=rid; try{window.__selRunId=rid;}catch(_){} try{window.__showRunPanel&&window.__showRunPanel();}catch(_){} try{renderPanel();}catch(_){} }); })(run.id);
+          lay.appendChild(poly);
+        });
+      });
+    }
     // ELBOW BRIDGES — render each recorded run-to-run elbow as connecting duct-width bands through the
     // corner, so the two duct sections visibly join (runs themselves stay put — bridge is new geometry).
     (window.__elbowJoins||[]).forEach(function(j){
@@ -3578,6 +3591,13 @@ function refreshSel(){
     if(c==='cap'||c==='ec') return 'End caps';
     return 'Other';
   };
+  function missingDim(p){ if(!p||p.kind!=='straight') return false; if(p.round) return false;   // round needs only the diameter
+    var s=String(p.size||''); if(/\?/.test(s)) return true;
+    return !/\d\s*[x\u00d7\/]\s*\d/i.test(s); }                                                   // rect straight with no W x H = the second dimension was never read
+  window.__missingDimCount=function(){ var n=0; (window.__runs2d||[]).forEach(function(r){ (r.pieces||[]).forEach(function(p){ if(missingDim(p)) n++; }); }); return n; };
+  window.__toggleDimReview=function(){ window.__dimReview=!window.__dimReview; renderItems();
+    var n=window.__missingDimCount(), btn=document.getElementById('dtMissingDims'); if(btn) btn.style.background=window.__dimReview?'#fbe3b3':'#fff7e6';
+    if(typeof setStatus==='function') setStatus(window.__dimReview?(n?('Highlighting '+n+' duct(s) missing a size \u2014 click one to select its run, then Set size.'):'No ducts missing a size \u2014 all sized!'):'Missing-size highlight off.'); };
   window.__toggleFitPanel=function(){ window.__fitPanelOpen=!window.__fitPanelOpen;
     if(!window.__fitPanelOpen){ window.__fitReview=null; var el=document.getElementById('fitList'); if(el) el.innerHTML=''; renderItems(); }
     else window.__showFitPanel();
@@ -3600,15 +3620,19 @@ function refreshSel(){
   window.__selName=function(){ var el=document.getElementById('selLabel'); if(!el)return; var nm=el.value; var ids=new Set(); sel.forEach(function(k){ ids.add(k.split(':')[0]); }); ids.forEach(function(id){ var r=findRun(id); if(r)r.label=nm; }); renderItems(); renderPanel(); setStatus('Labeled '+ids.size+' run(s).'); };
   window.__pcSel=function(id,i){ var k=id+':'+i; if(sel.has(k)) sel.delete(k); else sel.add(k); renderPanel(); };
   window.__selSize=function(){ var el=document.getElementById('selSize'); if(!el)return; var raw=String(el.value||'').trim();
-    var round=/[o\u00f8]/i.test(raw)||/rd|round/i.test(raw); var nums=raw.match(/\d+(\.\d+)?/g);
+    var explicitRound=/[o\u00f8]/i.test(raw)||/round/i.test(raw), explicitRect=/\d\s*[x\u00d7\/]\s*\d/i.test(raw);
+    var nums=raw.match(/\d+(\.\d+)?/g);
     if(!nums||!nums.length){ el.style.borderColor='#e55'; el.focus(); return; }
-    var w=parseFloat(nums[0]), d=round?w:(nums[1]?parseFloat(nums[1]):w), sizeStr=round?('\u00f8'+w):(w+'\u00d7'+d);
+    var w=parseFloat(nums[0]), h2=(nums[1]?parseFloat(nums[1]):null);
     window.__pushRunUndo&&window.__pushRunUndo();
-    var n=0; sel.forEach(function(k){ var pr=k.split(':'), r=findRun(pr[0]); if(!r)return; var pc=r.pieces[+pr[1]]; if(!pc)return;
-      if(pc.kind==='straight'){ pc.widthIn=w; pc.depthIn=d; pc.round=round; pc.size=sizeStr; pc.cid=round?'spiral':'st'; pc.camduct=round?'Spiral':'Straight Duct'; pc._scaled=false; n++; }
-      else { pc.widthIn=w; pc.depthIn=d; pc.round=round; if(pc._sizeStep){ pc._newW=w; pc._newD=d; pc._newR=round; pc._newS=sizeStr; pc.outW=w; pc.outD=d; } n++; } });
+    var n=0, lastStr='';
+    sel.forEach(function(k){ var pr=k.split(':'), r=findRun(pr[0]); if(!r)return; var pc=r.pieces[+pr[1]]; if(!pc)return;
+      var rnd = explicitRound ? true : (explicitRect ? false : !!pc.round);   // bare number keeps the piece's current shape (so 20 on a round piece stays \u00f820)
+      var d = rnd ? w : (h2!=null ? h2 : w), sizeStr = rnd ? ('\u00f8'+w) : (w+'\u00d7'+d); lastStr=sizeStr;
+      if(pc.kind==='straight'){ pc.widthIn=w; pc.depthIn=d; pc.round=rnd; pc.size=sizeStr; pc.cid=rnd?'spiral':'st'; pc.camduct=rnd?'Spiral':'Straight Duct'; pc._scaled=false; n++; }
+      else { pc.widthIn=w; pc.depthIn=d; pc.round=rnd; if(pc._sizeStep){ pc._newW=w; pc._newD=d; pc._newR=rnd; pc._newS=sizeStr; pc.outW=w; pc.outD=d; } n++; } });
     try{ var ids=new Set(); sel.forEach(function(k){ids.add(k.split(':')[0]);}); ids.forEach(function(id){ var r=findRun(id); if(r) applyReducerDownstream(r); }); }catch(_){}
-    renderItems(); renderPanel(); setStatus('Set '+n+' piece(s) to '+sizeStr+'.'); };
+    renderItems(); renderPanel(); setStatus('Set '+n+' piece(s) to '+lastStr+'.'); };
   window.__stamp=null;
   window.__copyStamp=function(){ if(!sel.size){ setStatus('Tick the pieces you want to copy first.'); return; }
     // gather selected pieces in run+index order from the first run that has a selection
@@ -5301,10 +5325,16 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
    <button id="dtUndo" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#fff4e6;border:1px solid #ffd9a8;color:#b5641a;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:700;font-size:12px">↶ Undo last change</button>
    <button id="dtFixElbows" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#eafaf0;border:1px solid #a9e0c0;color:#1b7a45;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">↰ Straighten elbows from trace</button>
    <button id="dtAddDuct" onclick="window.__addDuctStart&&window.__addDuctStart()" style="display:block;width:100%;text-align:center;margin-bottom:8px;background:#eef4ff;border:1px solid #a9c4ff;color:#2b53a8;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">＋ Add duct run (click to drop)</button>
-   <button id="dtFittings" onclick="window.__toggleFitPanel&&window.__toggleFitPanel()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#e6fbff;border:1px solid #a5e4ef;color:#0e7490;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">◎ Review fittings by type</button>
+   <div id="frSec" style="margin-bottom:8px;border:1px solid #d7dee6;border-radius:9px;overflow:hidden">
+     <button id="frToggle" onclick="var b=document.getElementById('frBody'),o=(b.style.display==='none');b.style.display=o?'block':'none';this.textContent=(o?'▾':'▸')+' Final review';" style="display:block;width:100%;text-align:left;background:#eef1f6;border:none;color:#37414f;padding:9px 11px;cursor:pointer;font-weight:800;font-size:12px">▸ Final review</button>
+     <div id="frBody" style="display:none;padding:8px 8px 2px">
+       <button id="dtMissingDims" onclick="window.__toggleDimReview&&window.__toggleDimReview()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#fff7e6;border:1px solid #f0cf8a;color:#9a6a12;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⚠ Highlight ducts missing a size</button>
+       <button id="dtFittings" onclick="window.__toggleFitPanel&&window.__toggleFitPanel()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#e6fbff;border:1px solid #a5e4ef;color:#0e7490;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">◎ Review fittings by type</button>
+       <div id="fitList"></div>
+     </div>
+   </div>
    <button id="dtCamExport" onclick="window.__exportCamCSV&&window.__exportCamCSV()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#eef7ee;border:1px solid #a9d3a0;color:#2f6b2a;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⬇ Export CAMduct CSV (report)</button>
    <button id="dtCamAscii" onclick="window.__exportCamASCII&&window.__exportCamASCII()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#e9f2ff;border:1px solid #a9c4ff;color:#2b53a8;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⬇ Export CAMduct Job ASCII (.txt)</button>
-   <div id="fitList"></div>
    <button class="dtTool" data-mode="dragsize" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-resize width</button>
    <button class="dtTool" data-mode="draglen" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Drag-end (length)</button>
    <button class="dtTool" data-mode="move" style="display:block;width:100%;text-align:left;margin-bottom:5px;background:#f5f7fa;border:1px solid #dde2e9;color:#2b3441;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:600;font-size:12px">Move run</button>
