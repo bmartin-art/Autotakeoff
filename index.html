@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.35</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.37</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -2508,7 +2508,8 @@ function refreshSel(){
         window.__runs2d=window.__runs2d||[];
         window.__runs2d.push({ id:brId, start:[f.x, f.y],                    // START AT THE TAP POINT on the trunk so it's truly attached
           dir:[f.nx*bSide, f.ny*bSide], widthIn:bW, color:run.color,
-          pieces:[{kind:'straight',lenIn:(spec.branchLenIn||24),widthIn:bW,depthIn:bD,size:bSize,cid:bRound?'spiral':'st',camduct:bRound?'Spiral':'Straight Duct',round:bRound}],
+          pieces:[{kind:'fitting',cid:'stap',camduct:(spec.shopTap?'Shop Tap':'Tap'),round:false,lenIn:0,widthIn:bW,depthIn:(bD!=null?bD:bW),size:bSize,_tap:true,_tapRef:true,branchSide:bSide,branchW:bW,mainRound:(spec.mainRound!=null?!!spec.mainRound:rr),branchRound:bRound},
+                  {kind:'straight',lenIn:(spec.branchLenIn||24),widthIn:bW,depthIn:bD,size:bSize,cid:bRound?'spiral':'st',camduct:bRound?'Spiral':'Straight Duct',round:bRound}],
           _branch:true, _tapRunId:run.id }); } }
       renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Added a tap'+(spec.branch?' + '+bSize+' branch \u2014 drag its end to length':'')+'.'); return true; }
     var fit;
@@ -3047,12 +3048,12 @@ function refreshSel(){
       return [inOut, heel, otOut, thB, thA, inIn].map(function(q){return n2s(q[0],q[1]);});
     }
     // TAP — a short straight branch stub off the trunk wall (unless it's a shop tap collar)
-    if(p.kind==='fitting' && p._tap && !p.shopTap){
+    if(p.kind==='fitting' && p._tap && !p.shopTap && !p._tapRef){
       var sd=p.branchSide||1, bhw=inToPt((p.branchW||8)/2), stub=inToPt(p.branchLenIn||10);
       var w0=sd*hw, w1=sd*(hw+stub);
       return [P(-bhw,w0),P(bhw,w0),P(bhw,w1),P(-bhw,w1)].map(function(q){return n2s(q[0],q[1]);});   // simple rectangular stub
     }
-    if(p.kind==='fitting' && p._tap && p.shopTap){   // SHOP TAP — fabricated collar with an angled upstream throat
+    if(p.kind==='fitting' && p._tap && p.shopTap && !p._tapRef){   // SHOP TAP — fabricated collar with an angled upstream throat
       var side=p.branchSide||1, bw=inToPt((p.branchW||p.widthIn||12)/2), th=inToPt(p.throatIn||10), s0=side*hw, s1=side*(hw+2*bw);
       return [P(-bw,s0),P(bw,s0),P(bw,s1),P(-bw+th,s1)].map(function(q){return n2s(q[0],q[1]);});
     }
@@ -3277,7 +3278,7 @@ function refreshSel(){
       +'<div style="font-size:11px;margin-bottom:5px">'+sel.size+' piece(s) selected</div>'
       +'<div style="display:flex;gap:5px;margin-bottom:5px">'+palette.map(function(c){return '<button onclick="__selColor(\''+c+'\')" style="width:20px;height:20px;border-radius:4px;border:1px solid #fff3;background:'+c+';cursor:pointer"></button>';}).join('')+'</div>'
       +'<div style="display:flex;gap:5px;margin-bottom:5px"><input id="selLabel" placeholder="label run" style="flex:1;padding:5px;border:1px solid #345;border-radius:5px;background:#0e1923;color:#fff"><button onclick="__selName()" style="padding:5px 9px;border:none;border-radius:5px;background:#15a;color:#fff;cursor:pointer">Set</button></div>'
-      +'<div style="display:flex;gap:5px"><input id="selSize" placeholder="new size e.g. 28x8 or 10\u00f8" style="flex:1;padding:5px;border:1px solid #345;border-radius:5px;background:#0e1923;color:#fff"><button onclick="__selSize()" style="padding:5px 9px;border:none;border-radius:5px;background:#1b8a4a;color:#fff;cursor:pointer;font-weight:600">Set size</button></div>'
+      +'<div style="display:flex;gap:5px"><input id="selSize" placeholder="12 = round \\u00f8 \\u00b7 12x8 = rect" style="flex:1;padding:5px;border:1px solid #345;border-radius:5px;background:#0e1923;color:#fff"><button onclick="__selSize()" style="padding:5px 9px;border:none;border-radius:5px;background:#1b8a4a;color:#fff;cursor:pointer;font-weight:600">Set size</button></div>'
       +'<button onclick="__copyStamp()" style="width:100%;margin-top:5px;padding:6px;border:1px solid #7a5cc0;border-radius:5px;background:#2a2140;color:#d9c9ff;cursor:pointer;font-weight:600">\u29c9 Copy as stamp</button>'
       +'<button onclick="__selDelPieces()" style="width:100%;margin-top:5px;padding:6px;border:1px solid #a44;border-radius:5px;background:#3a2020;color:#fbb;cursor:pointer;font-weight:600">\u00d7 Delete selected piece(s)</button>'
       +'</div>'; }
@@ -3447,7 +3448,7 @@ function refreshSel(){
   function camSpec(pc){ var n=(pc||'2" w.g.').replace(/\s*w\.g\.?/i,'').replace(/"/g,'in').trim(); return CAM_CFG.specBase+'+'+n+' '+CAM_CFG.specSuffix; }
   function camBuildRows(runs){ var rows=[], entry=0;
     runs.forEach(function(r){ var pcls=camSpec(r.pressureClass), sect=r.sectionLabel||'', lin=CAM_CFG.liner[r.liner]||null;
-      (r.pieces||[]).forEach(function(p,idx){ var key=camKey(p); if(!key)return; var pat=CAM_PAT[key]; if(!pat)return;
+      (r.pieces||[]).forEach(function(p,idx){ if(p._tapRef) return; var key=camKey(p); if(!key)return; var pat=CAM_PAT[key]; if(!pat)return;
         var isRound=camPieceRound(r.pieces,idx), pd=(key==='s2r')?pat.round:(isRound?pat.round:pat.rect);
         var w=p.widthIn||r.widthIn||0, h=(p.depthIn!=null?p.depthIn:w), e1='',e2='',e3='',len='';
         if(key==='st'){ e1=e2=camEnd(isRound,w,h); len=camF3(p.lenIn); }
@@ -3493,7 +3494,7 @@ function refreshSel(){
     L.push('JOBHEADER_END');
     var entry=0, verify={};
     runs.forEach(function(r){ var spec='Brookstone: +'+((r.pressureClass||'2" w.g.').replace(/\s*w\.g\.?/i,'').replace(/"/g,'in').trim())+' Multiple';
-      (r.pieces||[]).forEach(function(p,idx){ var key=camKey(p); if(!key) return; var pat=CAM_PAT[key]; if(!pat) return;
+      (r.pieces||[]).forEach(function(p,idx){ if(p._tapRef) return; var key=camKey(p); if(!key) return; var pat=CAM_PAT[key]; if(!pat) return;
         var isR=camPieceRound(r.pieces,idx), pd=(key==='s2r')?pat.round:(isR?pat.round:pat.rect);
         var pallet=(pd.eg==='RONDFIT'||isR)?'./Item Catalog/Round Pallet/Fab/':'./Item Catalog/Rectangular Pallet/';
         var w=p.widthIn||r.widthIn||0, h=(p.depthIn!=null?p.depthIn:w), inW=p.inW||w, inD=(p.inD!=null?p.inD:h), ow=p.outW||w, od=(p.outD!=null?p.outD:ow), bw=p.branchW||Math.max(6,Math.round(w/2));
@@ -3582,7 +3583,7 @@ function refreshSel(){
     cb.onclick=function(){ window.__joinSet=[]; window.__editMode=null; var b=document.getElementById('joinBar'); if(b)b.remove(); renderItems(); };
     bar.appendChild(cb);
   };
-  window.__fitCat=function(p){ if(!p||p.kind!=='fitting') return null; var c=p.cid||'';
+  window.__fitCat=function(p){ if(!p||p.kind!=='fitting'||p._tapRef) return null; var c=p.cid||'';
     if(c==='e90'||c==='e45'||c==='e90r'||p._elbow) return 'Elbows';
     if(c==='tr'||c==='reducer'||c==='s2r'||c==='reo'||c==='ecr'||p._sizeStep) return 'Transitions';
     if(c==='stap'||c==='rtap'||p._tap) return 'Taps';
@@ -3627,7 +3628,7 @@ function refreshSel(){
     window.__pushRunUndo&&window.__pushRunUndo();
     var n=0, lastStr='';
     sel.forEach(function(k){ var pr=k.split(':'), r=findRun(pr[0]); if(!r)return; var pc=r.pieces[+pr[1]]; if(!pc)return;
-      var rnd = explicitRound ? true : (explicitRect ? false : !!pc.round);   // bare number keeps the piece's current shape (so 20 on a round piece stays \u00f820)
+      var rnd = explicitRound ? true : (explicitRect ? false : (nums.length<2));   // a lone number = round diameter; W x H = rect
       var d = rnd ? w : (h2!=null ? h2 : w), sizeStr = rnd ? ('\u00f8'+w) : (w+'\u00d7'+d); lastStr=sizeStr;
       if(pc.kind==='straight'){ pc.widthIn=w; pc.depthIn=d; pc.round=rnd; pc.size=sizeStr; pc.cid=rnd?'spiral':'st'; pc.camduct=rnd?'Spiral':'Straight Duct'; pc._scaled=false; n++; }
       else { pc.widthIn=w; pc.depthIn=d; pc.round=rnd; if(pc._sizeStep){ pc._newW=w; pc._newD=d; pc._newR=rnd; pc._newS=sizeStr; pc.outW=w; pc.outD=d; } n++; } });
