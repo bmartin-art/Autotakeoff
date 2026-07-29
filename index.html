@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.52</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.57</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -1902,7 +1902,7 @@ function refreshSel(){
               '<button id="qNot" style="padding:6px 9px;border:none;border-radius:6px;background:#c0392b;color:#fff;font-weight:700;cursor:pointer">\u2715 Not</button>'+
               '<button id="qX" style="padding:6px 8px;border:1px solid #345;border-radius:6px;background:#13212e;color:#9ab;cursor:pointer">\u00d7</button>';
   document.body.appendChild(q);
-  window.showQuick=function(x,y){ var w=148,h=36; var px=Math.min(x+12, window.innerWidth-w-8), py=Math.min(y+12, window.innerHeight-h-8);
+  window.showQuick=function(x,y){ if(window.__activeTab==='edit') return; var w=148,h=36; var px=Math.min(x+12, window.innerWidth-w-8), py=Math.min(y+12, window.innerHeight-h-8);
     q.style.left=Math.max(8,px)+'px'; q.style.top=Math.max(8,py)+'px'; q.style.display='flex'; };
   window.hideQuick=function(){ q.style.display='none'; };
   function apply(cls){ pushUndo(); var __sel=Array.from(selected); selected.forEach(function(i){ segments[i].lock=cls; segments[i]._userMark=true; }); var __n=addExamplesClustered(__sel,cls,8)||0; classify(); drawOverlay(); selected.clear(); refreshSel(); hideQuick(); setStatus('Marked '+__sel.length+' line(s) '+cls+' \u00b7 taught AI '+__n+' example(s), '+EXAMPLES.length+' learned total'); }
@@ -2017,6 +2017,8 @@ function refreshSel(){
   ov.addEventListener('touchend', function(){ up(); }, true);
   ov.addEventListener('contextmenu', function(e){ if(brushOn) e.preventDefault(); }, true);
   window.__tools=window.__tools||{}; window.__tools.brush=function(){ if(brushOn) setBrush(false); };
+  window.addEventListener('blur', function(){ if(stroke){ try{up();}catch(_){} } });   // released outside the window -> don't leave a stroke armed
+  window.__brushCancel=function(){ if(stroke){ stroke=null; touched=null; } };          // hard-cancel any in-progress stroke (called on zoom)
 })();
 // ---- ADD TAP tool: configure style/direction/size, then click duct to stamp taps (carried into 3D) ----
 (function(){
@@ -2830,10 +2832,12 @@ function refreshSel(){
     dets.forEach(function(x){ x._used=false; });   // fresh each build
     window.__elbowJoins=[];                          // recorded connections, rebuilt each pass
     function base(c){ return (c||'').replace(/^(rect|round)-/,''); }
-    var reach=inToPt(36);   // an endpoint must be within ~3' of the elbow detection to count as its corner
+    var reach0=inToPt(36);
     var joined=0;
     dets.forEach(function(d){
       if(d._used || base(d.cls)!=='elbow' || d.nx==null) return;
+      var bw=Math.abs((d.nx1!=null?d.nx1:d.nx)-(d.nx0!=null?d.nx0:d.nx)), bh=Math.abs((d.ny1!=null?d.ny1:d.ny)-(d.ny0!=null?d.ny0:d.ny));
+      var reach=Math.max(reach0, 0.85*Math.hypot(bw,bh));   // a run end must be within ~elbow-size of the detection to count as its corner (radius elbows reach farther)
       var hits=[];
       (window.__runs2d||[]).forEach(function(r){
         var e=runEnd(r);
@@ -3635,6 +3639,16 @@ function refreshSel(){
           if(lin&&lin.mat){ mrow['Insulation Material']=lin.mat; mrow['Insulation Thickness']=lin.th; } rows.push(mrow); });
       });
     });
+    (window.__elbowJoins||[]).forEach(function(j){ var tr=findRun(j.trunkId); if(!tr) return;   // corner elbows (YOLO joins between two run ends) — not run pieces, so add them here
+      var is45=Math.abs(Math.abs(j.turn||0)-Math.PI/4) < Math.abs(Math.abs(j.turn||0)-Math.PI/2);
+      var key=is45?'e45':'e90', pat=CAM_PAT[key], isR=!!j.round, pd=isR?pat.round:pat.rect;
+      var w=j.widthIn||tr.widthIn||12, pcls=camSpec(tr.pressureClass), sect=tr.sectionLabel||'', lin=CAM_CFG.liner[tr.liner]||null;
+      entry++; var jr={}; CAM_HDR.forEach(function(c){jr[c]='';});
+      jr['Job File Name']='takeoff'; try{ jr['Date']=new Date().toLocaleDateString('en-US'); }catch(_){}
+      jr['Epicor Group']=pd.eg; jr['Entry']=entry; jr['Qty']=1; jr[CAM_CFG.sectionCol]=sect; jr['CID']=pd.cid||''; jr['Item Description']=pd.d;
+      jr['Size - End 1']=isR?camF3(w):(camF3(w)+'x'+camF3(w)); jr['Size - End 2']=jr['Size - End 1']; if(isR) jr['Size - End 3']=jr['Size - End 1'];
+      jr['Material']=CAM_CFG.material; jr['Wire Gauge']=CAM_CFG.gauge; jr['Pressure Class']=pcls; jr['Company']=CAM_CFG.company; jr['Plant']=CAM_CFG.plant;
+      if(lin&&lin.mat){ jr['Insulation Material']=lin.mat; jr['Insulation Thickness']=lin.th; } rows.push(jr); });
     return rows; }
   function camToCSV(rows){ function cell(c,v){ v=(v==null?'':String(v)); return CAM_NUM.has(c)?v:('"'+v.replace(/"/g,'""')+'"'); }
     var out=[CAM_HDR.map(function(c){return '"'+c+'"';}).join(',')];
@@ -3700,6 +3714,19 @@ function refreshSel(){
           L.push('ITEMHEADER_END'); L.push('CUSTOM_DATA_START'); L.push('  Epicor Group='+mpd.eg); L.push('CUSTOM_DATA_END');
           L.push('DIMS_START'); mdims.forEach(function(d){ L.push('  '+d); }); L.push('DIMS_END'); L.push('ITEM_END'); });
       });
+    });
+    (window.__elbowJoins||[]).forEach(function(j){ var tr=findRun(j.trunkId); if(!tr) return;   // corner elbows (YOLO joins between two run ends) — not run pieces, so add them here
+      var is45=Math.abs(Math.abs(j.turn||0)-Math.PI/4) < Math.abs(Math.abs(j.turn||0)-Math.PI/2);
+      var key=is45?'e45':'e90', pat=CAM_PAT[key], isR=!!j.round, pd=isR?pat.round:pat.rect;
+      var pallet=(pd.eg==='RONDFIT'||isR)?'./Item Catalog/Round Pallet/Fab/':'./Item Catalog/Rectangular Pallet/';
+      var w=j.widthIn||tr.widthIn||12, spec='+'+((tr.pressureClass||'2" w.g.').replace(/\s*w\.g\.?/i,'').replace(/"/g,'in').trim())+' Multiple';
+      var dims = isR ? [f3(w),f3(is45?45:90),S] : (is45?[f3(w),f3(w),S,f3(45),f3(THROAT),f3(THROAT)]:[f3(w),f3(w),S,f3(THROAT),f3(THROAT)]);
+      entry++;
+      L.push('ITEM_START'); L.push('ITEMHEADER_START');
+      kv('ITEMFILE',pallet+pd.d+'.ITM'); kv('ITEM_NUMBER',entry+' '+pd.d); kv('SPEC',spec); kv('MATERIAL','GAL-60'); kv('QUANTITY',1);
+      if(tr.sectionLabel) kv('NOTES', tr.sectionLabel);
+      L.push('ITEMHEADER_END'); L.push('CUSTOM_DATA_START'); L.push('  Epicor Group='+pd.eg); L.push('CUSTOM_DATA_END');
+      L.push('DIMS_START'); dims.forEach(function(dd){ L.push('  '+dd); }); L.push('DIMS_END'); L.push('ITEM_END');
     });
     if(!entry){ alert('Nothing exportable found in the runs.'); return; }
     var blob=new Blob([L.join(NL)+NL],{type:'text/plain'}), a=document.createElement('a');
@@ -4194,9 +4221,10 @@ function refreshSel(){
     YSWAP.forEach(function(c){ h+='<button class="ys" data-c="'+c+'" style="display:block;width:100%;text-align:left;margin-bottom:3px;background:'+(c===d.cls?'#eef4ff':'#f5f7fa')+';border:1px solid '+(c===d.cls?'#a9c4ff':'#dde2e9')+';color:#2b3441;border-radius:6px;padding:5px 8px;cursor:pointer">'+c+'</button>'; });
     h+='<button id="ysDel" style="width:100%;margin-top:5px;background:#fdf2f2;border:1px solid #f2d4d4;color:#c0484d;border-radius:6px;padding:6px;cursor:pointer;font-weight:600">Delete detection</button>';
     m.innerHTML=h; document.body.appendChild(m);
-    ['mousedown','mouseup','click','wheel'].forEach(function(t){ m.addEventListener(t,function(e){e.stopPropagation();},true); });
-    function close(){ try{m.remove();}catch(_){} document.removeEventListener('mousedown',close,true); }
-    setTimeout(function(){ document.addEventListener('mousedown',close,true); },0);
+    ['mousedown','mouseup','wheel'].forEach(function(t){ m.addEventListener(t,function(e){e.stopPropagation();},true); });   // guard canvas drag/pan — but NOT 'click', or the buttons never fire
+    function close(){ try{m.remove();}catch(_){} document.removeEventListener('mousedown',onDoc,true); }
+    function onDoc(e){ if(!m.contains(e.target)) close(); }   // only close on clicks OUTSIDE the menu — inside clicks reach the buttons
+    setTimeout(function(){ document.addEventListener('mousedown',onDoc,true); },0);
     Array.prototype.forEach.call(m.querySelectorAll('.ys'),function(b){ b.onclick=function(){ d.cls=b.getAttribute('data-c'); d.clsIdx=-1; close(); renderYolo(); if(typeof setStatus==='function')setStatus('Detection changed to '+d.cls+'. Re-run build to apply.'); }; });
     m.querySelector('#ysDel').onclick=function(){ window.__yoloDets=(window.__yoloDets||[]).filter(function(x){return x!==d;}); if(window.__yoloAll) window.__yoloAll=window.__yoloAll.filter(function(x){return x!==d;}); close(); renderYolo(); if(typeof setStatus==='function')setStatus('Detection deleted.'); };
   }
@@ -4204,6 +4232,7 @@ function refreshSel(){
     var lay=$('yoloLayer'); if(!lay) return; lay.innerHTML='';
     if(!window.__yoloVisible) return;
     (window.__yoloDets||[]).forEach(function(d){
+      if((d.cls||'').replace(/^(rect|round)-/,'')==='straight') return;   // the builder ignores YOLO 'straight' boxes (green trace owns straights) — don't clutter the sheet with them
       if(d.nx0==null) return; var p0=n2sY(d.nx0,d.ny0), p1=n2sY(d.nx1,d.ny1); if(!p0||!p1) return;
       var x=Math.min(p0[0],p1[0]), y=Math.min(p0[1],p1[1]), w=Math.abs(p1[0]-p0[0]), h=Math.abs(p1[1]-p0[1]);
       var col=colorFor(d.clsIdx);
@@ -5443,6 +5472,7 @@ $('zIn').onclick =()=>{ zoomTo(scale*1.25, null, null); };
 $('zOut').onclick=()=>{ zoomTo(scale/1.25, null, null); };
 (function(){ const main=document.querySelector('main'); if(!main) return;
   main.addEventListener('wheel',function(e){ if(!pdfDoc) return; if(!(e.ctrlKey||e.metaKey||true)) return;
+    if(window.__brushCancel) window.__brushCancel();   // a zoom must never continue/leak a paint stroke
     e.preventDefault(); const f=e.deltaY<0?1.15:1/1.15; zoomTo(scale*f, e.clientX, e.clientY);
   },{passive:false});
 })();
@@ -5589,10 +5619,16 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     var w=parseFloat(nums[0]), d=round?w:(nums[1]?parseFloat(nums[1]):w);
     window.__addDuct={w:w,d:d,round:round}; window.__editMode='addduct'; try{refl();}catch(_){}
     status('Add duct: click on the plan to drop a '+(round?('\u00f8'+w):(w+'\u00d7'+d))+' run. Esc to stop.'); };
-  document.addEventListener('keydown',function(e){ if(e.key!=='Escape') return;      // Esc clears any active edit tool + in-progress selection
-    var had=window.__editMode||window.__connA||window.__tapMain||(window.__joinSet&&window.__joinSet.length)||window.__aimTarget||window.__addDuct;
+  document.addEventListener('keydown',function(e){ if(e.key!=='Escape') return;      // Esc = master off-switch for every tool
+    if(/^(input|textarea|select)$/i.test((document.activeElement||{}).tagName||'')) return;   // don't disrupt typing
+    var had=window.__editMode||window.__connA||window.__tapMain||(window.__joinSet&&window.__joinSet.length)||window.__aimTarget||window.__addDuct||window.__brushOn;
     window.__editMode=null; window.__tapMain=null; window.__connA=null; window.__connClickA=null; window.__connClickB=null; window.__joinSet=[]; window.__aimTarget=null; window.__addDuct=null;
+    try{ if(window.__tools) Object.keys(window.__tools).forEach(function(k){ try{window.__tools[k]();}catch(_){}}); }catch(_){}   // brush / tap / erase off
+    try{ window.hideQuick&&window.hideQuick(); }catch(_){}                                     // hide the Duct/Not quick popup
+    try{ if(window.__pcFitMenuEl){window.__pcFitMenuEl.remove(); window.__pcFitMenuEl=null;} }catch(_){}
+    try{ if(window.__pcElbowMenuEl){window.__pcElbowMenuEl.remove(); window.__pcElbowMenuEl=null;} }catch(_){}
     var mp=document.getElementById('connPick'); if(mp) mp.remove(); var jb=document.getElementById('joinBar'); if(jb) jb.remove();
+    var yn=document.getElementById('yoloTagMenu'); if(yn) yn.remove();
     try{ refl(); }catch(_){} try{ window.__renderItems&&window.__renderItems(); }catch(_){}
     if(had) status('Tools off \u2014 click a duct to select.'); });
   setInterval(refl,500);   // stay in sync if a left-panel edit button changes the mode
@@ -5987,6 +6023,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
     body.style.display='block'; body.style.width='auto'; body.style.border='none'; body.style.boxShadow='none'; body.style.margin='0'; body.style.padding='0';
     if(bar) bar.style.display='none';                          // hide the old floating right-edge toolbar
     window.__showTab=function(which){
+      window.__activeTab=which;
       var edit=(which==='edit');
       tSel.style.display=edit?'none':''; host.style.display=edit?'':'none';
       bSel.style.background=edit?'#f5f7fa':'#eef4ff'; bSel.style.color=edit?'#6b7482':'#3562c4'; bSel.style.borderColor=edit?'#dde2e9':'#cdd6e2';
