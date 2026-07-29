@@ -137,7 +137,20 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.57</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.64</span></div>
+   <script>
+   (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
+     setTimeout(function(){ try{
+       fetch(location.href.split('#')[0], {cache:'no-store'}).then(function(r){return r.text();}).then(function(t){
+         var m=t.match(/id="verBadge"[^>]*>(v[\d.]+)</); var served=m&&m[1];
+         var b=document.getElementById('verBadge'); if(!b||!served) return;
+         var loaded=(b.textContent||'').trim();
+         if(served!==loaded){ b.textContent=loaded+' \u2192 '+served+' available \u2014 hard refresh (Ctrl+Shift+R)';
+           b.style.cssText='font-size:10px;font-weight:800;letter-spacing:.04em;color:#fff;background:#c0392b;border-radius:5px;padding:2px 6px;opacity:1'; }
+       }).catch(function(){});
+     }catch(_){} }, 2500);
+   })();
+   </script>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -441,6 +454,10 @@ function analyzeVectorDarkness(){
   if(big.length<2 || nonBlack < segments.length*0.03){ return; }   // flat / single-color print -> fall back to raster sampling
   // cutoff sits just ABOVE the background (lighter) cluster of the largest gap — anything darker than
   // the page background counts as ink. Using the midpoint dropped walls that render mid-gray (~0.65).
+  // IMPORTANT: place the gap among INK levels only (vdark >= 0.2). White/near-white lines are invisible
+  // mask linework; letting them anchor the gap put the cutoff at ~0.10 and greened every gray wall.
+  var ink=big.filter(function(L){ return L>=0.2; });
+  if(ink.length>=2) big=ink;
   var gap=-1, lo=0.5, cut=0.6;
   for(var g=1;g<big.length;g++){ var d=big[g]-big[g-1]; if(d>gap){ gap=d; lo=big[g-1]; } }
   cut = lo + Math.min(0.10, Math.max(0.05, gap*0.18));
@@ -464,9 +481,11 @@ async function sampleDarknessHiRes(page){
     var ratio=samp/((baseScale||1)*(scale||1));   // main-viewport px -> sampling-canvas px
     function darkAt(px,py){ px=(px*ratio)|0; py=(py*ratio)|0; if(px<1)px=1;if(py<1)py=1;if(px>W-2)px=W-2;if(py>H-2)py=H-2; var best=255; for(var ox=-1;ox<=1;ox++){for(var oy=-1;oy<=1;oy++){ var i=((py+oy)*W+(px+ox))*4; var a=img[i+3]; var L=(a===0)?255:(0.299*img[i]+0.587*img[i+1]+0.114*img[i+2]); if(L<best)best=L; }} return best; }
     var __pStep=(ratio>0.001?1/ratio:1);   // ~1 sampling-canvas px, expressed in main-viewport px
-    for(var k=0;k<segments.length;k++){ var s=segments[k]; var dX=s.x2-s.x1, dY=s.y2-s.y1, dL=Math.hypot(dX,dY)||1, nX=-dY/dL, nY=dX/dL; var mind=255;
-      for(var t=0;t<=8;t++){ var f=t/8, cx=s.x1+dX*f, cy=s.y1+dY*f;
-        for(var o=-2;o<=2;o++){ var L=darkAt(cx+nX*o*__pStep, cy+nY*o*__pStep); if(L<mind)mind=L; } }
+    for(var k=0;k<segments.length;k++){ var s=segments[k]; var dX=s.x2-s.x1, dY=s.y2-s.y1, dL=Math.hypot(dX,dY)||1, nX=-dY/dL, nY=dX/dL; var pts=[];
+      for(var t=0;t<=8;t++){ var f=t/8, cx=s.x1+dX*f, cy=s.y1+dY*f; var pm=255;
+        for(var o=-2;o<=2;o++){ var L=darkAt(cx+nX*o*__pStep, cy+nY*o*__pStep); if(L<pm)pm=L; }
+        pts.push(pm); }
+      pts.sort(function(a,b){return a-b;}); var mind=pts[2];   // 3rd-darkest of 9: one black CROSSING can't blacken a gray line, but dashed/solid black (dark at most points) still reads black
       var __rd=1-mind/255; s.dark = __useMax ? Math.max((s.dark==null?0:s.dark), __rd) : __rd; }
   }catch(e){}
 }
@@ -477,10 +496,12 @@ function sampleDarkness(){
     var cx=cv.getContext('2d'); var W=cv.width,H=cv.height; var img;
     try{ img=cx.getImageData(0,0,W,H).data; }catch(e){ return; }
     function darkAt(px,py){ px=px|0; py=py|0; if(px<1)px=1; if(py<1)py=1; if(px>W-2)px=W-2; if(py>H-2)py=H-2; var best=255; for(var ox=-1;ox<=1;ox++){ for(var oy=-1;oy<=1;oy++){ var i=((py+oy)*W+(px+ox))*4; var a=img[i+3]; var L=(a===0)?255:(0.299*img[i]+0.587*img[i+1]+0.114*img[i+2]); if(L<best)best=L; } } return best; }
-    for(var si=0; si<segments.length; si++){ var s=segments[si]; var dX=s.x2-s.x1, dY=s.y2-s.y1, dL=Math.hypot(dX,dY)||1, nX=-dY/dL, nY=dX/dL; var mind=255;
-      for(var k=0;k<=8;k++){ var t=k/8, cx=s.x1+dX*t, cy=s.y1+dY*t;
-        for(var o=-2;o<=2;o++){ var L=darkAt(cx+nX*o, cy+nY*o); if(L<mind)mind=L; } }
-      s.dark=1-(mind/255); }
+    for(var si=0; si<segments.length; si++){ var s=segments[si]; var dX=s.x2-s.x1, dY=s.y2-s.y1, dL=Math.hypot(dX,dY)||1, nX=-dY/dL, nY=dX/dL; var pts=[];
+      for(var k=0;k<=8;k++){ var t=k/8, cx=s.x1+dX*t, cy=s.y1+dY*t; var pm=255;
+        for(var o=-2;o<=2;o++){ var L=darkAt(cx+nX*o, cy+nY*o); if(L<pm)pm=L; }
+        pts.push(pm); }
+      pts.sort(function(a,b){return a-b;});
+      s.dark=1-(pts[2]/255); }
   }catch(e){}
 }
 function paintBlkReadout(){ try{ var bt=document.getElementById('blkThresh'); var v=parseFloat(bt&&bt.value); if(isNaN(v))v=0.45; var bk=0,gy=0,bins=[0,0,0,0,0]; segments.forEach(function(s){ var d=(s.dark==null?1:s.dark); if(d>=v)bk++; else gy++; var bi=Math.min(4,Math.max(0,Math.floor(d*5))); bins[bi]++; }); var c=document.getElementById('blkCounts'); if(c) c.textContent='\u00b7 '+bk+' black / '+gy+' gray \u00b7 hist '+bins.join('/'); var el=document.getElementById('blkThreshV'); if(el)el.textContent=v.toFixed(2); var ml=document.getElementById('blkMinV'),bml=document.getElementById('blkMinLen'); if(ml&&bml)ml.textContent=parseInt(bml.value); }catch(e){} }
@@ -1076,7 +1097,7 @@ function isStructural(s){
 // ---- classification ----
 function classify(){
   const minGap=+$('minGap').value, maxGap=+$('maxGap').value;   // in PDF points now
-  for(const s of segments){ s.paired=false; s.nearTag=false; s.labelBox=false; s.blkRescue=false; }
+  for(const s of segments){ s.paired=false; s.nearTag=false; s.labelBox=false; s.blkRescue=false; s.wallPair=false; }
   var __blackM=(document.getElementById('blackOnly')||{}).checked, __blkTM=parseFloat((document.getElementById('blkThresh')||{}).value)||0.45;
   function __isBlk(s){ return !__blackM || (s.dark==null?1:s.dark)>=__blkTM; }   // a "confirmed black" line
   // blkRescue: a marginal (sub-threshold) line that sits parallel within gap range to a confirmed-black
@@ -1089,20 +1110,54 @@ function classify(){
     return {o:'D'};
   }
   segments.forEach(s=>{ s._u=uinfo(s); });
-  // parallel-pair detection within H and V buckets, measured in real points
+  // ---- collinear CHAINING: a wall drawn as many short fragments (dashed lines, walls broken by
+  // taps/crossings) is one logical wall. Chain fragments that share an axis position (±1.2pt) with
+  // gaps ≤12pt, then PAIR THE CHAINS — so a dashed wall pairs like a solid one and the refined
+  // duct-run length check sees the full extent instead of one dash. Flags propagate to members. ----
+  function chainBucket(items, tolFix, joinGap){
+    items.sort(function(a,b){ return a.fix-b.fix || a.lo-b.lo; });
+    var chains=[], cur=null;
+    for(var i=0;i<items.length;i++){ var it=items[i];
+      if(cur && Math.abs(it.fix-cur.fix)<=tolFix && it.lo<=cur.hi+joinGap){
+        cur.hi=Math.max(cur.hi,it.hi); cur.members.push(it.s);
+        cur.fix=(cur.fix*cur.n+it.fix)/(cur.n+1); cur.n++;
+        cur.dark=Math.max(cur.dark,(it.s.dark==null?1:it.s.dark));
+      } else { cur={fix:it.fix, lo:it.lo, hi:it.hi, members:[it.s], n:1, dark:(it.s.dark==null?1:it.s.dark)}; chains.push(cur); }
+    }
+    return chains;
+  }
+  var __chains={H:[],V:[]};
+  ['H','V'].forEach(function(o){
+    var items=segments.filter(function(s){return s._u.o===o;}).map(function(s){ return {fix:s._u.fix, lo:s._u.lo, hi:s._u.hi, s:s}; });
+    __chains[o]=chainBucket(items, 1.2, 12);
+  });
+  // parallel-pair detection within H and V buckets — on LOGICAL CHAINS, measured in real points
   ['H','V'].forEach(o=>{
-    const arr=segments.filter(s=>s._u.o===o);   // pair ALL lines; blackness decided per-match so a gray wall can be rescued by its black twin
-    for(let i=0;i<arr.length;i++){ const a=arr[i],ua=a._u;
-      for(let j=i+1;j<arr.length;j++){ const b=arr[j],ub=b._u;
-        const gap=Math.abs(ua.fix-ub.fix);
-        if(gap<minGap||gap>maxGap) continue;
-        const ov=Math.min(ua.hi,ub.hi)-Math.max(ua.lo,ub.lo);
+    const arr=__chains[o];   // pair chained walls; blackness decided per-match so a gray wall can be rescued by its black twin
+    function chBlk(c){ return !__blackM || c.dark>=__blkTM; }
+    for(let i=0;i<arr.length;i++){ const a=arr[i];
+      for(let j=i+1;j<arr.length;j++){ const b=arr[j];
+        const gap=Math.abs(a.fix-b.fix);
+        if(gap>maxGap) continue;
+        const ov=Math.min(a.hi,b.hi)-Math.max(a.lo,b.lo);
+        if(gap<minGap){
+          // WALL-THICKNESS pair: two long parallel lines closer than a real wall's width are a drawn
+          // wall (double-line partition), not duct. The band is PHYSICAL (≤5.5 real inches via plan
+          // scale, capped at 4.5pt when scale is unset) — deliberately NOT the user's Min gap, so a
+          // high Min gap can never stretch the veto over real duct. Needs near-full overlap (walls
+          // overlap; duct fragments don't). The veto only bites lines with no duct-width partner.
+          var __wallMax=(typeof scaleIPF!=='undefined'&&scaleIPF>0)?(5.5*6*scaleIPF):4.5;
+          if(gap>=1.2 && gap<=__wallMax && ov>=60 && ov>=0.6*Math.min(a.hi-a.lo,b.hi-b.lo)){
+            a.members.forEach(function(s){s.wallPair=true;}); b.members.forEach(function(s){s.wallPair=true;});
+          }
+          continue;
+        }
         // forgiving overlap so broken walls (interrupted by taps) still pair
-        if(ov>8 || ov> Math.min(ua.hi-ua.lo,ub.hi-ub.lo)*0.25){
-          const aB=__isBlk(a), bB=__isBlk(b);
-          if(aB&&bB){ a.paired=true; b.paired=true; }   // both black: the normal pair (unchanged off-mode)
-          else if(aB&&!bB) b.blkRescue=true;            // a is black, rescue its gray partner b
-          else if(bB&&!aB) a.blkRescue=true;
+        if(ov>8 || ov> Math.min(a.hi-a.lo,b.hi-b.lo)*0.25){
+          const aB=chBlk(a), bB=chBlk(b);
+          if(aB&&bB){ a.members.forEach(function(s){s.paired=true;}); b.members.forEach(function(s){s.paired=true;}); }
+          else if(aB&&!bB) b.members.forEach(function(s){s.blkRescue=true;});
+          else if(bB&&!aB) a.members.forEach(function(s){s.blkRescue=true;});
         }
       }
     }
@@ -1142,12 +1197,12 @@ function classify(){
     var __runMinFt=parseFloat((document.getElementById('runMinLen')||{}).value); if(isNaN(__runMinFt))__runMinFt=3;
     var __minWall=Math.max(24, __runMinFt*__ftPt);
     ['H','V'].forEach(function(o){
-      var arr=segments.filter(function(s){return s._u.o===o && __isBlk(s) && (s.ulen||0)>=__minWall;});
-      for(var i=0;i<arr.length;i++){ var a=arr[i],ua=a._u;
-        for(var j=i+1;j<arr.length;j++){ var b=arr[j],ub=b._u;
-          var gap=Math.abs(ua.fix-ub.fix); if(gap<__gMin||gap>__gMax) continue;
-          var ov=Math.min(ua.hi,ub.hi)-Math.max(ua.lo,ub.lo);
-          if(ov>20){ a.ductRun=true; b.ductRun=true; }
+      var arr=__chains[o].filter(function(c){ return c.dark>= (__blackM?__blkTM:0) && (c.hi-c.lo)>=__minWall; });   // CHAINED extent — a dashed/interrupted wall passes the length check as one wall
+      for(var i=0;i<arr.length;i++){ var a=arr[i];
+        for(var j=i+1;j<arr.length;j++){ var b=arr[j];
+          var gap=Math.abs(a.fix-b.fix); if(gap<__gMin||gap>__gMax) continue;
+          var ov=Math.min(a.hi,b.hi)-Math.max(a.lo,b.lo);
+          if(ov>20){ a.members.forEach(function(s){s.ductRun=true;}); b.members.forEach(function(s){s.ductRun=true;}); }
         }
       }
     });
@@ -1210,8 +1265,8 @@ function classify(){
     }   // color and/or shade pickers: tapped colors/shades become duct
     if(s.lock){ s.cls=s.lock; continue; }
     if(__ductRuns){ var __dDiag=(s._u&&s._u.o==='D'&&s.paired); s.cls = ((s.ductRun||__dDiag) ? (__aiFirst?'maybe':'duct') : 'not'); continue; }   // precision geometry mode (+ paired diagonal runs the H/V detector can't see)
-    if(matchSample && ductRef){ s.cls=((darkOf(s) >= __blkT) && (s.len==null || s.len >= __blkMin))?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY color takeoff: dark AND long enough (Min length drops short grid/cross lines)
-    if(__black){ s.cls=((darkOf(s) >= __blkT) && (s.len==null || s.len >= __blkMin))?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY black mode: dark AND long enough (Min length drops short grid/cross lines)
+    if(matchSample && ductRef){ s.cls=(((darkOf(s) >= __blkT) || s.blkRescue) && (s.len==null || s.len >= __blkMin) && !(s.wallPair && !s.paired && !s.nearTag))?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY color takeoff: dark AND long enough — a wall-thickness pair with no duct-width partner and no size tag is a WALL
+    if(__black){ s.cls=(((darkOf(s) >= __blkT) || s.blkRescue) && (s.len==null || s.len >= __blkMin) && !(s.wallPair && !s.paired && !s.nearTag))?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY black mode: dark AND long enough — a wall-thickness pair with no duct-width partner and no size tag is a WALL, even in black mode
     if(pickHeavy){ s.cls=((s.lw||0) >= __lwT)?(__aiFirst?'maybe':'duct'):'not'; continue; }   // HEAVY mode: thicker-than-cutoff lines are duct (line-weight slider controls it)
     if(s.labelBox){ s.cls='not'; continue; }   // dimension-text box border, not duct (auto mode only)
     if(s.curved && s.ulen<26){ s.cls='not'; continue; }  // round symbols (diffusers, registers, T/H sensors) are never duct
@@ -2720,13 +2775,14 @@ function refreshSel(){
     var nMerge = mergeTagLineRuns();
     var nOut = containYoloToGreen();
     var nJoin = joinRunsAtElbows();
+    var nSyn = 0; try{ nSyn = synthElbowLegs(); }catch(e){ console.warn('synthElbowLegs', e); }
     var nFit = integrateYoloFittings();
     var nCarry = 0;   // DISABLED: a no-tag run keeps its OWN green-line width (was inheriting a nearby tagged run's size, overriding the measured gap). Height stays unknown — set via ✎ resize.
     var nDrop = dropUnsupportedRuns();
     var nDup = 0; try{ nDup=dedupeOverlappingRuns(); }catch(e){}   // collapse two-runs-over-one-duct into the centered one
     var nElb = 0;   // AUTO elbow-turning is OFF: the green trace already sets each run's direction, and auto-turning kept swinging straight runs sideways. Elbows stay inline; turn the real corners by hand (click the placeholder / panel arrows). __repairElbowTurns still exists for an optional manual "snap elbows to green".
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nElb?(' \u00b7 '+nElb+' elbow(s) turned'):'')+(nDup?(' \u00b7 '+nDup+' doubled run(s) merged'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.'); try{ __ductDiag('joints'); }catch(e){}
+    setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(typeof nSyn!=='undefined'&&nSyn?(' \u00b7 '+nSyn+' corner leg(s) built from green'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nElb?(' \u00b7 '+nElb+' elbow(s) turned'):'')+(nDup?(' \u00b7 '+nDup+' doubled run(s) merged'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.'); try{ __ductDiag('joints'); }catch(e){}
     try{ var _fs=window.__yoloFitStats, _yo=document.getElementById('yoloOut');
       if(_fs && _yo){ var _dropped=(_fs.skipped_no_run_nearby||0)+(_fs.skipped_no_piece||0);
         var _msg=(_fs.insertable? ('YOLO fittings: <b>'+_fs.insertable+'</b> detected \u00b7 <b>'+_fs.placed+'</b> placed'+(_dropped?(' \u00b7 <b>'+_dropped+'</b> dropped (sat where no run was built \u2014 corners/edges)'):''))
@@ -2874,6 +2930,64 @@ function refreshSel(){
     return joined;
   }
   window.__joinRunsAtElbows=joinRunsAtElbows;
+  // ---- ELBOW LEG SYNTHESIS: a YOLO elbow that sits on exactly ONE run, where the GREEN trace
+  // clearly continues perpendicular, means the other leg never built (single wall / arc chords).
+  // Build that leg from the green centerline and record the corner — instead of dropping the elbow. ----
+  function synthElbowLegs(){
+    var dets=window.__yoloDets||[], runs=window.__runs2d||[]; if(!dets.length||!runs.length) return 0;
+    function base(c){ return (c||'').replace(/^(rect|round)-/,''); }
+    var made=0;
+    dets.forEach(function(d){
+      if(d._used || base(d.cls)!=='elbow' || d.nx==null) return;
+      if((d.score||0) < (window.__yoloGreenScoped?0.25:0.45)) return;         // don't synthesize duct off a weak hit
+      // exactly one run under/at the elbow
+      var hits=[];
+      runs.forEach(function(r){ var L=runLenIn(r); var pr=projOnRun(r,d.nx,d.ny);
+        if(pr.alongIn>=-24 && pr.alongIn<=L+24 && Math.abs(pr.perpIn)<=(r.widthIn/2+24)) hits.push({r:r, pr:pr}); });
+      if(hits.length!==1) return;
+      var M=hits[0].r, pr=hits[0].pr, t=inToPt(Math.max(0,Math.min(runLenIn(M),pr.alongIn)));
+      var C=[M.start[0]+M.dir[0]*t, M.start[1]+M.dir[1]*t];                   // corner point on the main run's centerline
+      var pd=[-M.dir[1], M.dir[0]];                                           // perpendicular
+      // measure GREEN support along +pd and -pd from C: perpendicular-oriented duct lines in a corridor
+      var corridorPt=inToPt((M.widthIn||12)/2+14), maxLegPt=inToPt(20*12), minSupPt=inToPt(30);
+      function support(sgn){ var ext=0;
+        for(var i=0;i<segments.length;i++){ var s=segments[i]; if(s.cls!=='duct'||s.nx1==null) continue;
+          var vx=s.nx2-s.nx1, vy=s.ny2-s.ny1, sl=Math.hypot(vx,vy); if(sl<6) continue;
+          var dot=Math.abs((vx/sl)*pd[0]+(vy/sl)*pd[1]); if(dot<0.94) continue;                 // must run along the perpendicular
+          var a1=((s.nx1-C[0])*pd[0]+(s.ny1-C[1])*pd[1])*sgn, a2=((s.nx2-C[0])*pd[0]+(s.ny2-C[1])*pd[1])*sgn;
+          var lo=Math.min(a1,a2), hi=Math.max(a1,a2); if(hi<=8||lo>maxLegPt) continue;          // ahead of the corner, within max leg
+          var p1=(s.nx1-C[0])*M.dir[0]+(s.ny1-C[1])*M.dir[1], p2=(s.nx2-C[0])*M.dir[0]+(s.ny2-C[1])*M.dir[1];
+          if(Math.min(Math.abs(p1),Math.abs(p2))>corridorPt) continue;                          // stays in the corridor beside the main
+          ext=Math.max(ext, Math.min(hi,maxLegPt)); }
+        return ext; }
+      var eP=support(1), eN=support(-1), sgn=(eP>=eN?1:-1), ext=Math.max(eP,eN);
+      if(ext<minSupPt) return;                                                                  // no real green continuation -> not a corner
+      // cap the leg at the nearest OTHER run's endpoint along this direction, so the synthesized
+      // leg never overlaps a run that already built farther along (doubled-duct guard)
+      runs.forEach(function(o){ if(o===M) return; var oe=runEnd(o);
+        [[o.start[0],o.start[1]],[oe.x,oe.y]].forEach(function(ep){
+          var a=((ep[0]-C[0])*pd[0]+(ep[1]-C[1])*pd[1])*sgn; if(a<inToPt(12)||a>ext) return;
+          var pp=Math.abs((ep[0]-C[0])*M.dir[0]+(ep[1]-C[1])*M.dir[1]); if(pp>corridorPt) return;
+          ext=Math.max(inToPt(12), a-inToPt(2)); }); });
+      var rr=!!(M.pieces&&M.pieces.some(function(p){return p.kind==='straight'&&p.round;}));
+      var w=M.widthIn||12, half=inToPt(w/2), legPt=Math.max(inToPt(12), ext-0);                 // leg runs to the end of green coverage
+      var startPt=[C[0]+pd[0]*sgn*half, C[1]+pd[1]*sgn*half];                                   // start at the main run's FACE
+      var sz=rr?('\u00f8'+w):(w+'\u00d7?');
+      var leg={ id:'syn'+Date.now().toString(36)+Math.floor(Math.random()*1e4), start:startPt, dir:[pd[0]*sgn,pd[1]*sgn], widthIn:w, color:M.color,
+        sectionId:M.sectionId, sectionLabel:M.sectionLabel, pressureClass:M.pressureClass, liner:M.liner, axis:(Math.abs(pd[0])>0.7?'horizontal':'vertical'),
+        pieces:[{kind:'straight',lenIn:Math.round(ptToIn(legPt-half)*10)/10,widthIn:w,depthIn:(rr?w:null),size:sz,cid:rr?'spiral':'st',camduct:rr?'Spiral':'Straight Duct',round:rr,_scaled:!rr}],
+        _branch:true, _synthLeg:true };
+      if((leg.pieces[0].lenIn||0)<12) return;
+      runs.push(leg);
+      var tinto=[M.dir[0],M.dir[1]], bout=[leg.dir[0],leg.dir[1]];
+      var turn=Math.atan2(tinto[0]*bout[1]-tinto[1]*bout[0], tinto[0]*bout[0]+tinto[1]*bout[1]);
+      (window.__elbowJoins=window.__elbowJoins||[]).push({ trunkId:M.id, branchId:leg.id, atX:C[0], atY:C[1], turn:turn, round:rr, widthIn:w, score:d.score, _synth:true });
+      d._used=true; made++;
+    });
+    if(made) console.log('[takeoff] synthesized '+made+' elbow leg(s) from green trace');
+    return made;
+  }
+  window.__synthElbowLegs=synthElbowLegs;
 
   // ---- STAGE 5 CARRY-FORWARD: a run with no tag of its own inherits the size of the run it
   // connects to at a shared endpoint (a branch holds the trunk size until a real sizechange).
@@ -3264,6 +3378,16 @@ function refreshSel(){
           if(e.shiftKey){ if(sel.has(key))sel.delete(key); else sel.add(key); } else { sel.clear(); sel.add(key); }
           selRun=run.id; renderItems(); renderPanel(); };
         poly.addEventListener('mousedown',pcHit,true);
+        poly.addEventListener('mouseenter',function(e){ var tip=document.getElementById('pcTip'); if(!tip){ tip=document.createElement('div'); tip.id='pcTip'; tip.style.cssText='position:fixed;z-index:100005;pointer-events:none;background:#0e1c2b;color:#d8ecff;border:1px solid #2b6aa0;border-radius:6px;padding:4px 8px;font:11px system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.4)'; document.body.appendChild(tip); }
+          var nm=(p.kind==='straight'?(p.size||((p.widthIn||run.widthIn)+'\u00d7?')):((p.camduct||p.cid||'fitting')+(p.size?(' \u00b7 '+p.size):'')));
+          tip.textContent=nm+(p.kind==='straight'&&p.lenIn?(' \u00b7 '+fmtFt(p.lenIn)):''); tip.style.display='block'; });
+        poly.addEventListener('mousemove',function(e){ var tip=document.getElementById('pcTip'); if(tip){ tip.style.left=(e.clientX+14)+'px'; tip.style.top=(e.clientY+12)+'px'; } });
+        poly.addEventListener('mouseleave',function(){ var tip=document.getElementById('pcTip'); if(tip) tip.style.display='none'; });
+        poly.addEventListener('dblclick',function(e){ e.stopPropagation(); e.preventDefault();   // double-click a run: select ALL its pieces + focus the size box
+          sel.clear(); run.pieces.forEach(function(pp,ii){ sel.add(run.id+':'+ii); });
+          selRun=run.id; try{window.__selRunId=run.id;}catch(_){} try{window.__showRunPanel&&window.__showRunPanel();}catch(_){}
+          renderItems(); renderPanel();
+          setTimeout(function(){ var ss=document.getElementById('selSize'); if(ss){ ss.focus(); ss.select(); } },40); });
         lay.appendChild(poly);
         var cxm=(pts[0][0]+pts[2][0])/2, cym=(pts[0][1]+pts[2][1])/2;
         // (no dot marker — the shaped polygon above already draws the fitting: elbow / tap / transition / offset)
@@ -3418,6 +3542,47 @@ function refreshSel(){
     var ss=document.getElementById('selSize'); if(ss){ if(_keepSize) ss.value=_keepSize; ss.onkeydown=function(e){ if(e.key==='Enter')window.__selSize(); }; }
   }
   window.__renderItemPanel=renderPanel;
+  // ==== FINAL REVIEW: summary, next-issue navigation ====
+  window.__frIssues=function(){ var out=[];
+    (window.__runs2d||[]).forEach(function(r){ r.pieces.forEach(function(p,i){ if(missingDim(p)) out.push({runId:r.id, i:i, kind:'size'}); }); });
+    (window.__runs2d||[]).forEach(function(r){ if(!r.sectionLabel && runLenIn(r)>24) out.push({runId:r.id, i:0, kind:'section'}); });
+    return out; };
+  window.__frSummary=function(){ var host=document.getElementById('frSummary'); if(!host) return;
+    var runs=window.__runs2d||[]; if(!runs.length){ host.innerHTML='<div style="font-size:11px;color:#8a93a1">No takeoff yet \u2014 build runs first.</div>'; return; }
+    var lf=0, nSizeMiss=0, nNoSect=0, fits=0, sects={};
+    runs.forEach(function(r){ var L=runLenIn(r); lf+=L;
+      var key=r.sectionLabel||''; if(!key && L>24) nNoSect++;
+      if(key){ var e=sects[key]=sects[key]||{lf:0,p:r.pressureClass||'2" w.g.',ln:r.liner||'None'}; e.lf+=L; }
+      r.pieces.forEach(function(p){ if(missingDim(p)) nSizeMiss++; if(p.kind==='fitting'&&!p._tapRef) fits++; }); });
+    var joins=(window.__elbowJoins||[]).length;
+    function row(label,val,warn,click){ return '<div '+(click?('onclick="'+click+'" style="cursor:pointer;"'):'')+' class="frrow" style="display:flex;justify-content:space-between;font-size:11px;padding:3px 6px;border-radius:5px;'+(warn?'background:#fdf0e0;color:#8a5f0a;font-weight:700':'color:#37414f')+'">'+ '<span>'+label+'</span><span>'+val+'</span></div>'; }
+    var h='';
+    h+=row('Runs \u00b7 total length', runs.length+' \u00b7 '+Math.round(lf/12)+' LF');
+    h+=row('Fittings (placed + corners)', (fits+joins));
+    h+=row('Pieces missing a size', nSizeMiss, nSizeMiss>0, nSizeMiss?'window.__toggleDimReview&&window.__toggleDimReview()':null);
+    h+=row('Runs with no section', nNoSect, nNoSect>0);
+    var keys=Object.keys(sects);
+    if(keys.length){ h+='<div style="font-size:10px;color:#8a93a1;margin:6px 0 2px;font-weight:700">SECTIONS</div>';
+      keys.forEach(function(k){ var e=sects[k]; h+=row(k+' \u00b7 '+e.p+' \u00b7 '+e.ln, Math.round(e.lf/12)+' LF'); }); }
+    host.innerHTML=h; };
+  window.__frNextIssue=function(){ var iss=window.__frIssues(); if(!iss.length){ if(typeof setStatus==='function')setStatus('No open issues \u2014 all sized and sectioned. Ready to export.'); window.__frSummary(); return; }
+    window.__frIdx=((window.__frIdx==null?-1:window.__frIdx)+1)%iss.length; var it=iss[window.__frIdx];
+    var r=findRun(it.runId); if(!r) return;
+    var fr=runFrames(r), f=fr[Math.min(it.i,fr.length-1)]||{x:r.start[0],y:r.start[1]};
+    var p=r.pieces[it.i], mid=inToPt((p&&p.lenIn||0)/2), px=f.x+(f.ux||0)*mid, py=f.y+(f.uy||0)*mid;
+    var sp=window.__n2s?window.__n2s(px,py):null;
+    if(sp){ var main=document.querySelector('main'); if(main){ main.scrollLeft=sp[0]-main.clientWidth/2; main.scrollTop=sp[1]-main.clientHeight/2; } }
+    sel.clear(); sel.add(it.runId+':'+it.i); selRun=it.runId; try{window.__selRunId=it.runId;}catch(_){}
+    try{window.__showRunPanel&&window.__showRunPanel();}catch(_){} renderItems(); renderPanel();
+    setTimeout(function(){ var ss=document.getElementById('selSize'); if(ss&&it.kind==='size'){ ss.focus(); } },40);
+    if(typeof setStatus==='function') setStatus('Issue '+(window.__frIdx+1)+' of '+iss.length+': '+(it.kind==='size'?'missing size \u2014 type it and press Enter, then N for the next.':'no section \u2014 name it in the Section box.')); };
+  (function(){ var b=document.getElementById('frRefresh'); if(b) b.onclick=function(){ window.__frSummary(); };
+    var n=document.getElementById('frNext'); if(n) n.onclick=function(){ window.__frNextIssue(); };
+    var t=document.getElementById('frToggle'); if(t){ var old=t.onclick; t.onclick=function(){ if(old)old.call(this); try{window.__frSummary();}catch(_){} }; }
+    document.addEventListener('keydown',function(e){ if(e.key!=='n'&&e.key!=='N') return;
+      if(/^(input|textarea|select)$/i.test((document.activeElement||{}).tagName||'')) return;
+      var fb=document.getElementById('frBody'); if(fb&&fb.style.display!=='none') window.__frNextIssue(); });
+  })();
 
   window.__runOpen=function(id){ selRun=(selRun===id?null:id); renderPanel(); };
   window.__selectRun=function(id){ selRun=id; try{window.__selRunId=id;}catch(_){} renderItems(); renderPanel(); };
@@ -5572,6 +5737,11 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
    <div id="frSec" style="margin-bottom:8px;border:1px solid #d7dee6;border-radius:9px;overflow:hidden">
      <button id="frToggle" onclick="var b=document.getElementById('frBody'),o=(b.style.display==='none');b.style.display=o?'block':'none';this.textContent=(o?'▾':'▸')+' Final review';" style="display:block;width:100%;text-align:left;background:#eef1f6;border:none;color:#37414f;padding:9px 11px;cursor:pointer;font-weight:800;font-size:12px">▸ Final review</button>
      <div id="frBody" style="display:none;padding:8px 8px 2px">
+       <div id="frSummary" style="margin-bottom:8px"></div>
+       <div style="display:flex;gap:5px;margin-bottom:8px">
+         <button id="frRefresh" style="flex:1;background:#eef1f6;border:1px solid #cdd6e2;color:#37414f;border-radius:8px;padding:6px;cursor:pointer;font-weight:700;font-size:11px">⟳ Refresh summary</button>
+         <button id="frNext" style="flex:1;background:#fff3d6;border:1px solid #eecf87;color:#8a5f0a;border-radius:8px;padding:6px;cursor:pointer;font-weight:700;font-size:11px">⏭ Next issue (N)</button>
+       </div>
        <button id="dtMissingDims" onclick="window.__toggleDimReview&&window.__toggleDimReview()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#fff7e6;border:1px solid #f0cf8a;color:#9a6a12;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⚠ Highlight ducts missing a size</button>
        <button id="dtFittings" onclick="window.__toggleFitPanel&&window.__toggleFitPanel()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#e6fbff;border:1px solid #a5e4ef;color:#0e7490;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">◎ Review fittings by type</button>
        <div id="fitList"></div>
