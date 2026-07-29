@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.50</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.52</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -343,6 +343,7 @@
          </div>
          <input type="file" id="yoloFile" accept=".onnx" style="display:none">
          <button class="btn go" id="yoloTestBtn" style="width:100%;margin-top:6px;background:#0c1f3a;border-color:#2b6aa0;color:#bfe0ff" disabled>▸ Test detect (visible area)</button>
+         <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="yoloGreenOnly"> Scan only near traced duct <span style="opacity:.6">(fewer false hits, faster)</span></label>
          <button class="btn go" id="yoloScanBtn" style="width:100%;margin-top:6px;background:#0a2a1f;border-color:#2b9e7a;color:#bfffe6;font-weight:700" disabled>Scan whole sheet (tiled)</button>
          <div style="margin-top:8px;background:#0c1a28;border:1px solid #22384a;border-radius:8px;padding:8px">
            <div style="font-size:11px;color:#9fb2c8;margin-bottom:6px">Scan sensitivity — turn up if it's <b>missing fittings</b>:</div>
@@ -2762,8 +2763,8 @@ function refreshSel(){
       var best=null,bestPerp=1e9,bestRun=null;
       window.__runs2d.forEach(function(run){
         var lenIn=runLenIn(run); var pr=projOnRun(run,d.nx,d.ny);
-        if(pr.alongIn< -6 || pr.alongIn> lenIn+6) return;            // must be within the run span
-        var perp=Math.abs(pr.perpIn); if(perp> (run.widthIn/2 + 12)) return;  // must sit on the duct (within half-width + slack)
+        var _slk=(window.__yoloGreenScoped?24:6); if(pr.alongIn< -_slk || pr.alongIn> lenIn+_slk) return;            // must be within the run span (wider when green-scoped)
+        var perp=Math.abs(pr.perpIn); if(perp> (run.widthIn/2 + (window.__yoloGreenScoped?30:12))) return;  // must sit on the duct (wider slack when green-scoped)
         if(perp<bestPerp){ bestPerp=perp; best=pr; bestRun=run; }
       });
       if(!bestRun){ skipNoRun++; return; }   // no run lay on this detection's centerline within reach (e.g. fitting at a corner where no run was built)
@@ -2987,14 +2988,14 @@ function refreshSel(){
   function containYoloToGreen(){
     var dets=window.__yoloDets||[], runs=window.__runs2d||[]; if(!dets.length||!runs.length) return 0;
     function base(c){ return (c||'').replace(/^(rect|round)-/,''); }
-    var HIGH=0.60;   // confidence to override geometry and keep an out-of-green detection
+    var HIGH=(window.__yoloGreenScoped?0.28:0.60), EXTRA=(window.__yoloGreenScoped?30:12);   // green-scoped scan is pre-vetted -> keep more
     var n0=dets.length;
     window.__yoloDets=dets.filter(function(d){
       if(d.nx==null) return true;
       if(base(d.cls)==='sizetag') return true;
       var inside=false;
       for(var i=0;i<runs.length;i++){ var L=runLenIn(runs[i]); var pr=projOnRun(runs[i],d.nx,d.ny);
-        if(pr.alongIn>=-6 && pr.alongIn<=L+6 && pr.perpIn<=runs[i].widthIn/2+12){ inside=true; break; } }
+        if(pr.alongIn>=-6 && pr.alongIn<=L+6 && pr.perpIn<=runs[i].widthIn/2+EXTRA){ inside=true; break; } }
       return inside || (d.score||0)>=HIGH;
     });
     return n0-window.__yoloDets.length;
@@ -4405,18 +4406,35 @@ function refreshSel(){
       for(var x=0;x<W;x+=stepT){ xs.push(Math.min(x,Math.max(0,W-TILE))); if(x+TILE>=W) break; }
       for(var y=0;y<H;y+=stepT){ ys.push(Math.min(y,Math.max(0,H-TILE))); if(y+TILE>=H) break; }
       xs=Array.from(new Set(xs)); ys=Array.from(new Set(ys));
-      // build the tile list, skipping tiles fully outside the work area
+      // green mask: when "scan only near traced duct" is on, keep only tiles that touch the green trace (+ padding for tags/corners)
+      var greenBoxes=null;
+      try{ if(($('yoloGreenOnly')||{}).checked){
+        var padPx=Math.max(220, 24*ptPerIn*rScale);   // ~2 ft real-world, min 220 render px — keeps size tags & corner fittings that sit beside the duct
+        greenBoxes=[];
+        (segments||[]).forEach(function(s){ if(s.cls!=='duct'||s.ux1==null) return;
+          var a=applyM(rvp.transform,s.ux1,s.uy1), b=applyM(rvp.transform,s.ux2,s.uy2);
+          greenBoxes.push([Math.min(a[0],b[0])-padPx-waOX, Math.min(a[1],b[1])-padPx-waOY, Math.max(a[0],b[0])+padPx-waOX, Math.max(a[1],b[1])+padPx-waOY]); });
+        if(!greenBoxes.length) greenBoxes=null;   // nothing traced green -> don't mask (scan all)
+      } }catch(_){ greenBoxes=null; }
+      window.__yoloGreenScoped = !!greenBoxes;   // green-scoped scan -> detections are pre-vetted near the trace, so the build can place more of them
+      // build the tile list, skipping tiles fully outside the work area (and, if on, outside the green mask)
       var tileList=[];
       for(var yi2=0;yi2<ys.length;yi2++){ for(var xi2=0;xi2<xs.length;xi2++){
         var tx0=xs[xi2], ty0=ys[yi2], tx1=tx0+TILE, ty1=ty0+TILE;
         if(WA && (tx1<WA.x0 || tx0>WA.x1 || ty1<WA.y0 || ty0>WA.y1)) continue;
+        if(greenBoxes){ var gh=false; for(var gi=0;gi<greenBoxes.length;gi++){ var g=greenBoxes[gi]; if(!(tx1<g[0]||tx0>g[2]||ty1<g[1]||ty0>g[3])){ gh=true; break; } } if(!gh) continue; }
         tileList.push([tx0,ty0]);
       }}
+      if(greenBoxes && !tileList.length){   // green mask killed everything — fall back to whole sheet rather than finding nothing
+        console.warn('[takeoff] green-only mask produced 0 tiles — scanning whole sheet instead');
+        for(var yg=0;yg<ys.length;yg++){ for(var xg=0;xg<xs.length;xg++){ tileList.push([xs[xg],ys[yg]]); }}
+      }
       if(WA && !tileList.length){   // work-area mapping produced no tiles — fall back to whole sheet rather than silently finding nothing
         console.warn('[takeoff] work area produced 0 tiles — scanning whole sheet instead');
         WA=null;
         for(var yi3=0;yi3<ys.length;yi3++){ for(var xi3=0;xi3<xs.length;xi3++){ tileList.push([xs[xi3],ys[yi3]]); }}
       }
+      if(greenBoxes) console.log('[takeoff] green-only scan: kept '+tileList.length+' of '+(xs.length*ys.length)+' tiles');
       var total=tileList.length, done=0, all=[];
       var tcv=document.createElement('canvas'); tcv.width=TILE; tcv.height=TILE; var tx=tcv.getContext('2d',{willReadFrequently:true});
       for(var ti=0;ti<tileList.length;ti++){
