@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.46</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.50</span></div>
    <label class="btn go" for="fileIn">Load PDF</label>
    <input type="file" id="fileIn" accept="application/pdf">
    <button class="btn" id="pagesBtn" disabled>Pages</button>
@@ -262,6 +262,19 @@
        <div class="hint"><b>Select</b>: click/drag to pick lines, then ✓ Duct / ✕ Not. <b>Paint Duct / Paint Not</b>: click a line or drag a box to set it directly — no second step. Your choices lock and win over the auto guess.</div>
      </div>
    </div>
+   <div class="sec" id="layerSec" style="display:none">
+     <h3>Layers <span id="layerCount" class="status"></span></h3>
+     <div class="row" style="margin-bottom:6px">
+       <button class="btn" id="autoL">Auto-detect duct</button>
+       <button class="btn" id="isoL">Isolate duct</button>
+     </div>
+     <div class="row" style="margin-bottom:6px">
+       <button class="btn" id="showAllL">Show all</button>
+       <button class="btn" id="hideAllL">Hide all</button>
+     </div>
+     <div id="layerList"></div>
+     <div class="hint">This PDF has layers. Toggle the eye to show/hide a layer on the sheet; tag one as <b>Duct</b> to feed it to the takeoff.</div>
+   </div>
    <div class="sec">
      <h3>Cleanup tools</h3>
      <div class="selbar">
@@ -322,7 +335,7 @@
        <div id="itemPanelBody" style="margin-top:7px"></div>
        <div style="margin-top:12px;border-top:1px solid #243;padding-top:10px">
          <div style="font-weight:700;color:#bfe6ff;font-size:13px;margin-bottom:5px">YOLO fitting detection</div>
-         <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="yoloShowChk"> Show detection boxes on the print <span style="opacity:.6">(off — detections still feed the builder)</span></label>
+         <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="yoloShowChk" checked> Show detection boxes on the print <span style="opacity:.6">(off — detections still feed the builder)</span></label>
          <div style="font-size:12px;color:#9fb2c8;margin-bottom:6px">Use fittings scoring ≥ <input type="range" id="yoloUseMin" min="0.05" max="1" step="0.01" value="0.10" style="width:96px;vertical-align:middle"> <span id="yoloUseMinV" style="font-family:ui-monospace,monospace">0.10</span><div class="hint" style="margin-top:2px">Lower = surface more fittings (incl. low-confidence taps) — you can delete false ones. Filters the boxes and what Build uses. Re-build to apply to the takeoff.</div></div>
          <div class="row" style="display:flex;gap:6px;align-items:center">
            <button class="btn" id="yoloLoadBtn" style="flex:1">Load best.onnx</button>
@@ -538,10 +551,12 @@ async function buildLayerMaster(){
 }
 
 function renderLayerPanel(){
-  const wrap=$('layerList'); wrap.innerHTML='';
+  const sec=$('layerSec'); const wrap=$('layerList');
   const ids=Object.keys(layers);
+  if(sec) sec.style.display = ids.length ? '' : 'none';   // Layers section appears only when the PDF actually has layers
+  if(!wrap) return;
+  wrap.innerHTML='';
   if(!ids.length){
-    wrap.innerHTML='<div class="hint">No PDF layers on this document. Use the width filter + selection to mark duct lines manually.</div>';
     if($('layerCount'))$('layerCount').textContent='(0)'; return;
   }
   // Show only layers actually drawn on this page; fall back to all if tagging missed
@@ -2329,10 +2344,9 @@ function refreshSel(){
       for(qi=0;qi<pieceList.length;qi++){ if(pieceList[qi].kind==='straight'){ fs=pieceList[qi]; break; } }
       var trim=fs?Math.max(0,Math.min(halfIn,(fs.lenIn||0)-1)):0; if(fs&&trim>0) fs.lenIn=Math.round(((fs.lenIn||0)-trim)*10)/10;
       var hp=inToPt(trim), startPt=[splitPt[0]+dir[0]*hp, splitPt[1]+dir[1]*hp];
-      var tapRef={kind:'fitting',cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:aBW,depthIn:(aBD!=null?aBD:aBW),size:(bR?('\u00f8'+aBW):(aBW+'\u00d7'+(aBD!=null?aBD:aBW))),_tap:true,_tapRef:true,branchSide:side,branchW:aBW,mainRound:rr,branchRound:bR};
       branches.push({ id:'br'+Date.now().toString(36)+Math.floor(Math.random()*1e4)+branches.length, start:startPt, dir:[dir[0],dir[1]], widthIn:aBW, color:color,
         sectionId:cross.sectionId, sectionLabel:cross.sectionLabel, pressureClass:cross.pressureClass, liner:cross.liner,
-        pieces:[tapRef].concat(pieceList), _branch:true, _tapRunId:trunk.id });
+        pieces:pieceList, _branch:true, _tapRunId:trunk.id });   // arms are plain branches — the two taps live on the trunk (no ref tap here, or you'd count 4)
       sides.push(side); }
     if(cpi>=0){
       var arm2=[], rem=(cross.pieces[cpi].lenIn||0)-cAlong;                        // P -> cross end (forward)
@@ -3009,7 +3023,7 @@ function refreshSel(){
     renderItems();
     var lay=document.getElementById('itemLayer');
     cleanFlagged.forEach(function(id){ var run=findRun(id); if(!run)return;
-      run.pieces.forEach(function(p,i){ var pts=piecePolyPts(run,i); if(pts.some(function(q){return !q;}))return;
+      run.pieces.forEach(function(p,i){ if(p._tapRef) return; var pts=piecePolyPts(run,i); if(pts.some(function(q){return !q;}))return;
         var hl=document.createElementNS(ns,'path'); hl.setAttribute('d','M'+pts.map(function(q){return q[0].toFixed(1)+' '+q[1].toFixed(1);}).join('L')+'Z');
         hl.setAttribute('fill','rgba(255,45,45,.18)'); hl.setAttribute('stroke','#ff2d2d'); hl.setAttribute('stroke-width','2.5'); hl.setAttribute('stroke-dasharray','5 4'); hl.setAttribute('pointer-events','none'); lay.appendChild(hl);
       });
@@ -3376,9 +3390,9 @@ function refreshSel(){
             var _isElb=(pc.cid==='e90'||pc.cid==='e45'||pc._elbow);
             var _ex=(pc.outW?(' \u2192'+pc.outW+(pc.cid==='s2r'?'\u00f8':'x'+(pc.outD||pc.outW))):'');
             if(_isElb){
-              h+='<span onclick="__pcElbowEdit(\''+run.id+'\','+i+',event)" title="Click to change angle (45/90) or flip direction" style="flex:1;font-size:11px;color:#f5b342;cursor:pointer;text-decoration:underline dotted #f5b34288">\u25c8 '+vh(pc.camduct||pc.cid)+_ex+' \u25be</span>';
+              h+='<span onclick="__pcFitEdit(\''+run.id+'\','+i+',event)" title="Click to change type, angle/direction, or size" style="flex:1;font-size:11px;color:#f5b342;cursor:pointer;text-decoration:underline dotted #f5b34288">\u25c8 '+vh(pc.camduct||pc.cid)+_ex+' \u25be</span>';
             } else {
-              h+='<span style="flex:1;font-size:11px;color:#f5b342">\u25c8 '+vh(pc.camduct||pc.cid)+_ex+(pc._damper&&pc.rodIn?(' \u00b7 rod '+pc.rodIn+'\u2033'):'')+'</span>';
+              h+='<span onclick="__pcFitEdit(\''+run.id+'\','+i+',event)" title="Click to change type or size" style="flex:1;font-size:11px;color:#f5b342;cursor:pointer;text-decoration:underline dotted #f5b34288">\u25c8 '+vh(pc.camduct||pc.cid)+_ex+(pc._damper&&pc.rodIn?(' \u00b7 rod '+pc.rodIn+'\u2033'):'')+' \u25be</span>';
             }
           }
           h+='<button onclick="__pcIns(\''+run.id+'\','+i+',event)" style="border:none;background:#243;color:#9f9;border-radius:4px;cursor:pointer;padding:2px 5px">+</button>'
@@ -3448,6 +3462,57 @@ function refreshSel(){
     window.__pushRunUndo&&window.__pushRunUndo();
     p.turn=Math.atan2(crs,dot); p._elbow=true;               // rotates the outgoing leg + everything downstream about this elbow's vertex
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Pointed the elbow leg that way.');
+  };
+  window.__pcFitEdit=function(id,i,ev){            // click any inserted fitting -> change its type / size / delete
+    var r=findRun(id); if(!r) return; var p=r.pieces[i]; if(!p||p.kind!=='fitting') return;
+    try{ if(window.__pcFitMenuEl){ window.__pcFitMenuEl.remove(); window.__pcFitMenuEl=null; } }catch(_){}
+    var x=(ev&&ev.clientX)||220, y=(ev&&ev.clientY)||150; if(ev&&ev.stopPropagation) ev.stopPropagation();
+    var m=document.createElement('div'); window.__pcFitMenuEl=m;
+    m.style.cssText='position:fixed;z-index:100002;left:'+Math.max(6,Math.min(x,window.innerWidth-208))+'px;top:'+Math.max(6,Math.min(y,window.innerHeight-370))+'px;background:#0e1c2b;border:1px solid #2b6aa0;border-radius:9px;padding:9px;box-shadow:0 10px 30px rgba(0,0,0,.5);font:12px system-ui,sans-serif;width:190px';
+    function close(){ try{m.remove();}catch(_){} window.__pcFitMenuEl=null; document.removeEventListener('mousedown',out,true); }
+    function out(e){ if(!m.contains(e.target)) close(); }
+    var isElb=(p.cid==='e90'||p.cid==='e45'||p._elbow);
+    var head=document.createElement('div'); head.textContent='Fitting: '+(p.camduct||p.cid||'?'); head.style.cssText='font-weight:800;color:#bfe0ff;margin-bottom:6px'; m.appendChild(head);
+    var srow=document.createElement('div'); srow.style.cssText='display:flex;gap:4px;margin-bottom:7px';
+    var si=document.createElement('input'); si.value=(p.size||''); si.placeholder='12 = \u00f8 \u00b7 12x8 = rect'; si.style.cssText='flex:1;padding:5px;border:1px solid #345;border-radius:5px;background:#0e1923;color:#fff;font-size:11px';
+    var sb=document.createElement('button'); sb.textContent='Set'; sb.style.cssText='padding:5px 9px;border:none;border-radius:5px;background:#1b8a4a;color:#fff;cursor:pointer;font-weight:600';
+    function applySize(raw){ raw=String(raw||'').trim(); var er=/[o\u00f8]/i.test(raw)||/round/i.test(raw), rc=/\d\s*[x\u00d7\/]\s*\d/i.test(raw), nums=raw.match(/\d+(\.\d+)?/g); if(!nums||!nums.length) return;
+      var rnd=er?true:(rc?false:(nums.length<2)), w=parseFloat(nums[0]), d=rnd?w:(nums[1]?parseFloat(nums[1]):w);
+      window.__pushRunUndo&&window.__pushRunUndo(); p.widthIn=w; p.depthIn=d; p.round=rnd; p.size=rnd?('\u00f8'+w):(w+'\u00d7'+d);
+      if(p._sizeStep||p.cid==='tr'||p.cid==='reducer'||p.cid==='s2r'){ p.outW=w; p.outD=d; }
+      if(p._tap||p.cid==='stap'){ p.branchW=w; }
+      if(p._damper){ p.rodIn=Math.round((w+4)*10)/10; }
+      renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Fitting size \u2192 '+p.size+'.'); }
+    sb.onclick=function(e){ e.stopPropagation(); applySize(si.value); close(); };
+    si.onkeydown=function(e){ if(e.key==='Enter'){ e.stopPropagation(); applySize(si.value); close(); } };
+    srow.appendChild(si); srow.appendChild(sb); m.appendChild(srow);
+    var tl=document.createElement('div'); tl.textContent='Change type'; tl.style.cssText='font-size:10px;color:#8aa3b8;margin:1px 0 4px'; m.appendChild(tl);
+    var TYPES=[['90\u00b0 Elbow','e90'],['45\u00b0 Elbow','e45'],['Tap','stap'],['Tee','sqt'],['Transition','tr'],['Reducer','reducer'],['Sq\u2192Round','s2r'],['Offset','offset'],['End Cap','cap'],['Damper','damper']];
+    var grid=document.createElement('div'); grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:3px';
+    function setType(code){ window.__pushRunUndo&&window.__pushRunUndo();
+      delete p._tap; delete p._elbow; delete p._cap; delete p._damper; p.turn=0;
+      var NM={e90:'Square Elbow',e45:'Angled Elbow',stap:'Tap',sqt:'Tee',tr:'Transition',reducer:'Reducer',s2r:'Square to Round - 2pc',offset:'Offset',cap:'End Cap',damper:'Rect Damper Loose'};
+      p.cid=code; p.camduct=NM[code]||code;
+      if(code==='e90'){ p._elbow=true; p.turn=Math.PI/2; }
+      else if(code==='e45'){ p._elbow=true; p.turn=Math.PI/4; }
+      else if(code==='stap'){ p._tap=true; p.branchW=p.branchW||Math.max(6,Math.round((p.widthIn||12)/2)); p.mainRound=!!p.round; }
+      else if(code==='sqt'){ p.branchW=p.branchW||Math.max(6,Math.round((p.widthIn||12)/2)); }
+      else if(code==='cap'){ p._cap=true; }
+      else if(code==='damper'){ p._damper=true; p.rodIn=Math.round(((p.widthIn||12)+4)*10)/10; }
+      else if(code==='tr'||code==='reducer'||code==='s2r'){ p.inW=p.inW||p.widthIn; p.inD=(p.inD!=null?p.inD:p.depthIn); p.outW=p.outW||p.widthIn; p.outD=(p.outD!=null?p.outD:p.depthIn); }
+      renderItems(); renderPanel();
+      if(code==='e90'||code==='e45'){ setTimeout(function(){ try{window.__pcElbowEdit(id,i,ev);}catch(_){} },30); }
+      if(typeof setStatus==='function')setStatus('Changed to '+p.camduct+'.'); }
+    TYPES.forEach(function(t){ var b=document.createElement('button'); b.textContent=t[0]; var cur=(p.cid===t[1]);
+      b.style.cssText='padding:6px 4px;border:1px solid '+(cur?'#5a8fd0':'#24455f')+';border-radius:5px;background:'+(cur?'#173654':'#12314b')+';color:#bfe0ff;cursor:pointer;font-size:11px';
+      b.onclick=function(e){ e.stopPropagation(); setType(t[1]); close(); }; grid.appendChild(b); });
+    m.appendChild(grid);
+    if(isElb){ var ab=document.createElement('button'); ab.textContent='Aim direction / angle\u2026'; ab.style.cssText='display:block;width:100%;margin-top:7px;padding:7px;border:none;border-radius:5px;background:#123b2b;color:#bfffe6;cursor:pointer;font-weight:600';
+      ab.onclick=function(e){ e.stopPropagation(); close(); setTimeout(function(){ try{window.__pcElbowEdit(id,i,ev);}catch(_){} },0); }; m.appendChild(ab); }
+    var db=document.createElement('button'); db.textContent='Delete fitting'; db.style.cssText='display:block;width:100%;margin-top:6px;padding:7px;border:none;border-radius:5px;background:#3a1e1e;color:#ffb0b0;cursor:pointer;font-weight:600';
+    db.onclick=function(e){ e.stopPropagation(); close(); try{window.__pcDel(id,i);}catch(_){} }; m.appendChild(db);
+    setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
+    document.body.appendChild(m);
   };
   window.__pcElbowEdit=function(id,i,ev){            // click an elbow row in the panel -> tiny menu: change 45/90, point leg any of 4 ways
     var r=findRun(id); if(!r) return; var p=r.pieces[i]; if(!p) return;
@@ -4155,6 +4220,7 @@ function refreshSel(){
 
   // ---- load model ----
   $('yoloLoadBtn') && ($('yoloLoadBtn').onclick=function(){ $('yoloFile').click(); });
+  window.__yoloVisible=true;
   $('yoloShowChk') && ($('yoloShowChk').onchange=function(){ window.__yoloVisible=this.checked; try{renderYolo();}catch(e){} });
   window.__yoloMinScore=0.10;
   window.__applyYoloFilter=function(){ var all=window.__yoloAll||window.__yoloDets||[]; if(!window.__yoloAll) window.__yoloAll=all.slice();
