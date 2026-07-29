@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.64</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.65</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2944,12 +2944,28 @@ function refreshSel(){
       var hits=[];
       runs.forEach(function(r){ var L=runLenIn(r); var pr=projOnRun(r,d.nx,d.ny);
         if(pr.alongIn>=-24 && pr.alongIn<=L+24 && Math.abs(pr.perpIn)<=(r.widthIn/2+24)) hits.push({r:r, pr:pr}); });
+      if(hits.length===0){
+        // no run UNDER the elbow — but a run whose END points at it from a few feet away means the
+        // run just stopped short of the corner (partial pairing). Adopt it and extend it to the corner.
+        var cand=null;
+        runs.forEach(function(r){ var L=runLenIn(r); var pr=projOnRun(r,d.nx,d.ny);
+          if(Math.abs(pr.perpIn)>(r.widthIn/2+24)) return;                      // must be on the run's axis
+          var beyond=(pr.alongIn<0)?(-pr.alongIn):(pr.alongIn>L?(pr.alongIn-L):0);
+          if(beyond<1||beyond>84) return;                                       // 1..84in past an end = stopped short
+          if(!cand||beyond<cand.beyond) cand={r:r, pr:pr, beyond:beyond, atStart:(pr.alongIn<0)}; });
+        if(cand){ var xr=cand.r, gapIn=Math.round(cand.beyond*10)/10;
+          if(cand.atStart){ xr.start=[xr.start[0]-xr.dir[0]*inToPt(gapIn), xr.start[1]-xr.dir[1]*inToPt(gapIn)];
+            for(var fs1=0;fs1<xr.pieces.length;fs1++){ if(xr.pieces[fs1].kind==='straight'){ xr.pieces[fs1].lenIn=Math.round((xr.pieces[fs1].lenIn+gapIn)*10)/10; break; } } }
+          else { for(var fs2=xr.pieces.length-1;fs2>=0;fs2--){ if(xr.pieces[fs2].kind==='straight'){ xr.pieces[fs2].lenIn=Math.round((xr.pieces[fs2].lenIn+gapIn)*10)/10; break; } } }
+          hits.push({r:xr, pr:projOnRun(xr,d.nx,d.ny)});
+        }
+      }
       if(hits.length!==1) return;
       var M=hits[0].r, pr=hits[0].pr, t=inToPt(Math.max(0,Math.min(runLenIn(M),pr.alongIn)));
       var C=[M.start[0]+M.dir[0]*t, M.start[1]+M.dir[1]*t];                   // corner point on the main run's centerline
       var pd=[-M.dir[1], M.dir[0]];                                           // perpendicular
       // measure GREEN support along +pd and -pd from C: perpendicular-oriented duct lines in a corridor
-      var corridorPt=inToPt((M.widthIn||12)/2+14), maxLegPt=inToPt(20*12), minSupPt=inToPt(30);
+      var corridorPt=inToPt((M.widthIn||12)/2+14), maxLegPt=inToPt(20*12), minSupPt=inToPt(20);   // 20in: short stub legs (e.g. a 2'5" leg to a drop) are real
       function support(sgn){ var ext=0;
         for(var i=0;i<segments.length;i++){ var s=segments[i]; if(s.cls!=='duct'||s.nx1==null) continue;
           var vx=s.nx2-s.nx1, vy=s.ny2-s.ny1, sl=Math.hypot(vx,vy); if(sl<6) continue;
