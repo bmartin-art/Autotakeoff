@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.77</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.79</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2842,6 +2842,8 @@ function refreshSel(){
     var nArc = 0; try{ nArc = arcCornerJoins(); }catch(e){ console.warn('arcCornerJoins', e); }
     var nBr = 0; try{ nBr = bridgeSizechanges(); }catch(e){ console.warn('bridgeSizechanges', e); }
     var nTb = 0; try{ nTb = bridgeTaps(); }catch(e){ console.warn('bridgeTaps', e); }
+    var nInf = 0; try{ nInf = inferCornersFromEnds(); }catch(e){ console.warn('inferCorners', e); }
+    var nMg = 0; try{ nMg = mergeElbowJoins(); }catch(e){ console.warn('mergeElbowJoins', e); }
     var nFit = integrateYoloFittings();
     var nCarry = 0;   // DISABLED: a no-tag run keeps its OWN green-line width (was inheriting a nearby tagged run's size, overriding the measured gap). Height stays unknown — set via ✎ resize.
     var nDrop = dropUnsupportedRuns();
@@ -3212,6 +3214,111 @@ function refreshSel(){
     return relabeled+dropped;
   }
   window.__sanitizeYoloDets=sanitizeYoloDets;
+  // ---- MERGE ELBOW JOINS: turn recorded corners into ONE continuous run — trunk pieces, a real
+  // elbow piece (signed turn), then the branch's pieces. The branch run is absorbed and removed.
+  // Runs whose corner-end is their 'start' are used as the second leg (no reversal needed); when
+  // both corner-ends are 'end'/'start', the simpler leg (straights + inline fittings only) is
+  // reversed. Corners that can't merge safely stay as visual/export joins — nothing is lost. ----
+  function headingAtEndOf(run){ var ux=run.dir[0], uy=run.dir[1];
+    for(var i=0;i<run.pieces.length;i++){ var p=run.pieces[i]; if(p.kind==='fitting'&&p.turn){ var a=p.turn,c=Math.cos(a),s=Math.sin(a),rx=ux*c-uy*s,ry=ux*s+uy*c; ux=rx; uy=ry; } }
+    return [ux,uy]; }
+  function runReversible(run){ return run.pieces.every(function(p){ return p.kind==='straight' || (p.kind==='fitting' && !p.turn && !p._tap && !p._offset && p.cid!=='offset'); }); }
+  function reverseRun(run){ // safe only for runReversible() runs (straights + inline size-steps)
+    var e=runEnd(run); run.start=[e.x,e.y]; run.dir=[-run.dir[0],-run.dir[1]];
+    run.pieces.reverse();
+    run.pieces.forEach(function(p){ if(p.kind==='fitting'&&p._sizeStep){ var t;
+      t=p.inW; p.inW=p.outW; p.outW=t; t=p.inD; p.inD=p.outD; p.outD=t;
+      p._newW=p.outW; p._newD=p.outD; } });
+    return run; }
+  function mergeElbowJoins(){
+    var J=window.__elbowJoins||[]; if(!J.length) return 0;
+    var merged=0, guard=0;
+    while(guard++<12){
+      var did=false;
+      for(var ji=0;ji<J.length;ji++){ var j=J[ji];
+        var A=findRun(j.trunkId), B=findRun(j.branchId); if(!A||!B||A===B){ continue; }
+        var C=[j.atX,j.atY], eA=runEnd(A), eB=runEnd(B);
+        var dAs=Math.hypot(A.start[0]-C[0],A.start[1]-C[1]), dAe=Math.hypot(eA.x-C[0],eA.y-C[1]);
+        var dBs=Math.hypot(B.start[0]-C[0],B.start[1]-C[1]), dBe=Math.hypot(eB.x-C[0],eB.y-C[1]);
+        var aEnd=(dAe<=dAs)?'end':'start', bEnd=(dBe<=dBs)?'end':'start';
+        var first=null, second=null;                         // first walks INTO C at its 'end'; second leaves C from its 'start'
+        if(aEnd==='end'&&bEnd==='start'){ first=A; second=B; }
+        else if(bEnd==='end'&&aEnd==='start'){ first=B; second=A; }
+        else if(aEnd==='end'&&bEnd==='end'){ if(runReversible(B)){ first=A; second=reverseRun(B); } else if(runReversible(A)){ first=B; second=reverseRun(A); } }
+        else { /* both starts */ if(runReversible(A)){ first=reverseRun(A); second=B; } else if(runReversible(B)){ first=reverseRun(B); second=A; } }
+        if(!first||!second) continue;
+        window.__pushRunUndo&&window.__pushRunUndo();
+        // absorb the corner gap: extend first's last straight to reach C; shift second's lead-in from C
+        var fe=runEnd(first), inH=headingAtEndOf(first);
+        var gapA=((C[0]-fe.x)*inH[0]+(C[1]-fe.y)*inH[1])/ (6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125));
+        for(var k1=first.pieces.length-1;k1>=0;k1--){ if(first.pieces[k1].kind==='straight'){ first.pieces[k1].lenIn=Math.max(1, Math.round((first.pieces[k1].lenIn+gapA)*10)/10); break; } }
+        var outH=[second.dir[0],second.dir[1]];
+        var gapB=((second.start[0]-C[0])*outH[0]+(second.start[1]-C[1])*outH[1])/(6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125));
+        for(var k2=0;k2<second.pieces.length;k2++){ if(second.pieces[k2].kind==='straight'){ second.pieces[k2].lenIn=Math.max(1, Math.round((second.pieces[k2].lenIn+gapB)*10)/10); break; } }
+        var turn=Math.atan2(inH[0]*outH[1]-inH[1]*outH[0], inH[0]*outH[0]+inH[1]*outH[1]);
+        var is45=Math.abs(Math.abs(turn)-Math.PI/4) < Math.abs(Math.abs(turn)-Math.PI/2);
+        var rr=!!j.round, w=j.widthIn||first.widthIn||12;
+        var lastW=w, lastD=null; for(var k3=first.pieces.length-1;k3>=0;k3--){ if(first.pieces[k3].kind==='straight'){ lastW=first.pieces[k3].widthIn||w; lastD=first.pieces[k3].depthIn; break; } }
+        var elbow={kind:'fitting',cid:(is45?'e45':'e90'),camduct:(rr?(is45?'45o Fixed Elbow':'90o Fixed Elbow'):(is45?'Angled Elbow':'Square Elbow')),round:rr,lenIn:0,turn:turn,widthIn:lastW,depthIn:lastD,size:(rr?('\u00f8'+lastW):(lastW+'\u00d7'+(lastD!=null?lastD:lastW))),_elbow:true,_fromJoin:true};
+        first.pieces.push(elbow);
+        second.pieces.forEach(function(p){ first.pieces.push(p); });
+        if(!first.sectionLabel && second.sectionLabel){ first.sectionLabel=second.sectionLabel; first.sectionId=second.sectionId; }
+        if(!first.pressureClass && second.pressureClass) first.pressureClass=second.pressureClass;
+        if(!first.liner && second.liner) first.liner=second.liner;
+        var dead=second.id, keepId=first.id;
+        window.__runs2d=(window.__runs2d||[]).filter(function(r){ return r.id!==dead; });
+        J.forEach(function(oj){ if(oj!==j){ if(oj.trunkId===dead) oj.trunkId=keepId; if(oj.branchId===dead) oj.branchId=keepId; } });
+        J.splice(ji,1);                                       // this corner is now a physical piece
+        merged++; did=true; break;
+      }
+      if(!did) break;
+    }
+    if(merged){ try{ selRun=null; }catch(_){}
+      console.log('[takeoff] merged '+merged+' corner(s) into continuous runs'); }
+    return merged;
+  }
+  window.__mergeElbowJoins=mergeElbowJoins;
+  // ---- CORNER INFERENCE FROM RUN ENDS: large-radius (fabric/round) elbows are often drawn as
+  // flattened polylines — no curves for the arc detector, too big/smooth for YOLO. But the two legs
+  // always point at each other: two roughly-perpendicular run ends whose FORWARD centerline
+  // extensions intersect within a few feet of both ends is a corner, whatever the arc was drawn as. ----
+  function inferCornersFromEnds(){
+    var runs=window.__runs2d||[]; if(runs.length<2) return 0;
+    function outEnds(r){ var e=runEnd(r), h=headingAtEndOf(r);
+      return [{p:[r.start[0],r.start[1]], out:[-r.dir[0],-r.dir[1]], r:r},
+              {p:[e.x,e.y], out:[h[0],h[1]], r:r}]; }
+    var ends=[]; runs.forEach(function(r){ outEnds(r).forEach(function(E){ ends.push(E); }); });
+    var made=0, J=window.__elbowJoins=window.__elbowJoins||[];
+    var MAXR=inToPt(96), MINR=inToPt(4);
+    for(var i=0;i<ends.length;i++){ for(var k=i+1;k<ends.length;k++){
+      var A=ends[i], B=ends[k]; if(A.r===B.r) continue;
+      var dot=A.out[0]*B.out[0]+A.out[1]*B.out[1]; if(Math.abs(dot)>0.5) continue;         // ~perpendicular legs only
+      // forward intersection P of the two extensions: A.p + tA*A.out = B.p + tB*B.out
+      var det=A.out[0]*(-B.out[1]) - (-B.out[0])*A.out[1]; if(Math.abs(det)<1e-9) continue;
+      var bx=B.p[0]-A.p[0], by=B.p[1]-A.p[1];
+      var tA=(bx*(-B.out[1]) - (-B.out[0])*by)/det;
+      var tB=(A.out[0]*by - A.out[1]*bx)/det;
+      if(tA<MINR||tA>MAXR||tB<MINR||tB>MAXR) continue;                                      // P must be FORWARD of both ends, within a few feet
+      var P=[A.p[0]+A.out[0]*tA, A.p[1]+A.out[1]*tA];
+      // shape/width agreement: a corner connects the same duct
+      function rndOf(r){ return !!(r.pieces&&r.pieces.some(function(p){return p.kind==='straight'&&p.round;})); }
+      var rA=rndOf(A.r), rB=rndOf(B.r); if(rA!==rB) continue;
+      var wA=A.r.widthIn||12, wB=B.r.widthIn||12; if(Math.max(wA,wB) > Math.min(wA,wB)*1.6+2) continue;
+      // skip if a corner is already recorded here, or another run's BODY passes through P (that's a tee, not a corner)
+      var dup=false; for(var jj=0;jj<J.length;jj++){ if(Math.hypot((J[jj].atX||0)-P[0],(J[jj].atY||0)-P[1])<=inToPt(24)){ dup=true; break; } }
+      if(dup) continue;
+      var body=false; for(var rr2=0;rr2<runs.length;rr2++){ var R=runs[rr2]; if(R===A.r||R===B.r) continue;
+        var pr=projOnRun(R,P[0],P[1]); var L=runLenIn(R);
+        if(pr.alongIn>=6 && pr.alongIn<=L-6 && Math.abs(pr.perpIn)<=(R.widthIn/2+6)){ body=true; break; } }
+      if(body) continue;
+      var turn=Math.atan2(A.out[0]*(-B.out[1])-A.out[1]*(-B.out[0]), A.out[0]*(-B.out[0])+A.out[1]*(-B.out[1]));
+      J.push({ trunkId:A.r.id, branchId:B.r.id, atX:P[0], atY:P[1], turn:turn, round:rA, widthIn:Math.max(wA,wB), _inferred:true });
+      made++;
+    } }
+    if(made) console.log('[takeoff] inferred '+made+' corner(s) from run-end geometry (flattened-arc elbows)');
+    return made;
+  }
+  window.__inferCornersFromEnds=inferCornersFromEnds;
 
   // ---- STAGE 5 CARRY-FORWARD: a run with no tag of its own inherits the size of the run it
   // connects to at a shared endpoint (a branch holds the trunk size until a real sizechange).
@@ -4456,8 +4563,10 @@ function refreshSel(){
     try{ _rBr=(window.__bridgeSizechanges?window.__bridgeSizechanges():0)||0; }catch(e){ console.warn('bridge',e); }
     var _rTap=0; try{ _rTap=(window.__bridgeTaps?window.__bridgeTaps():0)||0; }catch(e){ console.warn('tapbridge',e); }
     if(_rJoin||_rSyn||_rArc||_rBr||_rTap) console.log('[takeoff recovery] corners:'+_rJoin+' legs:'+_rSyn+' arc-elbows:'+_rArc+' reducer-bridges:'+_rBr+' tap-bridges:'+_rTap);
+    var _rInf=0; try{ _rInf=(window.__inferCornersFromEnds?window.__inferCornersFromEnds():0)||0; }catch(e){ console.warn('infer',e); }
+    var _rMg=0; try{ _rMg=(window.__mergeElbowJoins?window.__mergeElbowJoins():0)||0; }catch(e){ console.warn('merge',e); }
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled'+(__keep.TWdropped.length?(' \u00b7 '+__keep.TWdropped.length+' unsupported dropped'):'')+(__keep.TWflagged?(' \u00b7 '+__keep.TWflagged+' flagged'):'')+((_rJoin+_rSyn+_rArc+_rBr+_rTap)?(' \u00b7 recovered: '+_rJoin+' corner(s), '+_rSyn+' leg(s), '+_rArc+' arc elbow(s), '+_rBr+' reducer bridge(s), '+_rTap+' tap bridge(s)'):'')+'.'); try{ __ductDiag('track-walk'); }catch(e){}
+    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled'+(__keep.TWdropped.length?(' \u00b7 '+__keep.TWdropped.length+' unsupported dropped'):'')+(__keep.TWflagged?(' \u00b7 '+__keep.TWflagged+' flagged'):'')+((_rJoin+_rSyn+_rArc+_rBr+_rTap)?(' \u00b7 recovered: '+_rJoin+' corner(s), '+_rSyn+' leg(s), '+_rArc+' arc elbow(s), '+_rBr+' reducer bridge(s), '+_rTap+' tap bridge(s)'):'')+((typeof _rInf!=='undefined'&&_rInf)?(' \u00b7 '+_rInf+' corner(s) inferred from geometry'):'')+((typeof _rMg!=='undefined'&&_rMg)?(' \u00b7 '+_rMg+' corner(s) merged into one run'):'')+'.'); try{ __ductDiag('track-walk'); }catch(e){}
   }
   // ── DIAGNOSTICS — why is duct missing / doubling? Structured coverage + overlap dump.
   // Auto-runs after each build; re-run anytime from the console with __ductDiag().
