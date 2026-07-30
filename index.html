@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.67</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.68</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -451,7 +451,9 @@ function analyzeVectorDarkness(){
   var min=segments.length*0.015; var big=levels.filter(function(L){return H[L]>=min;});
   // informative only if there's a meaningful non-black cluster (something clearly lighter than near-black)
   var nonBlack=0; for(var k=0;k<segments.length;k++){ var vv=segments[k].vdark; if(vv==null)vv=1; if(vv<0.8) nonBlack++; }
-  if(big.length<2 || nonBlack < segments.length*0.03){ return; }   // flat / single-color print -> fall back to raster sampling
+  if(big.length<2 || nonBlack < segments.length*0.03){
+    try{ setStatus('No usable vector stroke color on this print ('+big.length+' cluster'+(big.length===1?'':'s')+', '+Math.round(nonBlack*100/(segments.length||1))+'% non-black) \u2014 darkness comes from RASTER sampling. If gray lines green wrongly here, this is why: send me the console line.'); }catch(_){}
+    return; }   // flat / single-color print -> fall back to raster sampling
   // cutoff sits just ABOVE the background (lighter) cluster of the largest gap — anything darker than
   // the page background counts as ink. Using the midpoint dropped walls that render mid-gray (~0.65).
   // IMPORTANT: place the gap among INK levels only (vdark >= 0.2). White/near-white lines are invisible
