@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.66</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.67</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -464,6 +464,9 @@ function analyzeVectorDarkness(){
   window.VEC_COLOR=true;
   var bt=document.getElementById('blkThresh'); if(bt){ bt.value=cut.toFixed(2); }
   var bo=document.getElementById('blackOnly'); if(bo){ bo.checked=true; }
+  try{ var __hh={}; for(var __i=0;__i<segments.length;__i++){ var __v=segments[__i].vdark; if(__v==null)__v=1; var __b=(Math.round(__v*20)/20).toFixed(2); __hh[__b]=(__hh[__b]||0)+1; }
+    var __tot=segments.length||1, __top=Object.keys(__hh).sort(function(x,y){return __hh[y]-__hh[x];}).slice(0,5).map(function(k){return k+':'+Math.round(__hh[k]*100/__tot)+'%';}).join('  ');
+    console.log('[takeoff darkness] vdark clusters -> '+__top+'  | VEC_COLOR='+(!!window.VEC_COLOR)); }catch(__e){}
   try{ setStatus('Vector color detected ('+big.length+' shades) \u2014 using exact stroke colors (vector authoritative), cutoff auto-set to '+cut.toFixed(2)+'.'); }catch(e){}
 }
 
@@ -801,6 +804,9 @@ async function extractVectors(page){
     else if(OPS.setStrokeGray!==undefined && fn===OPS.setStrokeGray){ var _g=(a&&a[0]&&a[0].length)?a[0][0]:a[0]; if(_g>1)_g/=255; strokeDark=1-(_g||0); strokeRGB=[_g||0,_g||0,_g||0]; }
     else if(OPS.setStrokeRGBColor!==undefined && fn===OPS.setStrokeRGBColor){ var _c=(a&&a.length===1&&a[0]&&a[0].length>=3)?a[0]:a; var _r=_c[0],_gg=_c[1],_b=_c[2]; if(_r>1||_gg>1||_b>1){_r/=255;_gg/=255;_b/=255;} strokeDark=1-(0.299*_r+0.587*_gg+0.114*_b); strokeRGB=[_r||0,_gg||0,_b||0]; }
     else if(OPS.setStrokeCMYKColor!==undefined && fn===OPS.setStrokeCMYKColor){ var _aa=(a&&a.length===1&&a[0]&&a[0].length)?a[0]:a; var _cc=_aa[0]||0,_mm=_aa[1]||0,_yy=_aa[2]||0,_k=_aa[3]||0,_mx=Math.max(_cc,_mm,_yy); strokeDark=1-((1-_k)*(1-_mx)); strokeRGB=[(1-_cc)*(1-_k),(1-_mm)*(1-_k),(1-_yy)*(1-_k)]; }
+    else if(OPS.setStrokeColor!==undefined && fn===OPS.setStrokeColor){ var _sc=(a&&a.length===1&&a[0]&&a[0].length)?a[0]:a;
+      if(_sc&&_sc.length>=3){ var _r3=_sc[0],_g3=_sc[1],_b3=_sc[2]; if(_r3>1||_g3>1||_b3>1){_r3/=255;_g3/=255;_b3/=255;} strokeDark=1-(0.299*_r3+0.587*_g3+0.114*_b3); strokeRGB=[_r3||0,_g3||0,_b3||0]; }
+      else if(_sc&&_sc.length>=1&&typeof _sc[0]==='number'){ var _g5=_sc[0]; if(_g5>1)_g5/=255; strokeDark=1-_g5; strokeRGB=[_g5||0,_g5||0,_g5||0]; } }
     else if(OPS.setStrokeColorN!==undefined && fn===OPS.setStrokeColorN){ var _n=(a&&a.length===1&&a[0]&&a[0].length)?a[0]:a; if(_n&&_n.length>=4){ var _k2=_n[3]||0,_m2=Math.max(_n[0]||0,_n[1]||0,_n[2]||0); strokeDark=1-((1-_k2)*(1-_m2)); strokeRGB=[(1-(_n[0]||0))*(1-_k2),(1-(_n[1]||0))*(1-_k2),(1-(_n[2]||0))*(1-_k2)]; } else if(_n&&_n.length>=3){ var _r2=_n[0],_g2=_n[1],_b2=_n[2]; if(_r2>1||_g2>1||_b2>1){_r2/=255;_g2/=255;_b2/=255;} strokeDark=1-(0.299*_r2+0.587*_g2+0.114*_b2); strokeRGB=[_r2||0,_g2||0,_b2||0]; } else if(_n&&_n.length>=1){ var _g4=_n[0]; if(_g4>1)_g4/=255; strokeDark=1-_g4; strokeRGB=[_g4||0,_g4||0,_g4||0]; } }
     else if(fn===OPS.beginMarkedContentProps){
       // a = [tag, properties]; optional content if tag === 'OC'
