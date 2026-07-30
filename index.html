@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.76</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.77</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2836,6 +2836,7 @@ function refreshSel(){
     }catch(e){ console.log('[takeoff sizing] diag error', e); }
     var nMerge = mergeTagLineRuns();
     var nOut = containYoloToGreen();
+    try{ sanitizeYoloDets(); }catch(e){ console.warn('sanity', e); }
     var nJoin = joinRunsAtElbows();
     var nSyn = 0; try{ nSyn = synthElbowLegs(); }catch(e){ console.warn('synthElbowLegs', e); }
     var nArc = 0; try{ nArc = arcCornerJoins(); }catch(e){ console.warn('arcCornerJoins', e); }
@@ -3172,6 +3173,45 @@ function refreshSel(){
     return made;
   }
   window.__bridgeTaps=bridgeTaps;
+  // ---- DETECTION SANITY: the geometry outranks the model's label. An 'elbow' where the duct
+  // demonstrably runs STRAIGHT THROUGH is not an elbow — if the size steps there it's a
+  // sizechange (relabel so the transition machinery gets it); if nothing changes, it's a false
+  // positive (drop). Same for an 'elbow' sitting in an in-line gap between two facing ends. ----
+  function sanitizeYoloDets(){
+    var dets=window.__yoloDets||[], runs=window.__runs2d||[]; if(!dets.length||!runs.length) return 0;
+    function base(c){ return (c||'').replace(/^(rect|round)-/,''); }
+    function pref(c){ var m=/^(rect|round)-/.exec(c||''); return m?m[0]:''; }
+    var relabeled=0, dropped=0;
+    dets.forEach(function(d){
+      if(d._used || d.nx==null || base(d.cls)!=='elbow') return;
+      // (a) sits on the INTERIOR of one run that continues straight both ways -> no turn here
+      var host=null, hostPr=null;
+      for(var i=0;i<runs.length;i++){ var r=runs[i], L=runLenIn(r), pr=projOnRun(r,d.nx,d.ny);
+        if(pr.alongIn>=18 && pr.alongIn<=L-18 && Math.abs(pr.perpIn)<=(r.widthIn/2+12)){ host=r; hostPr=pr; break; } }
+      var stepped=false;
+      if(host){ // does the size step near this point? (piece widths on either side differ)
+        var acc=0, wA=null, wB=null;
+        for(var p=0;p<host.pieces.length;p++){ var pc=host.pieces[p]; if(pc.kind!=='straight'){ continue; }
+          var a0=acc, a1=acc+(pc.lenIn||0); acc=a1;
+          if(a1<=hostPr.alongIn) wA=pc.widthIn; else if(wB==null && a0>=hostPr.alongIn) wB=pc.widthIn; }
+        stepped=(wA!=null&&wB!=null&&Math.abs(wA-wB)>=2);
+        if(stepped){ d.cls=pref(d.cls)+'sizechange'; relabeled++; }
+        else { d._used=true; dropped++; }
+        return;
+      }
+      // (b) in an in-line GAP between two ends that FACE each other -> a fitting, not a corner
+      var reach=inToPt(36), ends=[];
+      runs.forEach(function(r){ var re2=runEnd(r);
+        [{p:[r.start[0],r.start[1]], out:[-r.dir[0],-r.dir[1]], r:r},{p:[re2.x,re2.y], out:[r.dir[0],r.dir[1]], r:r}].forEach(function(E){
+          if(Math.hypot(E.p[0]-d.nx,E.p[1]-d.ny)<=reach) ends.push(E); }); });
+      var byRun={}; ends.forEach(function(E){ byRun[E.r.id]=E; }); var ids=Object.keys(byRun);
+      if(ids.length===2){ var A=byRun[ids[0]], B=byRun[ids[1]];
+        if((A.out[0]*B.out[0]+A.out[1]*B.out[1]) < -0.7){ d.cls=pref(d.cls)+'sizechange'; relabeled++; } }
+    });
+    if(relabeled||dropped) console.log('[takeoff sanity] elbow labels corrected by geometry: '+relabeled+' -> sizechange, '+dropped+' dropped (duct runs straight through)');
+    return relabeled+dropped;
+  }
+  window.__sanitizeYoloDets=sanitizeYoloDets;
 
   // ---- STAGE 5 CARRY-FORWARD: a run with no tag of its own inherits the size of the run it
   // connects to at a shared endpoint (a branch holds the trunk size until a real sizechange).
@@ -4408,6 +4448,7 @@ function refreshSel(){
     // Takeoff (which runs THIS builder) never executed them and detected elbows/reducers between
     // runs were left orphaned. Run the full stack here: YOLO corner joins -> missing-leg synthesis
     // -> drawn-arc elbow detection -> size-change gap bridging.
+    try{ if(window.__sanitizeYoloDets) window.__sanitizeYoloDets(); }catch(e){ console.warn('sanity',e); }
     var _rJoin=0,_rSyn=0,_rArc=0,_rBr=0;
     try{ _rJoin=(window.__joinRunsAtElbows?window.__joinRunsAtElbows():0)||0; }catch(e){ console.warn('joins',e); }
     try{ _rSyn=(window.__synthElbowLegs?window.__synthElbowLegs():0)||0; }catch(e){ console.warn('synth',e); }
