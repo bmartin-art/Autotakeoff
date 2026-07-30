@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.65</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.66</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -464,11 +464,15 @@ function analyzeVectorDarkness(){
   window.VEC_COLOR=true;
   var bt=document.getElementById('blkThresh'); if(bt){ bt.value=cut.toFixed(2); }
   var bo=document.getElementById('blackOnly'); if(bo){ bo.checked=true; }
-  try{ setStatus('Vector color detected ('+big.length+' shades) \u2014 using exact stroke color + raster cross-check, cutoff auto-set to '+cut.toFixed(2)+'.'); }catch(e){}
+  try{ setStatus('Vector color detected ('+big.length+' shades) \u2014 using exact stroke colors (vector authoritative), cutoff auto-set to '+cut.toFixed(2)+'.'); }catch(e){}
 }
 
 async function sampleDarknessHiRes(page){
-  var __useMax = !!window.VEC_COLOR;   // vector reliable -> COMBINE raster with vector (catches black the vector reader misread); else raster replaces
+  var __useMax = !!window.VEC_COLOR;   // vector reliable -> vector darkness is AUTHORITATIVE; raster only fills in when vector color is unusable.
+  // On dense sheets (hatching, tile fields) a gray line crosses black ink at 3+ of its 9 sample
+  // points, so even robust raster sampling reads it black — max-combining then greened gray walls
+  // no matter the threshold. When the PDF declares its stroke colors, believe them.
+  if(__useMax) return;
   try{
     if(!page) return;
     var un=page.getViewport({scale:1});
