@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.68</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.69</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -794,13 +794,20 @@ async function extractVectors(page){
   const vt=viewport.transform;
   const nvt=page.getViewport({scale:1}).transform;
   window.__nvt=nvt;
-  let ctm=[1,0,0,1,0,0]; let lw=1; let strokeDark=1; let strokeRGB=[0,0,0]; const stack=[]; const ocStack=[];
+  let ctm=[1,0,0,1,0,0]; let lw=1; let strokeDark=1; let strokeRGB=[0,0,0]; let fillDark=1; let fillRGB=[0,0,0]; const stack=[]; const ocStack=[];
   const fns=opList.fnArray, args=opList.argsArray;
+  try{ // DIAGNOSTIC: histogram the operator stream + show the color-op mix, so a mis-read print names its own color path
+    var __oc={}; for(var __k2=0;__k2<fns.length;__k2++){ __oc[fns[__k2]]=(__oc[fns[__k2]]||0)+1; }
+    var __names={}; for(var __nm in OPS){ __names[OPS[__nm]]=__nm; }
+    var __top=Object.keys(__oc).sort(function(a2,b2){return __oc[b2]-__oc[a2];}).slice(0,14)
+      .map(function(f2){ return (__names[f2]||('op'+f2))+':'+__oc[f2]; }).join('  ');
+    console.log('[takeoff ops] '+__top);
+  }catch(__e){}
   const pageDiag=Math.hypot(viewport.width,viewport.height);
   for(let k=0;k<fns.length;k++){
     const fn=fns[k], a=args[k];
-    if(fn===OPS.save){ stack.push([ctm.slice(),lw,strokeDark,strokeRGB.slice()]); }
-    else if(fn===OPS.restore){ if(stack.length){ var __st=stack.pop(); ctm=__st[0]; lw=__st[1]; strokeDark=(__st[2]==null?strokeDark:__st[2]); strokeRGB=(__st[3]||strokeRGB); } }
+    if(fn===OPS.save){ stack.push([ctm.slice(),lw,strokeDark,strokeRGB.slice(),fillDark,fillRGB.slice()]); }
+    else if(fn===OPS.restore){ if(stack.length){ var __st=stack.pop(); ctm=__st[0]; lw=__st[1]; strokeDark=(__st[2]==null?strokeDark:__st[2]); strokeRGB=(__st[3]||strokeRGB); fillDark=(__st[4]==null?fillDark:__st[4]); fillRGB=(__st[5]||fillRGB); } }
     else if(fn===OPS.transform){ ctm=mulM(ctm, a); }
     else if(fn===OPS.setLineWidth){ lw=a[0]; }
     else if(OPS.setStrokeGray!==undefined && fn===OPS.setStrokeGray){ var _g=(a&&a[0]&&a[0].length)?a[0][0]:a[0]; if(_g>1)_g/=255; strokeDark=1-(_g||0); strokeRGB=[_g||0,_g||0,_g||0]; }
@@ -810,6 +817,13 @@ async function extractVectors(page){
       if(_sc&&_sc.length>=3){ var _r3=_sc[0],_g3=_sc[1],_b3=_sc[2]; if(_r3>1||_g3>1||_b3>1){_r3/=255;_g3/=255;_b3/=255;} strokeDark=1-(0.299*_r3+0.587*_g3+0.114*_b3); strokeRGB=[_r3||0,_g3||0,_b3||0]; }
       else if(_sc&&_sc.length>=1&&typeof _sc[0]==='number'){ var _g5=_sc[0]; if(_g5>1)_g5/=255; strokeDark=1-_g5; strokeRGB=[_g5||0,_g5||0,_g5||0]; } }
     else if(OPS.setStrokeColorN!==undefined && fn===OPS.setStrokeColorN){ var _n=(a&&a.length===1&&a[0]&&a[0].length)?a[0]:a; if(_n&&_n.length>=4){ var _k2=_n[3]||0,_m2=Math.max(_n[0]||0,_n[1]||0,_n[2]||0); strokeDark=1-((1-_k2)*(1-_m2)); strokeRGB=[(1-(_n[0]||0))*(1-_k2),(1-(_n[1]||0))*(1-_k2),(1-(_n[2]||0))*(1-_k2)]; } else if(_n&&_n.length>=3){ var _r2=_n[0],_g2=_n[1],_b2=_n[2]; if(_r2>1||_g2>1||_b2>1){_r2/=255;_g2/=255;_b2/=255;} strokeDark=1-(0.299*_r2+0.587*_g2+0.114*_b2); strokeRGB=[_r2||0,_g2||0,_b2||0]; } else if(_n&&_n.length>=1){ var _g4=_n[0]; if(_g4>1)_g4/=255; strokeDark=1-_g4; strokeRGB=[_g4||0,_g4||0,_g4||0]; } }
+    else if(OPS.setFillGray!==undefined && fn===OPS.setFillGray){ var _fg=(a&&a[0]&&a[0].length)?a[0][0]:a[0]; if(_fg>1)_fg/=255; fillDark=1-(_fg||0); fillRGB=[_fg||0,_fg||0,_fg||0]; }
+    else if(OPS.setFillRGBColor!==undefined && fn===OPS.setFillRGBColor){ var _fc=(a&&a.length===1&&a[0]&&a[0].length>=3)?a[0]:a; var _fr=_fc[0],_fgg=_fc[1],_fb=_fc[2]; if(_fr>1||_fgg>1||_fb>1){_fr/=255;_fgg/=255;_fb/=255;} fillDark=1-(0.299*_fr+0.587*_fgg+0.114*_fb); fillRGB=[_fr||0,_fgg||0,_fb||0]; }
+    else if(OPS.setFillCMYKColor!==undefined && fn===OPS.setFillCMYKColor){ var _fa=(a&&a.length===1&&a[0]&&a[0].length)?a[0]:a; var _fcc=_fa[0]||0,_fmm=_fa[1]||0,_fyy=_fa[2]||0,_fk=_fa[3]||0,_fmx=Math.max(_fcc,_fmm,_fyy); fillDark=1-((1-_fk)*(1-_fmx)); fillRGB=[(1-_fcc)*(1-_fk),(1-_fmm)*(1-_fk),(1-_fyy)*(1-_fk)]; }
+    else if((OPS.setFillColorN!==undefined && fn===OPS.setFillColorN)||(OPS.setFillColor!==undefined && fn===OPS.setFillColor)){ var _fn=(a&&a.length===1&&a[0]&&a[0].length)?a[0]:a;
+      if(_fn&&_fn.length>=4){ var _fk2=_fn[3]||0,_fm2=Math.max(_fn[0]||0,_fn[1]||0,_fn[2]||0); fillDark=1-((1-_fk2)*(1-_fm2)); fillRGB=[(1-(_fn[0]||0))*(1-_fk2),(1-(_fn[1]||0))*(1-_fk2),(1-(_fn[2]||0))*(1-_fk2)]; }
+      else if(_fn&&_fn.length>=3){ var _fr2=_fn[0],_fg2=_fn[1],_fb2=_fn[2]; if(_fr2>1||_fg2>1||_fb2>1){_fr2/=255;_fg2/=255;_fb2/=255;} fillDark=1-(0.299*_fr2+0.587*_fg2+0.114*_fb2); fillRGB=[_fr2||0,_fg2||0,_fb2||0]; }
+      else if(_fn&&_fn.length>=1&&typeof _fn[0]==='number'){ var _fg4=_fn[0]; if(_fg4>1)_fg4/=255; fillDark=1-_fg4; fillRGB=[_fg4||0,_fg4||0,_fg4||0]; } }
     else if(fn===OPS.beginMarkedContentProps){
       // a = [tag, properties]; optional content if tag === 'OC'
       let id=null;
@@ -821,7 +835,15 @@ async function extractVectors(page){
     else if(fn===OPS.constructPath){
       const curLayer = ocStack.filter(Boolean).slice(-1)[0]||null;
       if(curLayer) pageLayersUsed.add(curLayer);
-      collectPath(a[0], a[1], ctm, vt, curLayer, pageDiag, nvt, lw*Math.sqrt(Math.abs(ctm[0]*ctm[3]-ctm[1]*ctm[2])), strokeDark, strokeRGB);
+      // a path painted by a FILL op is colored by the fill color, not the stroke color — thin filled
+      // bars are how many plot styles draw their background linework (mis-reading them as
+      // stroke-black is how 87% of a gray sheet reads black)
+      var _nf=fns[k+1], _dk=strokeDark, _rgb=strokeRGB;
+      var _isFill=(OPS.fill!==undefined&&_nf===OPS.fill)||(OPS.eoFill!==undefined&&_nf===OPS.eoFill);
+      var _isBoth=(OPS.fillStroke!==undefined&&_nf===OPS.fillStroke)||(OPS.eoFillStroke!==undefined&&_nf===OPS.eoFillStroke)||(OPS.closeFillStroke!==undefined&&_nf===OPS.closeFillStroke)||(OPS.closeEOFillStroke!==undefined&&_nf===OPS.closeEOFillStroke);
+      if(_isFill){ _dk=fillDark; _rgb=fillRGB; }
+      else if(_isBoth){ if(fillDark>strokeDark){ _dk=fillDark; _rgb=fillRGB; } }
+      collectPath(a[0], a[1], ctm, vt, curLayer, pageDiag, nvt, lw*Math.sqrt(Math.abs(ctm[0]*ctm[3]-ctm[1]*ctm[2])), _dk, _rgb);
     }
   }
 }
