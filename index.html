@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.79</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.82</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3247,10 +3247,17 @@ function refreshSel(){
         else if(aEnd==='end'&&bEnd==='end'){ if(runReversible(B)){ first=A; second=reverseRun(B); } else if(runReversible(A)){ first=B; second=reverseRun(A); } }
         else { /* both starts */ if(runReversible(A)){ first=reverseRun(A); second=B; } else if(runReversible(B)){ first=reverseRun(B); second=A; } }
         if(!first||!second) continue;
-        window.__pushRunUndo&&window.__pushRunUndo();
-        // absorb the corner gap: extend first's last straight to reach C; shift second's lead-in from C
+        // SAFETY RAILS — a merge that needs big phantom extensions or a weird angle is a bad pairing;
+        // leave those corners as visual/export joins instead of bending real duct the wrong way.
         var fe=runEnd(first), inH=headingAtEndOf(first);
-        var gapA=((C[0]-fe.x)*inH[0]+(C[1]-fe.y)*inH[1])/ (6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125));
+        var _ppiM=(6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125));
+        var gapA=((C[0]-fe.x)*inH[0]+(C[1]-fe.y)*inH[1])/_ppiM;
+        var outH0=[second.dir[0],second.dir[1]];
+        var gapB0=((second.start[0]-C[0])*outH0[0]+(second.start[1]-C[1])*outH0[1])/_ppiM;
+        var turn0=Math.atan2(inH[0]*outH0[1]-inH[1]*outH0[0], inH[0]*outH0[0]+inH[1]*outH0[1]);
+        var perpOffA=Math.abs((C[0]-fe.x)*(-inH[1])+(C[1]-fe.y)*inH[0])/_ppiM;
+        if(Math.abs(gapA)>30 || Math.abs(gapB0)>30 || perpOffA>18 || Math.abs(turn0)<Math.PI/6 || Math.abs(turn0)>Math.PI*0.85){ continue; }
+        window.__pushRunUndo&&window.__pushRunUndo();
         for(var k1=first.pieces.length-1;k1>=0;k1--){ if(first.pieces[k1].kind==='straight'){ first.pieces[k1].lenIn=Math.max(1, Math.round((first.pieces[k1].lenIn+gapA)*10)/10); break; } }
         var outH=[second.dir[0],second.dir[1]];
         var gapB=((second.start[0]-C[0])*outH[0]+(second.start[1]-C[1])*outH[1])/(6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125));
@@ -3289,7 +3296,10 @@ function refreshSel(){
               {p:[e.x,e.y], out:[h[0],h[1]], r:r}]; }
     var ends=[]; runs.forEach(function(r){ outEnds(r).forEach(function(E){ ends.push(E); }); });
     var made=0, J=window.__elbowJoins=window.__elbowJoins||[];
-    var MAXR=inToPt(96), MINR=inToPt(4);
+    var MAXR=inToPt(60), MINR=inToPt(4);   // forward reach: a real radius elbow's legs stop within ~5ft of the corner; farther = probably unrelated ends
+    // collect ALL candidate pairs first, then accept greedily nearest-first with each END used at
+    // most ONCE — otherwise one end can collect several "corners" and the merge fans legs off it
+    var cands=[];
     for(var i=0;i<ends.length;i++){ for(var k=i+1;k<ends.length;k++){
       var A=ends[i], B=ends[k]; if(A.r===B.r) continue;
       var dot=A.out[0]*B.out[0]+A.out[1]*B.out[1]; if(Math.abs(dot)>0.5) continue;         // ~perpendicular legs only
@@ -3312,9 +3322,18 @@ function refreshSel(){
         if(pr.alongIn>=6 && pr.alongIn<=L-6 && Math.abs(pr.perpIn)<=(R.widthIn/2+6)){ body=true; break; } }
       if(body) continue;
       var turn=Math.atan2(A.out[0]*(-B.out[1])-A.out[1]*(-B.out[0]), A.out[0]*(-B.out[0])+A.out[1]*(-B.out[1]));
-      J.push({ trunkId:A.r.id, branchId:B.r.id, atX:P[0], atY:P[1], turn:turn, round:rA, widthIn:Math.max(wA,wB), _inferred:true });
-      made++;
+      cands.push({i:i, k:k, A:A, B:B, P:P, turn:turn, rA:rA, w:Math.max(wA,wB), cost:tA+tB});
     } }
+    cands.sort(function(x,y){ return x.cost-y.cost; });
+    var usedEnd={};
+    cands.forEach(function(c){
+      if(usedEnd[c.i]||usedEnd[c.k]) return;
+      var dup2=false; for(var j2=0;j2<J.length;j2++){ if(Math.hypot((J[j2].atX||0)-c.P[0],(J[j2].atY||0)-c.P[1])<=inToPt(24)){ dup2=true; break; } }
+      if(dup2) return;
+      usedEnd[c.i]=true; usedEnd[c.k]=true;
+      J.push({ trunkId:c.A.r.id, branchId:c.B.r.id, atX:c.P[0], atY:c.P[1], turn:c.turn, round:c.rA, widthIn:c.w, _inferred:true });
+      made++;
+    });
     if(made) console.log('[takeoff] inferred '+made+' corner(s) from run-end geometry (flattened-arc elbows)');
     return made;
   }
@@ -4682,6 +4701,9 @@ function refreshSel(){
     return pts;
   }
   window.__runPoly=__runPoly;
+  window.__inToPt=inToPt;
+  window.__runPieceXY=function(run,i){ try{ var fr=runFrames(run), f=fr[i]; if(!f) return null;
+    var p=run.pieces[i], mid=inToPt(((p&&p.lenIn)||0)/2); return [f.x+(f.ux||0)*mid, f.y+(f.uy||0)*mid]; }catch(_){ return null; } };
   window.__ductDiag=__ductDiag;
   window.__buildRunsTrackWalk=buildRunsTrackWalk;
 
@@ -4736,7 +4758,36 @@ function refreshSel(){
     function onDoc(e){ if(!m.contains(e.target)) close(); }   // only close on clicks OUTSIDE the menu — inside clicks reach the buttons
     setTimeout(function(){ document.addEventListener('mousedown',onDoc,true); },0);
     Array.prototype.forEach.call(m.querySelectorAll('.ys'),function(b){ b.onclick=function(){ d.cls=b.getAttribute('data-c'); d.clsIdx=-1; close(); renderYolo(); if(typeof setStatus==='function')setStatus('Detection changed to '+d.cls+'. Re-run build to apply.'); }; });
-    m.querySelector('#ysDel').onclick=function(){ window.__yoloDets=(window.__yoloDets||[]).filter(function(x){return x!==d;}); if(window.__yoloAll) window.__yoloAll=window.__yoloAll.filter(function(x){return x!==d;}); close(); renderYolo(); if(typeof setStatus==='function')setStatus('Detection deleted.'); };
+    m.querySelector('#ysDel').onclick=function(){
+      window.__yoloDets=(window.__yoloDets||[]).filter(function(x){return x!==d;});
+      if(window.__yoloAll) window.__yoloAll=window.__yoloAll.filter(function(x){return x!==d;});
+      // also remove what this detection PRODUCED — the placed fitting piece and/or the corner join
+      var removed=0;
+      try{
+        var bw=Math.abs((d.nx1!=null?d.nx1:d.nx)-(d.nx0!=null?d.nx0:d.nx))||0, bh=Math.abs((d.ny1!=null?d.ny1:d.ny)-(d.ny0!=null?d.ny0:d.ny))||0;
+        var reach=Math.max((window.__inToPt?window.__inToPt(24):18), 0.75*Math.hypot(bw,bh));
+        var b=(d.cls||'').replace(/^(rect|round)-/,'');
+        function matches(p){
+          if(p.kind!=='fitting') return false;
+          if(b==='elbow') return !!(p.turn||p._elbow);
+          if(b==='sizechange'||b==='reducer'||b==='transition'||b==='sq2round') return !!(p._sizeStep||p.cid==='tr'||p.cid==='reducer'||p.cid==='s2r');
+          if(b==='tap'||b==='tee') return !!(p._tap||p.cid==='stap'||p.cid==='sqt');
+          if(b==='cap') return !!(p._cap||p.cid==='cap');
+          return false;
+        }
+        var best=null;
+        (window.__runs2d||[]).forEach(function(r){ if(!window.__runPieceXY) return;
+          r.pieces.forEach(function(p,i){ if(!matches(p)) return; var xy=window.__runPieceXY(r,i); if(!xy) return;
+            var dd=Math.hypot(xy[0]-d.nx, xy[1]-d.ny); if(dd<=reach && (!best||dd<best.dd)) best={r:r,i:i,dd:dd}; }); });
+        if(best){ window.__pushRunUndo&&window.__pushRunUndo(); best.r.pieces.splice(best.i,1); removed++; }
+        var J=window.__elbowJoins||[]; var before=J.length;
+        window.__elbowJoins=J.filter(function(jn){ return Math.hypot((jn.atX||0)-d.nx,(jn.atY||0)-d.ny)>reach; });
+        removed+=(before-window.__elbowJoins.length);
+        if(removed){ try{window.__renderItems&&window.__renderItems();}catch(_){ } try{window.__renderItemPanel&&window.__renderItemPanel();}catch(_){ } }
+      }catch(_){}
+      close(); renderYolo();
+      if(typeof setStatus==='function')setStatus('Detection deleted'+(removed?(' \u2014 removed its placed fitting/corner too ('+removed+').'):'.'));
+    };
   }
   function renderYolo(){
     var lay=$('yoloLayer'); if(!lay) return; lay.innerHTML='';
