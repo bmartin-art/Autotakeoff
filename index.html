@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.70</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.72</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -445,13 +445,14 @@ function analyzeVectorDarkness(){
   window.VEC_COLOR=false;
   if(!segments.length) return;
   // histogram vector darkness in 0.05 buckets
-  var H={}; for(var i=0;i<segments.length;i++){ var v=segments[i].vdark; if(v==null)v=1; var b=Math.round(v*20)/20; H[b]=(H[b]||0)+1; }
+  var H={}; for(var i=0;i<segments.length;i++){ if(segments[i]._fill) continue; var v=segments[i].vdark; if(v==null)v=1; var b=Math.round(v*20)/20; H[b]=(H[b]||0)+1; }
   var levels=Object.keys(H).map(parseFloat).sort(function(a,b){return a-b;});
   // keep only levels holding >=1.5% of segments (ignore stray colors)
-  var min=segments.length*0.015; var big=levels.filter(function(L){return H[L]>=min;});
+  var __minDen=0; for(var __q in H) __minDen+=H[__q]; var min=__minDen*0.015; var big=levels.filter(function(L){return H[L]>=min;});
   // informative only if there's a meaningful non-black cluster (something clearly lighter than near-black)
-  var nonBlack=0; for(var k=0;k<segments.length;k++){ var vv=segments[k].vdark; if(vv==null)vv=1; if(vv<0.8) nonBlack++; }
-  if(big.length<2 || nonBlack < segments.length*0.03){
+  var nonBlack=0, __nStk=0; for(var k=0;k<segments.length;k++){ if(segments[k]._fill) continue; __nStk++; var vv=segments[k].vdark; if(vv==null)vv=1; if(vv<0.8) nonBlack++; }
+  var __den=(typeof __nStk!=='undefined'&&__nStk)?__nStk:segments.length;
+  if(big.length<2 || nonBlack < __den*0.03){
     try{ setStatus('No usable vector stroke color on this print ('+big.length+' cluster'+(big.length===1?'':'s')+', '+Math.round(nonBlack*100/(segments.length||1))+'% non-black) \u2014 darkness comes from RASTER sampling. If gray lines green wrongly here, this is why: send me the console line.'); }catch(_){}
     return; }   // flat / single-color print -> fall back to raster sampling
   // cutoff sits just ABOVE the background (lighter) cluster of the largest gap — anything darker than
@@ -465,10 +466,10 @@ function analyzeVectorDarkness(){
   cut = lo + Math.min(0.10, Math.max(0.05, gap*0.18));
   window.VEC_COLOR=true;
   var bt=document.getElementById('blkThresh'); if(bt){ bt.value=cut.toFixed(2); }
-  var bo=document.getElementById('blackOnly'); if(bo){ bo.checked=true; }
-  try{ var __hh={}; for(var __i=0;__i<segments.length;__i++){ var __v=segments[__i].vdark; if(__v==null)__v=1; var __b=(Math.round(__v*20)/20).toFixed(2); __hh[__b]=(__hh[__b]||0)+1; }
+  // NOTE: no longer auto-checks 'Black lines only' — the cutoff is armed so the mode works instantly when the user turns it on
+  try{ var __hh={}, __nf=0; for(var __i=0;__i<segments.length;__i++){ if(segments[__i]._fill){__nf++; continue;} var __v=segments[__i].vdark; if(__v==null)__v=1; var __b=(Math.round(__v*20)/20).toFixed(2); __hh[__b]=(__hh[__b]||0)+1; }
     var __tot=segments.length||1, __top=Object.keys(__hh).sort(function(x,y){return __hh[y]-__hh[x];}).slice(0,5).map(function(k){return k+':'+Math.round(__hh[k]*100/__tot)+'%';}).join('  ');
-    console.log('[takeoff darkness] vdark clusters -> '+__top+'  | VEC_COLOR='+(!!window.VEC_COLOR)); }catch(__e){}
+    console.log('[takeoff darkness] STROKE vdark clusters -> '+__top+'  | fill-outline segs excluded: '+__nf+'  | VEC_COLOR='+(!!window.VEC_COLOR)); }catch(__e){}
   try{ setStatus('Vector color detected ('+big.length+' shades) \u2014 using exact stroke colors (vector authoritative), cutoff auto-set to '+cut.toFixed(2)+'.'); }catch(e){}
 }
 
@@ -812,6 +813,12 @@ async function extractVectors(page){
       __lines.push(__n3+' '+__a3);
     }
     console.log('[takeoff colorops] '+(__lines.length?__lines.join('  |  '):'NONE FOUND'));
+    var __fp=-1,__fs=-1,__ls=-1,__pre=0;
+    for(var __k4=0;__k4<fns.length;__k4++){ var __n4=__names[fns[__k4]]||'';
+      if(__fp<0 && fns[__k4]===OPS.constructPath) __fp=__k4;
+      if(/^setStroke(RGBColor|Gray|CMYKColor|ColorN|Color)$/.test(__n4)){ if(__fs<0)__fs=__k4; __ls=__k4; }
+      if(fns[__k4]===OPS.constructPath && __fs<0) __pre++; }
+    console.log('[takeoff order] first path @'+__fp+'  first strokeColor @'+__fs+'  last @'+__ls+'  paths BEFORE any stroke color: '+__pre+' of '+ (__oc[OPS.constructPath]||0));
   }catch(__e){}
   const pageDiag=Math.hypot(viewport.width,viewport.height);
   for(let k=0;k<fns.length;k++){
@@ -853,12 +860,12 @@ async function extractVectors(page){
       var _isBoth=(OPS.fillStroke!==undefined&&_nf===OPS.fillStroke)||(OPS.eoFillStroke!==undefined&&_nf===OPS.eoFillStroke)||(OPS.closeFillStroke!==undefined&&_nf===OPS.closeFillStroke)||(OPS.closeEOFillStroke!==undefined&&_nf===OPS.closeEOFillStroke);
       if(_isFill){ _dk=fillDark; _rgb=fillRGB; }
       else if(_isBoth){ if(fillDark>strokeDark){ _dk=fillDark; _rgb=fillRGB; } }
-      collectPath(a[0], a[1], ctm, vt, curLayer, pageDiag, nvt, lw*Math.sqrt(Math.abs(ctm[0]*ctm[3]-ctm[1]*ctm[2])), _dk, _rgb);
+      collectPath(a[0], a[1], ctm, vt, curLayer, pageDiag, nvt, lw*Math.sqrt(Math.abs(ctm[0]*ctm[3]-ctm[1]*ctm[2])), _dk, _rgb, _isFill);
     }
   }
 }
 
-function collectPath(ops, coords, ctm, vt, layer, pageDiag, nvt, width, dark, rgb){
+function collectPath(ops, coords, ctm, vt, layer, pageDiag, nvt, width, dark, rgb, isFill){
   rgb=rgb||[0,0,0];
   let i=0, cx=0, cy=0, sx=0, sy=0;
   const emit=(ax,ay,bx,by,curved)=>{
@@ -872,7 +879,7 @@ function collectPath(ops, coords, ctm, vt, layer, pageDiag, nvt, width, dark, rg
     // rotation-normalized display coords (scale 1) — matches what's on screen
     const [nx1,ny1]=applyM(nvt,ux1,uy1), [nx2,ny2]=applyM(nvt,ux2,uy2);
     const ulen=Math.hypot(ux2-ux1,uy2-uy1);
-    segments.push({ux1,uy1,ux2,uy2,x1,y1,x2,y2,nx1,ny1,nx2,ny2,layer,len,ulen,ori,curved:!!curved,lw:(width||0),lwpt:(((baseScale||1)*(scale||1))>0?(width||0)/((baseScale||1)*(scale||1)):(width||0)),dark:(dark==null?1:Math.max(0,Math.min(1,dark))),vdark:(dark==null?1:Math.max(0,Math.min(1,dark))),rgb:[rgb[0]||0,rgb[1]||0,rgb[2]||0],paired:false,nearTag:false,cls:'not',lock:null});
+    segments.push({ux1,uy1,ux2,uy2,x1,y1,x2,y2,nx1,ny1,nx2,ny2,layer,len,ulen,ori,curved:!!curved,lw:(width||0),lwpt:(((baseScale||1)*(scale||1))>0?(width||0)/((baseScale||1)*(scale||1)):(width||0)),dark:(dark==null?1:Math.max(0,Math.min(1,dark))),vdark:(dark==null?1:Math.max(0,Math.min(1,dark))),rgb:[rgb[0]||0,rgb[1]||0,rgb[2]||0],paired:false,nearTag:false,cls:'not',lock:null,_fill:!!isFill});
   };
   for(const op of ops){
     if(op===OPS.moveTo){ cx=coords[i++]; cy=coords[i++]; sx=cx; sy=cy; }
@@ -1309,6 +1316,7 @@ function classify(){
     }   // color and/or shade pickers: tapped colors/shades become duct
     if(s.lock){ s.cls=s.lock; continue; }
     if(__ductRuns){ var __dDiag=(s._u&&s._u.o==='D'&&s.paired); s.cls = ((s.ductRun||__dDiag) ? (__aiFirst?'maybe':'duct') : 'not'); continue; }   // precision geometry mode (+ paired diagonal runs the H/V detector can't see)
+    if(s._fill){ s.cls='not'; continue; }                             // FILL outlines (hatch bars, solid fills) are ink shapes, not duct linework — they measure pure black and defeat every threshold
     if(matchSample && ductRef){ s.cls=(((darkOf(s) >= __blkT) || s.blkRescue) && (s.len==null || s.len >= __blkMin) && !(s.wallPair && !s.paired && !s.nearTag))?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY color takeoff: dark AND long enough — a wall-thickness pair with no duct-width partner and no size tag is a WALL
     if(__black){ s.cls=(((darkOf(s) >= __blkT) || s.blkRescue) && (s.len==null || s.len >= __blkMin) && !(s.wallPair && !s.paired && !s.nearTag))?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY black mode: dark AND long enough — a wall-thickness pair with no duct-width partner and no size tag is a WALL, even in black mode
     if(pickHeavy){ s.cls=((s.lw||0) >= __lwT)?(__aiFirst?'maybe':'duct'):'not'; continue; }   // HEAVY mode: thicker-than-cutoff lines are duct (line-weight slider controls it)
