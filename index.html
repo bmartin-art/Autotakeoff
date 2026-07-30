@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.69</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.70</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -802,6 +802,16 @@ async function extractVectors(page){
     var __top=Object.keys(__oc).sort(function(a2,b2){return __oc[b2]-__oc[a2];}).slice(0,14)
       .map(function(f2){ return (__names[f2]||('op'+f2))+':'+__oc[f2]; }).join('  ');
     console.log('[takeoff ops] '+__top);
+    // arg-level trace of the RARE color/state ops (these set the whole sheet's colors a few times)
+    var __seen={}, __lines=[];
+    for(var __k3=0;__k3<fns.length && __lines.length<24;__k3++){
+      var __n3=__names[fns[__k3]]||('op'+fns[__k3]);
+      if(!/Color|Gray|CMYK|GState|Pattern/i.test(__n3)) continue;
+      __seen[__n3]=(__seen[__n3]||0)+1; if(__seen[__n3]>3) continue;   // first 3 of each kind
+      var __a3; try{ __a3=JSON.stringify(args[__k3], function(kk,vv){ return (vv&&vv.length!==undefined&&typeof vv!=='string')?Array.prototype.slice.call(vv,0,6):vv; }).slice(0,120); }catch(__e3){ __a3='?'; }
+      __lines.push(__n3+' '+__a3);
+    }
+    console.log('[takeoff colorops] '+(__lines.length?__lines.join('  |  '):'NONE FOUND'));
   }catch(__e){}
   const pageDiag=Math.hypot(viewport.width,viewport.height);
   for(let k=0;k<fns.length;k++){
