@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.75</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.76</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2840,6 +2840,7 @@ function refreshSel(){
     var nSyn = 0; try{ nSyn = synthElbowLegs(); }catch(e){ console.warn('synthElbowLegs', e); }
     var nArc = 0; try{ nArc = arcCornerJoins(); }catch(e){ console.warn('arcCornerJoins', e); }
     var nBr = 0; try{ nBr = bridgeSizechanges(); }catch(e){ console.warn('bridgeSizechanges', e); }
+    var nTb = 0; try{ nTb = bridgeTaps(); }catch(e){ console.warn('bridgeTaps', e); }
     var nFit = integrateYoloFittings();
     var nCarry = 0;   // DISABLED: a no-tag run keeps its OWN green-line width (was inheriting a nearby tagged run's size, overriding the measured gap). Height stays unknown — set via ✎ resize.
     var nDrop = dropUnsupportedRuns();
@@ -3141,6 +3142,36 @@ function refreshSel(){
     return made;
   }
   window.__bridgeSizechanges=bridgeSizechanges;
+  // ---- TAP GAP BRIDGE: a tap detection sitting between a branch run's END and another run's BODY
+  // means the branch never attached (the walker only taps events on its own spine). Auto-connect it
+  // with the same machinery as Connect > Tap. ----
+  function bridgeTaps(){
+    var dets=window.__yoloDets||[], runs=window.__runs2d||[]; if(!dets.length||runs.length<2) return 0;
+    function base(c){ return (c||'').replace(/^(rect|round)-/,''); }
+    var made=0;
+    dets.forEach(function(d){
+      if(d._used || d.nx==null) return;
+      if(base(d.cls)!=='tap') return;
+      if((d.score||0) < (window.__yoloGreenScoped?0.18:0.30)) return;
+      var reach=inToPt(36);
+      // trunk: a run whose BODY is under the detection
+      var trunk=null, tBest=1e18;
+      runs.forEach(function(r){ var L=runLenIn(r), pr=projOnRun(r,d.nx,d.ny);
+        if(pr.alongIn>=6 && pr.alongIn<=L-6 && Math.abs(pr.perpIn)<=(r.widthIn/2+18)){ if(Math.abs(pr.perpIn)<tBest){ tBest=Math.abs(pr.perpIn); trunk=r; } } });
+      if(!trunk) return;
+      // branch: a DIFFERENT run whose end is near the detection, pointing at the trunk
+      var br=null, bBest=1e18, bEnd=null;
+      runs.forEach(function(r){ if(r===trunk) return; var re2=runEnd(r);
+        [{end:'start', p:[r.start[0],r.start[1]]},{end:'end', p:[re2.x,re2.y]}].forEach(function(E){
+          var dd=Math.hypot(E.p[0]-d.nx, E.p[1]-d.ny); if(dd<=reach && dd<bBest){ bBest=dd; br=r; bEnd=E.end; } }); });
+      if(!br) return;
+      var dot=Math.abs(br.dir[0]*trunk.dir[0]+br.dir[1]*trunk.dir[1]); if(dot>0.7) return;   // branch must come in from the side
+      try{ if(window.__connectTap && window.__connectTap(br.id, bEnd, trunk.id, null)){ d._used=true; made++; } }catch(e){ console.warn('bridgeTaps', e); }
+    });
+    if(made) console.log('[takeoff] bridged '+made+' tap(s): branch end into trunk side');
+    return made;
+  }
+  window.__bridgeTaps=bridgeTaps;
 
   // ---- STAGE 5 CARRY-FORWARD: a run with no tag of its own inherits the size of the run it
   // connects to at a shared endpoint (a branch holds the trunk size until a real sizechange).
@@ -4373,8 +4404,19 @@ function refreshSel(){
       return {TWdropped:TWdropped,TWflagged:TWflagged};
     })();
     try{ var _dd=dedupeOverlappingRuns(); console.log('[takeoff] de-dupe removed '+_dd+' duplicate run(s)'); }catch(e){ console.warn('[takeoff] de-dupe error:',e); }
+    // CORNER / FITTING RECOVERY — these passes lived only in the old preview builder, so Auto
+    // Takeoff (which runs THIS builder) never executed them and detected elbows/reducers between
+    // runs were left orphaned. Run the full stack here: YOLO corner joins -> missing-leg synthesis
+    // -> drawn-arc elbow detection -> size-change gap bridging.
+    var _rJoin=0,_rSyn=0,_rArc=0,_rBr=0;
+    try{ _rJoin=(window.__joinRunsAtElbows?window.__joinRunsAtElbows():0)||0; }catch(e){ console.warn('joins',e); }
+    try{ _rSyn=(window.__synthElbowLegs?window.__synthElbowLegs():0)||0; }catch(e){ console.warn('synth',e); }
+    try{ _rArc=(window.__arcCornerJoins?window.__arcCornerJoins():0)||0; }catch(e){ console.warn('arc',e); }
+    try{ _rBr=(window.__bridgeSizechanges?window.__bridgeSizechanges():0)||0; }catch(e){ console.warn('bridge',e); }
+    var _rTap=0; try{ _rTap=(window.__bridgeTaps?window.__bridgeTaps():0)||0; }catch(e){ console.warn('tapbridge',e); }
+    if(_rJoin||_rSyn||_rArc||_rBr||_rTap) console.log('[takeoff recovery] corners:'+_rJoin+' legs:'+_rSyn+' arc-elbows:'+_rArc+' reducer-bridges:'+_rBr+' tap-bridges:'+_rTap);
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled'+(__keep.TWdropped.length?(' \u00b7 '+__keep.TWdropped.length+' unsupported dropped'):'')+(__keep.TWflagged?(' \u00b7 '+__keep.TWflagged+' flagged'):'')+'.'); try{ __ductDiag('track-walk'); }catch(e){}
+    setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled'+(__keep.TWdropped.length?(' \u00b7 '+__keep.TWdropped.length+' unsupported dropped'):'')+(__keep.TWflagged?(' \u00b7 '+__keep.TWflagged+' flagged'):'')+((_rJoin+_rSyn+_rArc+_rBr+_rTap)?(' \u00b7 recovered: '+_rJoin+' corner(s), '+_rSyn+' leg(s), '+_rArc+' arc elbow(s), '+_rBr+' reducer bridge(s), '+_rTap+' tap bridge(s)'):'')+'.'); try{ __ductDiag('track-walk'); }catch(e){}
   }
   // ── DIAGNOSTICS — why is duct missing / doubling? Structured coverage + overlap dump.
   // Auto-runs after each build; re-run anytime from the console with __ductDiag().
