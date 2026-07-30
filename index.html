@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.72</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.75</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -228,7 +228,7 @@
      <div style="font-size:12px;margin-top:3px;opacity:.85">Line-weight cutoff <input type="range" id="lwThresh" min="0" max="3" step="0.05" value="0.5" style="width:120px;vertical-align:middle"> <span id="lwThreshV">0.50</span> pt <span id="lwCounts" style="opacity:.7"></span></div>
      <label class="adv" style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="dropTagBoxes" checked> <b>Drop boxes around tags & round symbols</b> — strip the rectangles around size labels and diffuser/damper circles, in every mode</label>
      <label style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="killText" checked> <b>Hide text from trace</b> — reads the PDF's text layer and drops any linework that sits inside a text label (the AI still reads the dims separately)</label>
-     <label style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="blackOnly"> <b>Black lines only</b> — hide gray background (duct is often pure black)</label>
+     <label style="display:block;margin-top:7px;font-size:13px"><input type="checkbox" id="blackOnly"> <b>Black lines only</b> — keep the normal selection, restricted to black ink (drops gray background)</label>
      <div style="font-size:12px;margin-top:3px;opacity:.85">Darkness cutoff <input type="range" id="blkThresh" min="0" max="1" step="0.02" value="0.45" style="width:120px;vertical-align:middle"> <span id="blkThreshV">0.45</span> <span id="blkCounts" style="opacity:.7"></span></div>
      <div class="adv" style="font-size:12px;margin-top:3px;opacity:.85">Min length <input type="range" id="blkMinLen" min="0" max="200" step="2" value="10" style="width:120px;vertical-align:middle"> <span id="blkMinV">10</span> pt <span style="opacity:.6">(raise to drop short grid / cross lines)</span></div>
      <label class="adv" style="display:block;margin-top:5px;font-size:12px"><input type="checkbox" id="strictBlack"> <b>True black only</b> — judge by the ink color, not the on-screen reading <span style="opacity:.7">(drops gray that reads as black; may drop a few faint walls — pick those back)</span></label>
@@ -1318,7 +1318,8 @@ function classify(){
     if(__ductRuns){ var __dDiag=(s._u&&s._u.o==='D'&&s.paired); s.cls = ((s.ductRun||__dDiag) ? (__aiFirst?'maybe':'duct') : 'not'); continue; }   // precision geometry mode (+ paired diagonal runs the H/V detector can't see)
     if(s._fill){ s.cls='not'; continue; }                             // FILL outlines (hatch bars, solid fills) are ink shapes, not duct linework — they measure pure black and defeat every threshold
     if(matchSample && ductRef){ s.cls=(((darkOf(s) >= __blkT) || s.blkRescue) && (s.len==null || s.len >= __blkMin) && !(s.wallPair && !s.paired && !s.nearTag))?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY color takeoff: dark AND long enough — a wall-thickness pair with no duct-width partner and no size tag is a WALL
-    if(__black){ s.cls=(((darkOf(s) >= __blkT) || s.blkRescue) && (s.len==null || s.len >= __blkMin) && !(s.wallPair && !s.paired && !s.nearTag))?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY black mode: dark AND long enough — a wall-thickness pair with no duct-width partner and no size tag is a WALL, even in black mode
+    // 'Black lines only' is no longer a binary mode — it now RESTRICTS the smart default selection
+    // to black ink (post-pass below), instead of replacing it with keep-everything-black.
     if(pickHeavy){ s.cls=((s.lw||0) >= __lwT)?(__aiFirst?'maybe':'duct'):'not'; continue; }   // HEAVY mode: thicker-than-cutoff lines are duct (line-weight slider controls it)
     if(s.labelBox){ s.cls='not'; continue; }   // dimension-text box border, not duct (auto mode only)
     if(s.curved && s.ulen<26){ s.cls='not'; continue; }  // round symbols (diffusers, registers, T/H sensors) are never duct
@@ -1331,6 +1332,15 @@ function classify(){
     else if(s._u && s._u.o==='D' && s.paired) s.cls = __aiFirst ? 'maybe' : 'duct';   // paired DIAGONAL walls = strong duct signal (lone diagonals were dropped as fold lines)
     else if(s.paired || s.nearTag) s.cls='maybe';
     else s.cls='not';
+  }
+  if(__black){   // BLACK LINES ONLY = the same smart selection, restricted to black ink
+    for(const s of segments){
+      if(s.lock && s._userMark) continue;                       // user marks always win
+      if(s.cls!=='duct' && s.cls!=='maybe') continue;
+      if(s.blkRescue) continue;                                 // gray wall rescued by its black twin stays
+      if(darkOf(s) < __blkT) s.cls='not';                       // lighter than the cutoff -> out
+      else if(s.len!=null && s.len < __blkMin) s.cls='not';     // Min length slider still applies
+    }
   }
   updateCounts();
   try{ updateScaleUI(); }catch(e){}
@@ -2828,13 +2838,15 @@ function refreshSel(){
     var nOut = containYoloToGreen();
     var nJoin = joinRunsAtElbows();
     var nSyn = 0; try{ nSyn = synthElbowLegs(); }catch(e){ console.warn('synthElbowLegs', e); }
+    var nArc = 0; try{ nArc = arcCornerJoins(); }catch(e){ console.warn('arcCornerJoins', e); }
+    var nBr = 0; try{ nBr = bridgeSizechanges(); }catch(e){ console.warn('bridgeSizechanges', e); }
     var nFit = integrateYoloFittings();
     var nCarry = 0;   // DISABLED: a no-tag run keeps its OWN green-line width (was inheriting a nearby tagged run's size, overriding the measured gap). Height stays unknown — set via ✎ resize.
     var nDrop = dropUnsupportedRuns();
     var nDup = 0; try{ nDup=dedupeOverlappingRuns(); }catch(e){}   // collapse two-runs-over-one-duct into the centered one
     var nElb = 0;   // AUTO elbow-turning is OFF: the green trace already sets each run's direction, and auto-turning kept swinging straight runs sideways. Elbows stay inline; turn the real corners by hand (click the placeholder / panel arrows). __repairElbowTurns still exists for an optional manual "snap elbows to green".
     sel.clear(); selRun=null; renderItems(); renderPanel();
-    setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(typeof nSyn!=='undefined'&&nSyn?(' \u00b7 '+nSyn+' corner leg(s) built from green'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nElb?(' \u00b7 '+nElb+' elbow(s) turned'):'')+(nDup?(' \u00b7 '+nDup+' doubled run(s) merged'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.'); try{ __ductDiag('joints'); }catch(e){}
+    setStatus('Created '+window.__runs2d.length+' runs'+(nMerge?(' \u00b7 '+nMerge+' trunk(s) merged'):'')+(nOut?(' \u00b7 '+nOut+' off-green detection(s) dropped'):'')+(nJoin?(' \u00b7 '+nJoin+' corner(s)'):'')+(typeof nSyn!=='undefined'&&nSyn?(' \u00b7 '+nSyn+' corner leg(s) built from green'):'')+(typeof nArc!=='undefined'&&nArc?(' \u00b7 '+nArc+' radius elbow(s) read from the drawing'):'')+(typeof nBr!=='undefined'&&nBr?(' \u00b7 '+nBr+' reducer(s) bridged between runs'):'')+(nFit?(' \u00b7 placed '+nFit+' fitting(s)'):'')+(nElb?(' \u00b7 '+nElb+' elbow(s) turned'):'')+(nDup?(' \u00b7 '+nDup+' doubled run(s) merged'):'')+(nDrop?(' \u00b7 '+nDrop+' unsupported dropped'):'')+'. Click a joint to edit.'); try{ __ductDiag('joints'); }catch(e){}
     try{ var _fs=window.__yoloFitStats, _yo=document.getElementById('yoloOut');
       if(_fs && _yo){ var _dropped=(_fs.skipped_no_run_nearby||0)+(_fs.skipped_no_piece||0);
         var _msg=(_fs.insertable? ('YOLO fittings: <b>'+_fs.insertable+'</b> detected \u00b7 <b>'+_fs.placed+'</b> placed'+(_dropped?(' \u00b7 <b>'+_dropped+'</b> dropped (sat where no run was built \u2014 corners/edges)'):''))
@@ -3056,6 +3068,79 @@ function refreshSel(){
     return made;
   }
   window.__synthElbowLegs=synthElbowLegs;
+  // ---- ARC CORNER DETECTOR: a drawn radius elbow leaves curved chord segments in the vector data
+  // at the exact corner — better evidence than YOLO for drawn elbows (the tracer itself can't use
+  // arcs: they flatten to unpairable chords and the round-symbol filter eats the short ones).
+  // Cluster dark curved chords, and where a cluster sits between two roughly-perpendicular run
+  // ends, record the corner elbow (same join store the exports already emit). ----
+  function arcCornerJoins(){
+    var runs=window.__runs2d||[]; if(runs.length<2||typeof segments==='undefined'||!segments||!segments.length) return 0;
+    var arcs=[];
+    for(var i=0;i<segments.length;i++){ var s=segments[i];
+      if(!s.curved||s._fill) continue;
+      var d=(s.vdark==null?(s.dark==null?1:s.dark):s.vdark); if(d<0.45) continue;         // dark ink only
+      var ul=s.ulen||0; if(ul<4||ul>inToPt(120)) continue;                                 // chord of a plausible elbow arc
+      arcs.push({x:(s.ux1+s.ux2)/2, y:(s.uy1+s.uy2)/2, ul:ul}); }
+    if(!arcs.length) return 0;
+    // greedy cluster by proximity (a radius elbow leaves 2-8 chords in one spot)
+    var clusters=[];
+    arcs.forEach(function(a){ for(var c=0;c<clusters.length;c++){ var K=clusters[c];
+        if(Math.hypot(a.x-K.x,a.y-K.y)<=inToPt(30)){ K.x=(K.x*K.n+a.x)/(K.n+1); K.y=(K.y*K.n+a.y)/(K.n+1); K.n++; K.ul=Math.max(K.ul,a.ul); return; } }
+      clusters.push({x:a.x,y:a.y,n:1,ul:a.ul}); });
+    var made=0;
+    clusters.forEach(function(K){
+      if(K.n<2) return;                                                                   // one lone chord = probably a symbol remnant
+      var reach=Math.max(inToPt(36), K.ul*1.4), hits=[];
+      runs.forEach(function(r){ var re2=runEnd(r);
+        [{p:[r.start[0],r.start[1]], d:[-r.dir[0],-r.dir[1]]},{p:[re2.x,re2.y], d:[r.dir[0],r.dir[1]]}].forEach(function(E){
+          var dd=Math.hypot(E.p[0]-K.x, E.p[1]-K.y); if(dd<=reach) hits.push({r:r, dd:dd, dir:E.d}); }); });
+      // need exactly two ends from two different runs, roughly perpendicular
+      var byRun={}; hits.forEach(function(hh){ if(!byRun[hh.r.id]||hh.dd<byRun[hh.r.id].dd) byRun[hh.r.id]=hh; });
+      var ids=Object.keys(byRun); if(ids.length!==2) return;
+      var A=byRun[ids[0]], B=byRun[ids[1]];
+      var dot=Math.abs(A.dir[0]*B.dir[0]+A.dir[1]*B.dir[1]); if(dot>0.7) return;          // collinear ends = a gap, not a corner
+      // skip if a corner is already recorded here (YOLO join / synthesis got it first)
+      var J=window.__elbowJoins=window.__elbowJoins||[];
+      for(var j=0;j<J.length;j++){ if(Math.hypot((J[j].atX||0)-K.x,(J[j].atY||0)-K.y)<=inToPt(24)) return; }
+      var tr=A.r, br=B.r;
+      var turn=Math.atan2(A.dir[0]*(-B.dir[1])-A.dir[1]*(-B.dir[0]), A.dir[0]*(-B.dir[0])+A.dir[1]*(-B.dir[1]));
+      var rr=!!(tr.pieces&&tr.pieces.some(function(p){return p.kind==='straight'&&p.round;}));
+      J.push({ trunkId:tr.id, branchId:br.id, atX:K.x, atY:K.y, turn:turn, round:rr, widthIn:tr.widthIn||br.widthIn||12, _arc:true });
+      made++;
+    });
+    if(made) console.log('[takeoff] arc-corner detector recorded '+made+' radius elbow(s) from the drawing');
+    return made;
+  }
+  window.__arcCornerJoins=arcCornerJoins;
+  // ---- SIZE-CHANGE GAP BRIDGE: a reducer/transition drawn BETWEEN two runs leaves a gap the
+  // track-walk can't fill (it only inserts fittings that land ON a run). When a size-change
+  // detection sits between two facing run ends, auto-connect them with the same machinery as
+  // Connect > Reducer (right fitting by shape: transition / reducer / sq-to-round). ----
+  function bridgeSizechanges(){
+    var dets=window.__yoloDets||[], runs=window.__runs2d||[]; if(!dets.length||runs.length<2) return 0;
+    function base(c){ return (c||'').replace(/^(rect|round)-/,''); }
+    var made=0;
+    dets.forEach(function(d){
+      if(d._used || d.nx==null) return;
+      var b=base(d.cls); if(b!=='sizechange'&&b!=='reducer'&&b!=='transition'&&b!=='sq2round') return;
+      if((d.score||0) < (window.__yoloGreenScoped?0.18:0.30)) return;
+      var reach=inToPt(36), hits=[];
+      runs.forEach(function(r){ var re2=runEnd(r);
+        [{end:'start', p:[r.start[0],r.start[1]], out:[-r.dir[0],-r.dir[1]]},
+         {end:'end',   p:[re2.x,re2.y],           out:[r.dir[0],r.dir[1]]}].forEach(function(E){
+          var dd=Math.hypot(E.p[0]-d.nx, E.p[1]-d.ny); if(dd<=reach) hits.push({r:r, end:E.end, p:E.p, out:E.out, dd:dd}); }); });
+      var byRun={}; hits.forEach(function(hh){ if(!byRun[hh.r.id]||hh.dd<byRun[hh.r.id].dd) byRun[hh.r.id]=hh; });
+      var ids=Object.keys(byRun); if(ids.length!==2) return;
+      var A=byRun[ids[0]], B=byRun[ids[1]];
+      if((A.out[0]*B.out[0]+A.out[1]*B.out[1]) > -0.7) return;                 // ends must FACE each other (in-line gap, not a corner)
+      if(Math.hypot(A.p[0]-B.p[0], A.p[1]-B.p[1]) > inToPt(72)) return;        // sanity: the gap itself is fitting-sized
+      var up=( (A.r.widthIn||0) >= (B.r.widthIn||0) ) ? A : B, dn=(up===A)?B:A; // step from the larger run down
+      try{ if(window.__connectReducer && window.__connectReducer(up.r.id, up.end, dn.r.id, dn.end)){ d._used=true; made++; } }catch(e){ console.warn('bridgeSizechanges', e); }
+    });
+    if(made) console.log('[takeoff] bridged '+made+' size change(s) between run ends');
+    return made;
+  }
+  window.__bridgeSizechanges=bridgeSizechanges;
 
   // ---- STAGE 5 CARRY-FORWARD: a run with no tag of its own inherits the size of the run it
   // connects to at a shared endpoint (a branch holds the trunk size until a real sizechange).
