@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.02</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.03</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2972,9 +2972,19 @@ function refreshSel(){
     window.__elbowJoins=[];                          // recorded connections, rebuilt each pass
     function base(c){ return (c||'').replace(/^(rect|round)-/,''); }
     var reach0=inToPt(36);
+    // SCORE FLOOR ON ELBOW JOINS — this pass had NO score gate whatsoever: any detection classed 'elbow'
+    // was eligible to weld two run ends together, right down to the 0.11 hits the global slider admits.
+    // Page-25 evidence with corner inference disabled (so these joins placed every elbow on the sheet):
+    // of 13 placed elbows, 12 were backed by dets scoring 0.73-0.89 and exactly ONE by a 0.46 -- and that
+    // one also landed 1.5 duct widths off its corner. Meanwhile 19 of the 21 detections that placed
+    // nothing scored 0.71 or below. A floor at 0.60 drops the bad one with 0.13 of headroom left under the
+    // real cluster, so it is not tuned to the edge of this print's numbers.
+    var ELB_JOIN_SCORE_MIN=(window.__yoloGreenScoped?0.50:0.60);
+    var _elbWeak=0;
     var joined=0;
     dets.forEach(function(d){
       if(d._used || base(d.cls)!=='elbow' || d.nx==null) return;
+      if((d.score||0) < ELB_JOIN_SCORE_MIN){ _elbWeak++; return; }
       var bw=Math.abs((d.nx1!=null?d.nx1:d.nx)-(d.nx0!=null?d.nx0:d.nx)), bh=Math.abs((d.ny1!=null?d.ny1:d.ny)-(d.ny0!=null?d.ny0:d.ny));
       var reach=Math.max(reach0, 0.85*Math.hypot(bw,bh));   // a run end must be within ~elbow-size of the detection to count as its corner (radius elbows reach farther)
       var hits=[];
@@ -3010,6 +3020,7 @@ function refreshSel(){
         round:elbRound, widthIn:lastP.widthIn||trunk.widthIn, score:d.score });
       d._used=true; joined++;
     });
+    if(_elbWeak) console.log('[takeoff] elbow joins: rejected '+_elbWeak+' detection(s) below score '+ELB_JOIN_SCORE_MIN.toFixed(2)+' (joined '+joined+')');
     return joined;
   }
   window.__joinRunsAtElbows=joinRunsAtElbows;
