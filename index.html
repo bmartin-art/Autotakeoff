@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.00</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.01</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -4777,6 +4777,30 @@ function refreshSel(){
     if(_rJoin||_rSyn||_rArc||_rBr||_rTap) console.log('[takeoff recovery] corners:'+_rJoin+' legs:'+_rSyn+' arc-elbows:'+_rArc+' reducer-bridges:'+_rBr+' tap-bridges:'+_rTap);
     var _rInf=0; try{ _rInf=(window.__inferCornersFromEnds?window.__inferCornersFromEnds():0)||0; }catch(e){ console.warn('infer',e); }
     var _rMg=0; try{ _rMg=(window.__mergeElbowJoins?window.__mergeElbowJoins():0)||0; }catch(e){ console.warn('merge',e); }
+    // DE-DUPE PLACEHOLDER ELBOWS — the walk drops a turn:0 marker at a chain end when YOLO sees a corner
+    // there. The recovery passes above then place the REAL turning elbow at that same corner and never
+    // clear the marker, so one physical corner ends up billing two (sometimes three) 90s. Evidence across
+    // two page-25 exports: 19 of 19 surviving markers sat within 1.3in of a real turning elbow in the same
+    // run, several at the identical vertex. A marker is removed ONLY when a real elbow is beside it, so an
+    // isolated marker survives and no corner is ever silently deleted. Pieces only -- no geometry touched.
+    var _rDup=0;
+    try{ (window.__runs2d||[]).forEach(function(r){
+      var pcs=r.pieces||[]; if(pcs.length<2) return;
+      var fr; try{ fr=runFrames(r); }catch(_){ return; }
+      function vtx(i){ var f=fr&&fr[i]; return f?[f.x,f.y]:null; }
+      var lim=inToPt(r.widthIn||12), kill=[];
+      for(var i=0;i<pcs.length;i++){ var p=pcs[i];
+        if(!(p.kind==='fitting' && p._elbow && !p.turn)) continue;
+        var a=vtx(i); if(!a) continue;
+        for(var j=0;j<pcs.length;j++){ var q=pcs[j];
+          if(j===i || !(q.kind==='fitting' && q._elbow && q.turn)) continue;
+          var b=vtx(j); if(!b) continue;
+          if(Math.hypot(a[0]-b[0],a[1]-b[1])<=lim){ kill.push(i); break; }
+        }
+      }
+      for(var k=kill.length-1;k>=0;k--){ pcs.splice(kill[k],1); _rDup++; }   // descending: earlier splices can't shift later indices
+    }); }catch(e){ console.warn('elbow de-dupe',e); }
+    if(_rDup) console.log('[takeoff] removed '+_rDup+' duplicate placeholder elbow(s) stacked on a real corner');
     sel.clear(); selRun=null; renderItems(); renderPanel();
     setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled'+(__keep.TWdropped.length?(' \u00b7 '+__keep.TWdropped.length+' unsupported dropped'):'')+(__keep.TWflagged?(' \u00b7 '+__keep.TWflagged+' flagged'):'')+((_rJoin+_rSyn+_rArc+_rBr+_rTap)?(' \u00b7 recovered: '+_rJoin+' corner(s), '+_rSyn+' leg(s), '+_rArc+' arc elbow(s), '+_rBr+' reducer bridge(s), '+_rTap+' tap bridge(s)'):'')+((typeof _rInf!=='undefined'&&_rInf)?(' \u00b7 '+_rInf+' corner(s) inferred from geometry'):'')+((typeof _rMg!=='undefined'&&_rMg)?(' \u00b7 '+_rMg+' corner(s) merged into one run'):'')+'.'); try{ __ductDiag('track-walk'); }catch(e){}
   }
