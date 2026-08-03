@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.11</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.13</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2346,7 +2346,27 @@ function refreshSel(){
     function grab(st){ return {widthIn:st.widthIn,depthIn:st.depthIn,round:st.round,size:st.size,cid:st.cid,camduct:st.camduct}; }
     var A=null,B=null,i; for(i=pieceIdx-1;i>=0;i--){ if(run.pieces[i].kind==='straight'){ A=run.pieces[i]; break; } }
     for(i=pieceIdx+1;i<run.pieces.length;i++){ if(run.pieces[i].kind==='straight'){ B=run.pieces[i]; break; } }
-    if(!A||!B) return false;
+    if(!A||!B){
+      // TAPER-ONLY FLIP. The size step the Connect tool builds sits at the very END (or START) of its run --
+      // __connectReducer does A.pieces.push(step) -- so the other size lives on a SEPARATE run and there is
+      // no straight on both sides. The region swap below needs both, so it bailed with `return false` and
+      // clicking the fitting did nothing at all. Flip the taper itself instead: swap inlet and outlet so the
+      // fitting visibly runs the other way, and leave both runs' sizes untouched.
+      var _pv=null,_nx=null,_q;
+      for(_q=pieceIdx-1;_q>=0;_q--){ if(run.pieces[_q].kind==='straight'){ _pv=run.pieces[_q]; break; } }
+      for(_q=pieceIdx+1;_q<run.pieces.length;_q++){ if(run.pieces[_q].kind==='straight'){ _nx=run.pieces[_q]; break; } }
+      var _eIn = p.inW  || (_pv&&_pv.widthIn) || p.widthIn || run.widthIn;
+      var _eOut= p.outW || (_nx&&_nx.widthIn) || p.widthIn || run.widthIn;
+      var _eInD =(p.inD !=null? p.inD : ((_pv&&_pv.depthIn!=null)?_pv.depthIn:_eIn));
+      var _eOutD=(p.outD!=null? p.outD: ((_nx&&_nx.depthIn!=null)?_nx.depthIn:_eOut));
+      p.inW=_eOut; p.outW=_eIn; p.inD=_eOutD; p.outD=_eInD;
+      p._newSide=(p._newSide==='end'?'start':'end');
+      p.widthIn=p.outW; p.depthIn=(p.round?null:p.outD);
+      p.size=(p.round?('\u00f8'+p.outW):(p.outW+'\u00d7'+(p.outD!=null?p.outD:p.outW)));
+      renderItems(); renderPanel();
+      if(typeof setStatus==='function') setStatus('Flipped the '+(p.camduct||'transition')+' \u2014 now runs '+_eOut+'\u2033 \u2192 '+_eIn+'\u2033.');
+      return true;
+    }
     var aSz=grab(A), bSz=grab(B);
     for(i=0;i<pieceIdx;i++){ if(run.pieces[i].kind==='straight') Object.assign(run.pieces[i],bSz); }      // swap the two size regions
     for(i=pieceIdx+1;i<run.pieces.length;i++){ if(run.pieces[i].kind==='straight') Object.assign(run.pieces[i],aSz); }
@@ -2391,11 +2411,16 @@ function refreshSel(){
       else if(bRound){ cid='reducer'; name='Reducer'; stepMsg=' + reducer'; }
       else { cid='tr'; name='Transition'; stepMsg=' + transition'; }
       var bSize = bRound?('\u00f8'+bW):(bW+'\u00d7'+bD);
+      // Same fix as __connectReducer: span the two sizes, don't impose one. Set the inlet and outlet in the
+      // order runFrames walks them, and drop the applyReducerDownstream call that was rewriting every
+      // straight in A to B's size (which on a start-connect meant the whole run).
+      var bDep=(bRound?bW:bD), atStart=(endA==='start');
       var step={kind:'fitting',cid:cid,camduct:name,round:bRound,lenIn:6,widthIn:bW,depthIn:(bRound?null:bD),
-                size:bSize,_sizeStep:true,_newSide:'end',_newW:bW,_newD:(bRound?bW:bD),_newR:bRound,_newS:bSize,
-                outW:bW,outD:(bRound?bW:bD)};
-      if(endA==='start') A.pieces.unshift(step); else A.pieces.push(step);
-      try{ if(typeof applyReducerDownstream==='function') applyReducerDownstream(A); }catch(_){}
+                size:bSize,_sizeStep:true,_newSide:(atStart?'start':'end'),
+                _newW:bW,_newD:bDep,_newR:bRound,_newS:bSize,
+                inW:(atStart?bW:aW),  inD:(atStart?bDep:aD),
+                outW:(atStart?aW:bW), outD:(atStart?aD:bDep)};
+      if(atStart) A.pieces.unshift(step); else A.pieces.push(step);
     }
     // connected pair should read as ONE run: give both the same color (+ shared label if one has none)
     var shared=A.color||B.color; if(!shared){ try{ shared=(typeof palette!=='undefined'&&palette.length)?palette[(window.__runs2d||[]).length%palette.length]:'#5b8def'; }catch(_){ shared='#5b8def'; } }
@@ -2531,15 +2556,38 @@ function refreshSel(){
     var t=(eb.p[0]-ea.p[0])*a[0]+(eb.p[1]-ea.p[1])*a[1], dIn=t/ppi, k;
     if(endA==='start'){ A.start=[A.start[0]+a[0]*t, A.start[1]+a[1]*t]; for(k=0;k<A.pieces.length;k++){ if(A.pieces[k].kind==='straight'){ A.pieces[k].lenIn=Math.max(1,A.pieces[k].lenIn+dIn); break; } } }
     else { for(k=A.pieces.length-1;k>=0;k--){ if(A.pieces[k].kind==='straight'){ A.pieces[k].lenIn=Math.max(1,A.pieces[k].lenIn+dIn); break; } } }
-    var aR=!!(A.pieces[0]&&A.pieces[0].round), bR=!!(B.pieces[0]&&B.pieces[0].round);
+    // THE TRANSITION MUST SPAN THE TWO EXISTING SIZES, NOT IMPOSE ONE OF THEM. Two things made it resize
+    // the duct instead. (1) `inW` was never set, so the fitting had no inlet size of its own and fell back
+    // to its own widthIn -- which was B's size -- drawing a B-to-B stub with no taper. (2) Worse,
+    // applyReducerDownstream(A) then walked A and rewrote EVERY straight to the step's outW. On an
+    // end-connect there is nothing after the step so that was harmless, but on a START-connect the step is
+    // unshifted to index 0 and the whole of A counts as downstream -- so connecting an 18x12 to a 10x10
+    // resized the entire 18x12 run to 10x10. A connector joins two runs; it must not change the duct on
+    // either side of it. Read A's actual size at the connected end, set inlet and outlet explicitly in the
+    // order runFrames walks them, and do not propagate anything.
+    var aAdj=null, k2;
+    if(endA==='start'){ for(k2=0;k2<A.pieces.length;k2++){ if(A.pieces[k2].kind==='straight'){ aAdj=A.pieces[k2]; break; } } }
+    else { for(k2=A.pieces.length-1;k2>=0;k2--){ if(A.pieces[k2].kind==='straight'){ aAdj=A.pieces[k2]; break; } } }
+    var aR=!!(aAdj?aAdj.round:(A.pieces[0]&&A.pieces[0].round));
+    var aW=(aAdj&&aAdj.widthIn)||A.widthIn, aD=((aAdj&&aAdj.depthIn!=null)?aAdj.depthIn:aW);
+    var bR=!!(B.pieces[0]&&B.pieces[0].round);
     var bW=B.widthIn, bD=(B.pieces[0]&&B.pieces[0].depthIn)!=null?B.pieces[0].depthIn:bW;
     var cid,name; if(aR!==bR){ cid='s2r'; name='Sq \u2192 Round'; } else if(bR){ cid='reducer'; name='Reducer'; } else { cid='tr'; name='Transition'; }
-    var bSize=bR?('\u00f8'+bW):(bW+'\u00d7'+bD);
-    var step={kind:'fitting',cid:cid,camduct:name,round:bR,lenIn:6,widthIn:bW,depthIn:(bR?null:bD),size:bSize,_sizeStep:true,_newSide:'end',_newW:bW,_newD:(bR?bW:bD),_newR:bR,_newS:bSize,outW:bW,outD:(bR?bW:bD)};
-    if(endA==='start') A.pieces.unshift(step); else A.pieces.push(step);
-    try{ if(typeof applyReducerDownstream==='function') applyReducerDownstream(A); }catch(_){}
+    var bSize=bR?('\u00f8'+bW):(bW+'\u00d7'+bD), bDep=(bR?bW:bD);
+    // runFrames walks pieces in array order from run.start, so a step unshifted at index 0 is entered from
+    // the B side and a step pushed at the tail is entered from the A side. Assign in/out to match.
+    var atStart=(endA==='start');
+    var inW_ =atStart? bW  : aW,  inD_ =atStart? bDep : aD;
+    var outW_=atStart? aW  : bW,  outD_=atStart? aD   : bDep;
+    var step={kind:'fitting',cid:cid,camduct:name,round:bR,lenIn:6,widthIn:bW,depthIn:(bR?null:bD),size:bSize,
+              _sizeStep:true,_newSide:(atStart?'start':'end'),
+              _newW:bW,_newD:bDep,_newR:bR,_newS:bSize,
+              inW:inW_, inD:inD_, outW:outW_, outD:outD_};
+    if(atStart) A.pieces.unshift(step); else A.pieces.push(step);
     var shared=A.color||B.color||'#5b8def'; A.color=shared; B.color=shared;
-    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Connected with a '+name+' \u2014 both now one color.'); return true;
+    renderItems(); renderPanel();
+    if(typeof setStatus==='function') setStatus('Connected with a '+name+' \u2014 '+aW+'\u2033 \u2192 '+bW+'\u2033, both runs keep their own size.');
+    return true;
   };
   window.__connectOffset=function(idA, endA, idB, endB){    // bridge two offset (parallel) ends with an offset jog: two 45s + a straight
     var A=findRun(idA), B=findRun(idB); if(!A||!B||A===B) return false;
@@ -6722,7 +6770,22 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
           +'<button id="cpCancel" style="width:100%;background:#eef1f5;border:1px solid #dde2e9;color:#6b7482;border-radius:8px;padding:6px;cursor:pointer">Cancel</button>';
         document.body.appendChild(mnu);
         ['mousedown','mouseup','wheel'].forEach(function(t){ mnu.addEventListener(t,function(ev){ev.stopPropagation();},true); });
-        function done(fn,label,extra){ try{ var ok=fn?fn(cA.runId,cA.end,cB.runId,cB.end,extra):null; if(ok===false) status('Couldn\u2019t '+label+' those two \u2014 try the other ends.'); }catch(err){ status('Connect error: '+((err&&err.message)||err)); } try{window.__renderPanel&&window.__renderPanel();}catch(_){} try{mnu.remove();}catch(_){} }
+        var CN_NICE={'elbow':'elbow','tap':'tap','cross-tap':'cross taps','reduce':'reducer / transition','offset':'offset'};
+        function done(fn,label,extra){
+          var ok=null;
+          try{ ok=fn?fn(cA.runId,cA.end,cB.runId,cB.end,extra):null; if(ok===false) status('Couldn\u2019t '+label+' those two \u2014 try the other ends.'); }
+          catch(err){ status('Connect error: '+((err&&err.message)||err)); }
+          try{window.__renderPanel&&window.__renderPanel();}catch(_){}
+          try{mnu.remove();}catch(_){}
+          // HAND OFF TO INSERT MODE. The fitting Connect just built is the same object the Insert tool builds,
+          // but tap-to-adjust only runs while __editMode is 'insert' (see the click dispatcher), so after a
+          // connect you were left holding a fitting you couldn't click. Drop into insert mode so the new
+          // fitting is immediately adjustable: a reducer flips which way it tapers, an elbow spins 90.
+          if(ok!==false){
+            window.__editMode='insert'; try{ refl(); }catch(_){}
+            status('Connected with a '+(CN_NICE[label]||label)+' \u2014 tap the new fitting to change the direction it runs.');
+          }
+        }
         mnu.querySelector('#cpElbow').onclick=function(){ done(window.__connectElbow,'elbow'); };
         mnu.querySelector('#cpTap').onclick=function(){ done(window.__connectTap,'tap',false); };
         mnu.querySelector('#cpShopTap').onclick=function(){ done(window.__connectTap,'tap',true); };
