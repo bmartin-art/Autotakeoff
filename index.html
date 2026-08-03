@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.04</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.05</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3378,7 +3378,19 @@ function refreshSel(){
         var offC=Math.hypot(P[0]-C[0], P[1]-C[1])/_ppiM;                          // how far the recorded corner sat from the real one
         // SAFETY RAILS — a merge needing big phantom extensions, a weird angle, or a corner far from
         // where it was detected is a bad pairing: leave it as a visual/export join instead.
-        if(Math.abs(gapA)>30 || Math.abs(gapB)>30 || offC>36 || Math.abs(turn0)<Math.PI/6 || Math.abs(turn0)>Math.PI*0.85){ continue; }
+        // ELBOW LENGTH LIMIT — the rail was a flat 30in of phantom leg extension and 36in of corner
+        // offset regardless of duct size, so one elbow could invent up to 5ft of duct to reach a
+        // neighbour. An elbow's reach is set by its own geometry: a long-radius 90 has a centerline
+        // radius of about 1.5x the width, so its tangent points sit that far back from the corner on
+        // each leg. Nothing spans 30in of gap on a 6in duct -- that is an offset or two elbows, not one.
+        // Scale to the duct, but clamp at the OLD values so this can only ever be tighter than before,
+        // never looser: on 18in duct it behaves as it always did, on 6in duct it stops inventing 4ft legs.
+        var _mw=(j.widthIn||first.widthIn||second.widthIn||12);
+        var _gapMax=Math.min(30, Math.max(12, 2.0*_mw));      // per-leg phantom extension
+        var _offMax=Math.min(36, Math.max(12, 1.5*_mw));      // how far the true corner may sit from the detected one
+        if(Math.abs(gapA)>_gapMax || Math.abs(gapB)>_gapMax || offC>_offMax || Math.abs(turn0)<Math.PI/6 || Math.abs(turn0)>Math.PI*0.85){
+          console.log('[takeoff] merge refused '+first.id+'+'+second.id+' \u00b7 w='+_mw+'\u2033 gapA='+gapA.toFixed(1)+' gapB='+gapB.toFixed(1)+' offC='+offC.toFixed(1)+' (limits '+_gapMax.toFixed(0)+'/'+_offMax.toFixed(0)+') turn='+Math.round(turn0*180/Math.PI)+'\u00b0');
+          continue; }
         window.__pushRunUndo&&window.__pushRunUndo();
         C=[P[0],P[1]];                                                            // snap the corner onto both centerlines
         for(var k1=first.pieces.length-1;k1>=0;k1--){ if(first.pieces[k1].kind==='straight'){ first.pieces[k1].lenIn=Math.max(1, Math.round((first.pieces[k1].lenIn+gapA)*10)/10); break; } }
