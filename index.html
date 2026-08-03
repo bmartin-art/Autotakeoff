@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.85</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.90</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -687,7 +687,12 @@ async function renderPage(){
   await sampleDarknessHiRes(page);    // (no-op when vector color is reliable; otherwise raster fallback)
   classify(); drawOverlay();
   try{ var __dm=document.getElementById('darkMap'); var __sp=document.getElementById('shadePalette'); if(__dm&&__dm.checked){ if(__sp){__sp.style.display='block';} buildShadePalette(); } buildColorPalette(); }catch(e){}
-  setStatus(segments.length+' segments · '+tags.length+' size tags · page '+pageNum + (ductRef?'':'   -   click a piece of duct to calibrate color + thickness'));
+  var __hv=(segments.length>150000), __noTxt=!((window.__textBoxes||[]).length);
+  setStatus(segments.length.toLocaleString()+' segments · '+tags.length+' size tags · page '+pageNum
+    + (__hv?' · ⚠ heavy sheet (flattened CAD plot) — set a Work Area to keep it responsive':'')
+    + (__noTxt?' · no text layer on this PDF: sizes must come from Read tags (AI)':'')
+    + (ductRef?'':'   -   click a piece of duct to calibrate color + thickness'));
+  if(__hv||__noTxt) console.log('[takeoff sheet] segments='+segments.length+' textBoxes='+((window.__textBoxes||[]).length)+' pdfTextTags='+tags.length+(__noTxt?'  (flattened/plotted PDF — no selectable text)':''));
   try{ if(!window.__wizShown){ window.__wizShown=true; setTimeout(function(){ openWizard(); }, 350); } }catch(e){}
   if(!ductRef){ pickMode=true; try{ document.getElementById('overlay').style.cursor='crosshair'; }catch(e){} }
 }
@@ -1221,6 +1226,11 @@ function classify(){
   // parallel-pair detection for DIAGONAL duct (angled runs) — same gap/overlap logic, rotated
   (function(){
     const Ds=segments.filter(s=>s._u.o==='D' && Math.hypot(s.ux2-s.ux1,s.uy2-s.uy1)>18);
+    // PERFORMANCE GUARD: this pass compares every diagonal to every other (O(n^2)). Flattened CAD
+    // plots can carry 100k+ diagonals (each line exported with its own full graphics state), which
+    // locks the browser for minutes. Above the cap, skip it — H/V pairing still runs, and a Work
+    // Area brings a sheet like that back under the cap.
+    if(Ds.length>6000){ console.warn('[takeoff] '+Ds.length+' diagonal segments \u2014 skipping the diagonal pair pass (set a Work Area for angled duct on this sheet)'); return; }
     const meta=Ds.map(s=>{ const dx=s.ux2-s.ux1, dy=s.uy2-s.uy1, L=Math.hypot(dx,dy)||1; const ux=dx/L, uy=dy/L; const mx=(s.ux1+s.ux2)/2, my=(s.uy1+s.uy2)/2;
       const t1=(s.ux1-mx)*ux+(s.uy1-my)*uy, t2=(s.ux2-mx)*ux+(s.uy2-my)*uy;
       return {s:s, ux:ux, uy:uy, nx:-uy, ny:ux, mx:mx, my:my, ang:((Math.atan2(dy,dx)*180/Math.PI)%180+180)%180, lo:Math.min(t1,t2), hi:Math.max(t1,t2)}; });
@@ -3180,6 +3190,46 @@ function refreshSel(){
     return made;
   }
   window.__bridgeTaps=bridgeTaps;
+  // ---- PRINTED TAG BEATS A MEASURED GAP: a run with no size of its own falls back to the wall gap
+  // the pairing measured — and when the pairing grabbed the wrong walls that gap can be way oversize
+  // (e.g. 30" on a duct the print tags 16x14). If an UNCLAIMED size tag sits on such a run, adopt it:
+  // the printed size is the authority; the measurement is only an estimate. Flags a big disagreement
+  // for review rather than hiding it. Only touches runs that are currently unsized. ----
+  function adoptTagsForScaledRuns(){
+    var runs=window.__runs2d||[]; if(!runs.length) return 0;
+    if(typeof tags==='undefined' || !tags || !tags.length) return 0;
+    var used={}; runs.forEach(function(r){ (r.tagIdx||[]).forEach(function(ti){ used[ti]=true; }); });
+    var cands=[];
+    runs.forEach(function(r){ if(!r.scaled) return;                       // only runs with no size of their own
+      var L=runLenIn(r), half=(r.widthIn||12)/2;
+      for(var ti=0;ti<tags.length;ti++){ if(used[ti]) continue; var tg=tags[ti]; if(tg.nx==null) continue;
+        var pd=parseTagDims(tg.text); if(!pd) continue;
+        var pr=projOnRun(r,tg.nx,tg.ny);
+        if(pr.alongIn < 12 || pr.alongIn > L-12) continue;                 // must sit in the run's INTERIOR — a tag near an
+                                                                           // end usually belongs to the duct crossing there
+        if(Math.abs(pr.perpIn) > half+6) continue;                         // and sit ON its band
+        cands.push({r:r, ti:ti, pd:pd, d:Math.abs(pr.perpIn)});
+      } });
+    // AMBIGUITY VETO: if more than one unsized run can claim a tag, we cannot know which duct it
+    // labels — leave both alone (a wrong adopt is worse than no size, which Final review will flag).
+    var perTag={}; cands.forEach(function(c){ (perTag[c.ti]=perTag[c.ti]||[]).push(c.r.id); });
+    cands=cands.filter(function(c){ var ids={}; perTag[c.ti].forEach(function(id){ ids[id]=1; }); return Object.keys(ids).length===1; });
+    cands.sort(function(a,b){ return a.d-b.d; });                          // nearest tag first
+    var n=0;
+    cands.forEach(function(c){ if(used[c.ti] || !c.r.scaled) return;       // one tag per run, one run per tag
+      var pd=c.pd, meas=c.r.widthIn, w=pd.w, dep=pd.round?pd.w:pd.h;
+      if(!pd.round && meas){ if(Math.abs(pd.h-meas) < Math.abs(pd.w-meas)-0.5){ w=pd.h; dep=pd.w; } }   // plan-view width = the number closest to the measurement
+      var sz=pd.round?('\u00f8'+w):(w+'\u00d7'+dep);
+      c.r.pieces.forEach(function(p){ if(p.kind!=='straight') return;
+        p.widthIn=w; p.depthIn=dep; p.round=!!pd.round; p.size=sz;
+        p.cid=pd.round?'spiral':'st'; p.camduct=pd.round?'Spiral':'Straight Duct'; p._scaled=false; delete p._needH; });
+      c.r.widthIn=w; c.r.scaled=false; c.r._needH=false; c.r.tagIdx=(c.r.tagIdx||[]).concat([c.ti]); used[c.ti]=true;
+      if(meas && Math.abs(meas-w)/Math.max(1,meas) > 0.4) c.r._flag='mismatch';   // printed size wins, but say so
+      n++; });
+    if(n) console.log('[takeoff] adopted '+n+' printed size tag(s) onto unsized runs (printed size beats the measured wall gap)');
+    return n;
+  }
+  window.__adoptTagsForScaledRuns=adoptTagsForScaledRuns;
   // ---- DETECTION SANITY: the geometry outranks the model's label. An 'elbow' where the duct
   // demonstrably runs STRAIGHT THROUGH is not an elbow — if the size steps there it's a
   // sizechange (relabel so the transition machinery gets it); if nothing changes, it's a false
@@ -3939,6 +3989,10 @@ function refreshSel(){
     try{window.__showRunPanel&&window.__showRunPanel();}catch(_){} renderItems(); renderPanel();
     setTimeout(function(){ var ss=document.getElementById('selSize'); if(ss&&it.kind==='size'){ ss.focus(); } },40);
     if(typeof setStatus==='function') setStatus('Issue '+(window.__frIdx+1)+' of '+iss.length+': '+(it.kind==='size'?'missing size \u2014 type it and press Enter, then N for the next.':'no section \u2014 name it in the Section box.')); };
+  (function(){ var sb=document.getElementById('frSizeFromTags');
+    if(sb) sb.onclick=function(){ var n=0; try{ n=window.__adoptTagsForScaledRuns?window.__adoptTagsForScaledRuns():0; }catch(e){}
+      try{ window.__renderItems&&window.__renderItems(); window.__renderItemPanel&&window.__renderItemPanel(); window.__frSummary&&window.__frSummary(); }catch(_){}
+      if(typeof setStatus==='function') setStatus(n?('Sized '+n+' run(s) from the printed tag sitting on them \u2014 check the \u26a0 flagged ones, Ctrl+Z to undo.'):'No unsized run has an unambiguous tag on it \u2014 nothing changed.'); }; })();
   (function(){ var b=document.getElementById('frRefresh'); if(b) b.onclick=function(){ window.__frSummary(); };
     var n=document.getElementById('frNext'); if(n) n.onclick=function(){ window.__frNextIssue(); };
     var t=document.getElementById('frToggle'); if(t){ var old=t.onclick; t.onclick=function(){ if(old)old.call(this); try{window.__frSummary();}catch(_){} }; }
@@ -5611,7 +5665,11 @@ async function aiTileSweep(){
          if(!un){ out.innerHTML='<div class="hint">Could not read page size.</div>'; return; }
          ux0=0; uy0=0; ux1=un.w; uy1=un.h; }
   var areaWu=ux1-ux0, areaHu=uy1-uy0;
-  var TILEU=300, OVERU=110, STEPU=TILEU-OVERU;                   // tile size in USER units (same render regardless of zoom)
+  // Tile size scales with the SHEET, not a fixed 300pt: on a letter-size plot (612x792) a 300pt tile
+  // covers half the page, so the AI's in-tile fractional position lands the tag feet away from its
+  // duct. Target ~5 tiles across whatever we're sweeping.
+  var TILEU=Math.max(110, Math.min(300, (ux1-ux0)/4.5)), OVERU=Math.round(TILEU*0.36), STEPU=TILEU-OVERU;
+  console.log('[takeoff sweep] area '+Math.round(ux1-ux0)+'x'+Math.round(uy1-uy0)+'pt \u00b7 tile '+Math.round(TILEU)+'pt \u00b7 overlap '+OVERU+'pt');
   var nx=Math.max(1,Math.ceil((areaWu-OVERU)/STEPU)), ny=Math.max(1,Math.ceil((areaHu-OVERU)/STEPU)), total=nx*ny;
   var added=0, done=0, fails=0, hits=[];
   for(var gy=0; gy<ny; gy++){ for(var gx=0; gx<nx; gx++){
@@ -6183,6 +6241,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
          <button id="frRefresh" style="flex:1;background:#eef1f6;border:1px solid #cdd6e2;color:#37414f;border-radius:8px;padding:6px;cursor:pointer;font-weight:700;font-size:11px">⟳ Refresh summary</button>
          <button id="frNext" style="flex:1;background:#fff3d6;border:1px solid #eecf87;color:#8a5f0a;border-radius:8px;padding:6px;cursor:pointer;font-weight:700;font-size:11px">⏭ Next issue (N)</button>
        </div>
+       <button id="frSizeFromTags" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#eef7ee;border:1px solid #a9d3a0;color:#2f6b2a;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⌗ Size unsized runs from nearby tags</button>
        <button id="dtMissingDims" onclick="window.__toggleDimReview&&window.__toggleDimReview()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#fff7e6;border:1px solid #f0cf8a;color:#9a6a12;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⚠ Highlight ducts missing a size</button>
        <button id="dtFittings" onclick="window.__toggleFitPanel&&window.__toggleFitPanel()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#e6fbff;border:1px solid #a5e4ef;color:#0e7490;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">◎ Review fittings by type</button>
        <div id="fitList"></div>
