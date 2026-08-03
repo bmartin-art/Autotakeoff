@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.09</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.11</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3062,7 +3062,14 @@ function refreshSel(){
       var pd=[-M.dir[1], M.dir[0]];                                           // perpendicular
       // measure GREEN support along +pd and -pd from C: perpendicular-oriented duct lines in a corridor
       var corridorPt=inToPt((M.widthIn||12)/2+14), maxLegPt=inToPt(20*12), minSupPt=inToPt(20);   // 20in: short stub legs (e.g. a 2'5" leg to a drop) are real
-      function support(sgn){ var ext=0;
+      // CONTIGUOUS support only. This used to be ext=max(hi) over every qualifying segment within maxLeg,
+      // so ONE unrelated duct line far down the corridor set the whole leg length -- rt7z8v5 on page 25
+      // came out as a real 1'8" stub, a real 90, then an invented 18'1" leg sized "10x?" reaching a duct
+      // 15ft away. Duct is continuous: walk outward from the corner and stop at the first void bigger than
+      // a joint. Support must also START at the corner, so a leg can't adopt duct that begins feet away.
+      var SUP_GAP=inToPt(18);                                  // one coupling / one fitting of slack
+      function support(sgn){
+        var iv=[];
         for(var i=0;i<segments.length;i++){ var s=segments[i]; if(s.cls!=='duct'||s.nx1==null) continue;
           var vx=s.nx2-s.nx1, vy=s.ny2-s.ny1, sl=Math.hypot(vx,vy); if(sl<6) continue;
           var dot=Math.abs((vx/sl)*pd[0]+(vy/sl)*pd[1]); if(dot<0.94) continue;                 // must run along the perpendicular
@@ -3070,8 +3077,16 @@ function refreshSel(){
           var lo=Math.min(a1,a2), hi=Math.max(a1,a2); if(hi<=8||lo>maxLegPt) continue;          // ahead of the corner, within max leg
           var p1=(s.nx1-C[0])*M.dir[0]+(s.ny1-C[1])*M.dir[1], p2=(s.nx2-C[0])*M.dir[0]+(s.ny2-C[1])*M.dir[1];
           if(Math.min(Math.abs(p1),Math.abs(p2))>corridorPt) continue;                          // stays in the corridor beside the main
-          ext=Math.max(ext, Math.min(hi,maxLegPt)); }
-        return ext; }
+          iv.push([Math.max(0,lo), Math.min(hi,maxLegPt)]); }
+        if(!iv.length) return 0;
+        iv.sort(function(a,b){ return a[0]-b[0]; });
+        if(iv[0][0] > SUP_GAP) return 0;                        // green doesn't start at the corner -> not this corner's leg
+        var reach=iv[0][1];
+        for(var k=1;k<iv.length;k++){
+          if(iv[k][0] <= reach + SUP_GAP) reach=Math.max(reach, iv[k][1]);
+          else break;                                           // first real void ends the leg
+        }
+        return reach; }
       var eP=support(1), eN=support(-1), sgn=(eP>=eN?1:-1), ext=Math.max(eP,eN);
       if(ext<minSupPt) return;                                                                  // no real green continuation -> not a corner
       // cap the leg at the nearest OTHER run's endpoint along this direction, so the synthesized
@@ -3417,8 +3432,18 @@ function refreshSel(){
         if(_fp && _sp){
           var _fw=_fp.widthIn||0, _sw=_sp.widthIn||0;
           var _fd=(_fp.depthIn!=null?_fp.depthIn:_fw), _sd=(_sp.depthIn!=null?_sp.depthIn:_sw);
-          if((!!_fp.round)!==(!!_sp.round) || Math.abs(_fw-_sw)>1.5 || Math.abs(_fd-_sd)>1.5){
-            console.log('[takeoff] merge refused '+first.id+'+'+second.id+' \u00b7 size/shape mismatch '+(_fp.size||_fw+'\u2033')+' \u2192 '+(_sp.size||_sw+'\u2033'));
+          // A ONE-SIZE STEP AT A CORNER IS NORMAL -- you fit the elbow, then a reducer. The first cut of this
+          // check used a flat 1.5in tolerance and threw away real corners: on a round print, 14"Ø horizontal
+          // into a 12"Ø and into a 16"Ø vertical both read as "mismatch" at 2.0in, and since a refused join
+          // is now dropped, two TAGGED elbows (dets scoring 0.84 and 0.73) vanished from the drawing and the
+          // takeoff entirely. What is not one duct is a GROSS step or a shape change. Use the same 1.35x
+          // width-class factor the chain splitter already uses, so both passes agree on what "same duct" means.
+          var _res=function(pc){ var t=String(pc.size||''); return t.indexOf('\u00f8')>=0 || t.indexOf('\u00d7')>=0; };
+          var _shape = _res(_fp) && _res(_sp) && ((!!_fp.round)!==(!!_sp.round));   // only judge shape when BOTH sizes resolved
+          var _wBad = Math.max(_fw,_sw) > Math.min(_fw,_sw)*1.35+1;
+          var _dBad = Math.max(_fd,_sd) > Math.min(_fd,_sd)*1.35+1;
+          if(_shape || _wBad || _dBad){
+            console.log('[takeoff] merge refused '+first.id+'+'+second.id+' \u00b7 '+(_shape?'shape change':'gross size step')+' '+(_fp.size||_fw+'\u2033')+' \u2192 '+(_sp.size||_sw+'\u2033'));
             _reject.push(j); continue; }
         }
         window.__pushRunUndo&&window.__pushRunUndo();
