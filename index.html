@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.08</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.09</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3358,7 +3358,7 @@ function refreshSel(){
     return run; }
   function mergeElbowJoins(){
     var J=window.__elbowJoins||[]; if(!J.length) return 0;
-    var merged=0, guard=0;
+    var merged=0, guard=0, _reject=[];
     while(guard++<12){
       var did=false;
       for(var ji=0;ji<J.length;ji++){ var j=J[ji];
@@ -3403,7 +3403,7 @@ function refreshSel(){
         var _offMax=Math.min(36, Math.max(12, 1.5*_mw));      // how far the true corner may sit from the detected one
         if(Math.abs(gapA)>_gapMax || Math.abs(gapB)>_gapMax || offC>_offMax || Math.abs(turn0)<Math.PI/6 || Math.abs(turn0)>Math.PI*0.85){
           console.log('[takeoff] merge refused '+first.id+'+'+second.id+' \u00b7 w='+_mw+'\u2033 gapA='+gapA.toFixed(1)+' gapB='+gapB.toFixed(1)+' offC='+offC.toFixed(1)+' (limits '+_gapMax.toFixed(0)+'/'+_offMax.toFixed(0)+') turn='+Math.round(turn0*180/Math.PI)+'\u00b0');
-          continue; }
+          _reject.push(j); continue; }
         // SIZE / SHAPE CONTINUITY — an elbow's inlet and outlet are the SAME duct: one size, one shape.
         // The merge took the elbow's size from `first` (below) and then appended `second`'s pieces at
         // whatever size they already carried, so a 14in ROUND leg could be welded to an 18x12 RECT leg
@@ -3419,7 +3419,7 @@ function refreshSel(){
           var _fd=(_fp.depthIn!=null?_fp.depthIn:_fw), _sd=(_sp.depthIn!=null?_sp.depthIn:_sw);
           if((!!_fp.round)!==(!!_sp.round) || Math.abs(_fw-_sw)>1.5 || Math.abs(_fd-_sd)>1.5){
             console.log('[takeoff] merge refused '+first.id+'+'+second.id+' \u00b7 size/shape mismatch '+(_fp.size||_fw+'\u2033')+' \u2192 '+(_sp.size||_sw+'\u2033'));
-            continue; }
+            _reject.push(j); continue; }
         }
         window.__pushRunUndo&&window.__pushRunUndo();
         C=[P[0],P[1]];                                                            // snap the corner onto both centerlines
@@ -3442,6 +3442,16 @@ function refreshSel(){
         merged++; did=true; break;
       }
       if(!did) break;
+    }
+    // DROP THE REFUSED JOINS. A join left in __elbowJoins is not inert: renderItems() still draws it as an
+    // elbow bridge and the CAMduct writer still emits it as an e90/e45. So every refusal above was moving
+    // an elbow OUT of `runs` while leaving it on the drawing and in the takeoff -- the count looked better
+    // without anything actually changing. All the refusal reasons above mean "this is not a real corner"
+    // (leg gap beyond an elbow's reach, corner far from the detection, angle not a bend, two different
+    // ducts), so the join has to go too. Runs simply stay separate, which is the correct answer.
+    if(_reject.length){
+      window.__elbowJoins=(window.__elbowJoins||[]).filter(function(jn){ return _reject.indexOf(jn)<0; });
+      console.log('[takeoff] dropped '+_reject.length+' impossible corner join(s) \u2014 no longer drawn or exported as elbows');
     }
     if(merged){ try{ selRun=null; }catch(_){}
       console.log('[takeoff] merged '+merged+' corner(s) into continuous runs'); }
@@ -6435,6 +6445,16 @@ $('exportBtn').onclick=()=>{
     scaleInPerPt:null,   // fill in inches-per-point, or leave null and tell Claude the drawing scale
     scaleIPF:(typeof scaleIPF!=='undefined'?scaleIPF:null), ptPerInch:round(ppi),
     count:duct.length, ductLines:duct, sizeTags:tagOut,
+    // UNMERGED CORNER JOINS — these are NOT run pieces, but they are drawn on the plan as elbow bridges
+    // and they DO export to CAMduct as e90/e45 fittings. Leaving them out of this file made every elbow
+    // count taken from it wrong: refusing a merge moved an elbow out of `runs` without removing it from
+    // the drawing or the takeoff. Export them so the real elbow total is runs-pieces PLUS this list.
+    elbowJoins:((window.__elbowJoins||[]).map(function(j){
+      return {trunkId:j.trunkId, branchId:j.branchId, x:round(j.atX), y:round(j.atY),
+              turnDeg:(j.turn!=null?Math.round(j.turn*180/Math.PI):null), widthIn:j.widthIn,
+              round:!!j.round, score:(j.score!=null?round(j.score*100)/100:null),
+              inferred:!!j._inferred, synth:!!j._synth};
+    })),
     yoloDets:yoloOut, runs:runOut, centerlines:clOut};
   const json=JSON.stringify(out,null,2);
   try{ const blob=new Blob([json],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='duct-lines-page'+pageNum+'.json'; document.body.appendChild(a); a.click(); a.remove(); }catch(_){}
