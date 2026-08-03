@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.99</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.00</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3692,6 +3692,18 @@ function refreshSel(){
       function back(from,toward,d){ var vx=toward[0]-from[0], vy=toward[1]-from[1], l=Math.hypot(vx,vy)||1; return [from[0]+vx/l*d, from[1]+vy/l*d]; }
       var thA=back(throat, inIn, TH), thB=back(throat, otIn, TH);   // throat corners on the incoming/outgoing inner walls
       return [inOut, heel, otOut, thB, thA, inIn].map(function(q){return n2s(q[0],q[1]);});
+    }
+    // NON-TURNING ELBOW PLACEHOLDER (turn:0, lenIn:0, from the track-walk at line ~4655). `p.turn` is 0
+    // and therefore FALSY, so it misses the mitered branch above; it carries no _tap/_sizeStep/_offset
+    // flag either, so it fell all the way through to the STRAIGHT fallback and drew at `lenIn||0.1` --
+    // a 0.1in hairline. Visible as a stray marker, but with no area to click. And every hit-tester that
+    // the plain left-click path uses (__pieceHit, __hitPiece) early-returns on kind!=='straight', while
+    // __elbowHit -- the one that WOULD find it -- is only wired to insert mode and the right-click wheel.
+    // Result: an elbow you can see, that adds a 90 to the CAMduct count, that no click can reach.
+    // Give it a real body one duct wide so the existing pcHit handler selects and deletes it normally.
+    if(p.kind==='fitting' && p._elbow && !p.turn){
+      var Lph=Math.max(inToPt(6), hw);
+      return [P(-Lph,-hw),P(Lph,-hw),P(Lph,hw),P(-Lph,hw)].map(function(q){ return n2s(q[0],q[1]); });
     }
     // TAP — a short straight branch stub off the trunk wall (unless it's a shop tap collar)
     if(p.kind==='fitting' && p._tap && !p.shopTap && !p._tapRef){
