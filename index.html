@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.01</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.02</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3411,7 +3411,9 @@ function refreshSel(){
   // always point at each other: two roughly-perpendicular run ends whose FORWARD centerline
   // extensions intersect within a few feet of both ends is a corner, whatever the arc was drawn as. ----
   function inferCornersFromEnds(){
+    if(window.__noInferCorners){ console.log('[takeoff] corner inference SKIPPED (window.__noInferCorners is set)'); return 0; }
     var runs=window.__runs2d||[]; if(runs.length<2) return 0;
+    window.__inferDiag=[];                              // fresh each build, so the table reflects this run only
     function outEnds(r){ var e=runEnd(r), h=headingAtEndOf(r);
       return [{p:[r.start[0],r.start[1]], out:[-r.dir[0],-r.dir[1]], r:r},
               {p:[e.x,e.y], out:[h[0],h[1]], r:r}]; }
@@ -3423,7 +3425,12 @@ function refreshSel(){
     var cands=[];
     for(var i=0;i<ends.length;i++){ for(var k=i+1;k<ends.length;k++){
       var A=ends[i], B=ends[k]; if(A.r===B.r) continue;
-      var dot=A.out[0]*B.out[0]+A.out[1]*B.out[1]; if(Math.abs(dot)>0.5) continue;         // ~perpendicular legs only
+      var dot=A.out[0]*B.out[0]+A.out[1]*B.out[1];
+      // PERPENDICULARITY: 0.5 accepted anything from 60deg to 120deg as "square". Plan-view duct is
+      // orthogonal -- the only slack a real trace needs is a degree or two, not thirty -- and a sloppy
+      // pairing here also sets the elbow's turn SIGN from the wrong two ends, which is how a run ends up
+      // turning the wrong way into a neighbour. 0.25 is ~76-104deg: physics, not per-print tuning.
+      if(Math.abs(dot)>0.25) continue;
       // forward intersection P of the two extensions: A.p + tA*A.out = B.p + tB*B.out
       var det=A.out[0]*(-B.out[1]) - (-B.out[0])*A.out[1]; if(Math.abs(det)<1e-9) continue;
       var bx=B.p[0]-A.p[0], by=B.p[1]-A.p[1];
@@ -3443,7 +3450,7 @@ function refreshSel(){
         if(pr.alongIn>=6 && pr.alongIn<=L-6 && Math.abs(pr.perpIn)<=(R.widthIn/2+6)){ body=true; break; } }
       if(body) continue;
       var turn=Math.atan2(A.out[0]*(-B.out[1])-A.out[1]*(-B.out[0]), A.out[0]*(-B.out[0])+A.out[1]*(-B.out[1]));
-      cands.push({i:i, k:k, A:A, B:B, P:P, turn:turn, rA:rA, w:Math.max(wA,wB), cost:tA+tB});
+      cands.push({i:i, k:k, A:A, B:B, P:P, turn:turn, rA:rA, w:Math.max(wA,wB), cost:tA+tB, tA:tA, tB:tB, dot:dot, wA:wA, wB:wB});
     } }
     cands.sort(function(x,y){ return x.cost-y.cost; });
     var usedEnd={};
@@ -3453,9 +3460,28 @@ function refreshSel(){
       if(dup2) return;
       usedEnd[c.i]=true; usedEnd[c.k]=true;
       J.push({ trunkId:c.A.r.id, branchId:c.B.r.id, atX:c.P[0], atY:c.P[1], turn:c.turn, round:c.rA, widthIn:c.w, _inferred:true });
+      // INSTRUMENTATION — MAXR is currently a flat 60in and we have no measurement of how much of that
+      // reach real corners actually use. Record it per accepted corner, alongside the nearest YOLO elbow
+      // detection, so the reach threshold can be set from evidence instead of picked. If det-supported
+      // corners all turn out to be short-reach and the unsupported ones long-reach, reach is the rail to
+      // tighten; if they interleave, detection support is the rail instead.
+      try{
+        var _dets=(window.__yoloDets||[]).filter(function(dd){ return dd.nx!=null && (dd.cls||'').replace(/^(rect|round)-/,'')==='elbow'; });
+        var _best=null;
+        _dets.forEach(function(dd){ var m=Math.hypot(dd.nx-c.P[0], dd.ny-c.P[1]); if(!_best||m<_best.m) _best={m:m, s:dd.score||0}; });
+        var _row={ runA:c.A.r.id, runB:c.B.r.id,
+                   reachA_in:Math.round(ptToIn(c.tA)*10)/10, reachB_in:Math.round(ptToIn(c.tB)*10)/10,
+                   angle_deg:Math.round(Math.acos(Math.max(-1,Math.min(1,Math.abs(c.dot))))*180/Math.PI),
+                   wA_in:c.wA, wB_in:c.wB, turn_deg:Math.round(c.turn*180/Math.PI),
+                   detDist_in:_best?Math.round(ptToIn(_best.m)*10)/10:null,
+                   detScore:_best?Math.round(_best.s*100)/100:null };
+        (window.__inferDiag=window.__inferDiag||[]).push(_row);
+      }catch(_){}
       made++;
     });
-    if(made) console.log('[takeoff] inferred '+made+' corner(s) from run-end geometry (flattened-arc elbows)');
+    if(made){ console.log('[takeoff] inferred '+made+' corner(s) from run-end geometry (flattened-arc elbows)');
+      try{ if(window.__inferDiag && window.__inferDiag.length && console.table) console.table(window.__inferDiag); }catch(_){}
+      console.log('[takeoff] reach/angle/detection table above \u00b7 also in window.__inferDiag \u00b7 set window.__noInferCorners=true and re-run Auto Takeoff to build without this pass'); }
     return made;
   }
   window.__inferCornersFromEnds=inferCornersFromEnds;
