@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.05</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.08</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2987,12 +2987,25 @@ function refreshSel(){
       if(hits.length<2) return;
       hits.sort(function(a,b){return a.dist-b.dist;});
       function leaveDir(h){ if(h.atStart) return [h.run.dir[0],h.run.dir[1]]; var e=runEnd(h.run); return [-e.ux,-e.uy]; }
-      var P=null,Q=null;
-      for(var i=0;i<hits.length&&!Q;i++) for(var j=i+1;j<hits.length;j++){
+      // PAIRING — the old test only skipped pairs on nearly the SAME heading (dot > 0.94). It said nothing
+      // about ends pointing AT EACH OTHER: anti-parallel gives dot ~ -1, which passed. Two colinear runs
+      // facing each other are a straight continuation, not a bend -- and because `hits` is distance-sorted
+      // and the old loop took the FIRST acceptable pair, that near pair got welded before the perpendicular
+      // partner each leg should have turned into was ever examined. Result: two ends of what is really one
+      // duct line joined to each other, while the ducts they belong to are left unconnected.
+      // Measure the actual bend instead. A run enters along -leaveDir(A) and leaves along leaveDir(B), so
+      // the turn is acos(-dot): 90deg for a square elbow, 45 for an angled one, 0 for a head-on
+      // continuation, 180 for two ends running the same way. Require a real bend, then take the pair
+      // CLOSEST to square rather than merely the nearest, with distance only as a tie-break.
+      var P=null,Q=null,bestCost=1e18;
+      for(var i=0;i<hits.length;i++) for(var j=i+1;j<hits.length;j++){
         if(hits[i].run===hits[j].run) continue;
         var a=leaveDir(hits[i]), b=leaveDir(hits[j]);
-        if(a[0]*b[0]+a[1]*b[1] > 0.94) continue;     // nearly same heading -> not a bend, skip
-        P=hits[i]; Q=hits[j]; break;
+        var dt=a[0]*b[0]+a[1]*b[1];
+        var turnMag=Math.acos(Math.max(-1,Math.min(1,-dt)));            // 0 = head-on continuation, PI = same heading
+        if(turnMag<Math.PI/6 || turnMag>Math.PI*0.85) continue;         // same band the merge rail uses: a real 45 or 90, nothing else
+        var cost=Math.abs(turnMag-Math.PI/2)*1000 + (hits[i].dist+hits[j].dist);
+        if(cost<bestCost){ bestCost=cost; P=hits[i]; Q=hits[j]; }
       }
       if(!P||!Q) return;
       var trunk=P.run, branch=Q.run;
@@ -3391,6 +3404,23 @@ function refreshSel(){
         if(Math.abs(gapA)>_gapMax || Math.abs(gapB)>_gapMax || offC>_offMax || Math.abs(turn0)<Math.PI/6 || Math.abs(turn0)>Math.PI*0.85){
           console.log('[takeoff] merge refused '+first.id+'+'+second.id+' \u00b7 w='+_mw+'\u2033 gapA='+gapA.toFixed(1)+' gapB='+gapB.toFixed(1)+' offC='+offC.toFixed(1)+' (limits '+_gapMax.toFixed(0)+'/'+_offMax.toFixed(0)+') turn='+Math.round(turn0*180/Math.PI)+'\u00b0');
           continue; }
+        // SIZE / SHAPE CONTINUITY — an elbow's inlet and outlet are the SAME duct: one size, one shape.
+        // The merge took the elbow's size from `first` (below) and then appended `second`'s pieces at
+        // whatever size they already carried, so a 14in ROUND leg could be welded to an 18x12 RECT leg
+        // through a "14x14 elbow" -- a fitting that cannot be fabricated as drawn, and a run CAMduct
+        // reads as a silent size change. rjn1ivg on this sheet ran 75.7ft across 14in -> 14x14 -> 8in ->
+        // 16in -> 18x12 with four silent steps, carrying two of the three remaining orphan elbows. If two
+        // legs really are different sizes then there is a reducer between them, which is bridgeSizechanges'
+        // job, not a corner weld. 1.5in of tolerance absorbs tag-read rounding without passing a real step.
+        var _fp=null; for(var k4=first.pieces.length-1;k4>=0;k4--){ if(first.pieces[k4].kind==='straight'){ _fp=first.pieces[k4]; break; } }
+        var _sp=null; for(var k5=0;k5<second.pieces.length;k5++){ if(second.pieces[k5].kind==='straight'){ _sp=second.pieces[k5]; break; } }
+        if(_fp && _sp){
+          var _fw=_fp.widthIn||0, _sw=_sp.widthIn||0;
+          var _fd=(_fp.depthIn!=null?_fp.depthIn:_fw), _sd=(_sp.depthIn!=null?_sp.depthIn:_sw);
+          if((!!_fp.round)!==(!!_sp.round) || Math.abs(_fw-_sw)>1.5 || Math.abs(_fd-_sd)>1.5){
+            console.log('[takeoff] merge refused '+first.id+'+'+second.id+' \u00b7 size/shape mismatch '+(_fp.size||_fw+'\u2033')+' \u2192 '+(_sp.size||_sw+'\u2033'));
+            continue; }
+        }
         window.__pushRunUndo&&window.__pushRunUndo();
         C=[P[0],P[1]];                                                            // snap the corner onto both centerlines
         for(var k1=first.pieces.length-1;k1>=0;k1--){ if(first.pieces[k1].kind==='straight'){ first.pieces[k1].lenIn=Math.max(1, Math.round((first.pieces[k1].lenIn+gapA)*10)/10); break; } }
@@ -4117,6 +4147,35 @@ function refreshSel(){
       var px=f.x+f.ux*t, py=f.y+f.uy*t, d=Math.hypot(nvx-px,nvy-py), half=inToPt((p.widthIn||r.widthIn||12)/2)+5;
       if(d<=half && (!best||d<best.d)){ best={d:d, runId:r.id, i:i, alongIn:ptToIn(t)}; } }); });
     return best; };
+  // ---- UNWELD: hand a joined run's downstream leg back to a run of its own ----
+  // mergeElbowJoins welds two separate runs into one by appending a turning elbow and then the second
+  // run's pieces. Splicing that elbow out did NOT undo the weld: the run stayed single, and because
+  // runFrames derives each piece's heading by chaining turns, every downstream piece silently rotated to
+  // continue the upstream heading -- so the far leg both stayed linked AND moved off its duct. Deleting
+  // the joint has to give the downstream pieces their own run, anchored at the corner with the heading
+  // they actually had. Returns the new run's id, or false if there is nothing to split.
+  window.__splitRunAtFitting=function(id,i){
+    var r=findRun(id); if(!r||!r.pieces) return false;
+    if(i<=0 || i>=r.pieces.length-1) return false;                  // nothing on one side -> ordinary delete
+    var fr; try{ fr=runFrames(r); }catch(_){ return false; }
+    var f=fr[i+1]; if(!f) return false;                             // outgoing frame: same point, rotated heading
+    var tail=r.pieces.slice(i+1); if(!tail.length) return false;
+    var head=r.pieces.slice(0,i); if(!head.length) return false;
+    window.__pushRunUndo&&window.__pushRunUndo();
+    r.pieces=head;
+    var nr={ id:uid(),
+             axis:(Math.abs(f.ux)>=Math.abs(f.uy)?'horizontal':'vertical'),
+             start:[f.x,f.y], dir:[f.ux,f.uy], normal:[-f.uy,f.ux],
+             widthIn:(tail[0]&&tail[0].widthIn)||r.widthIn,
+             color:r.color, label:'', confirmed:true, scaled:!!r.scaled, tagIdx:[], pieces:tail };
+    ['sectionLabel','sectionId','pressureClass','liner'].forEach(function(k){ if(r[k]!=null) nr[k]=r[k]; });
+    try{ if(typeof palette!=='undefined' && palette && palette.length){ var pi=palette.indexOf(r.color); nr.color=palette[((pi<0?0:pi)+1)%palette.length]; } }catch(_){}
+    window.__runs2d=window.__runs2d||[];
+    var at=window.__runs2d.indexOf(r);
+    if(at>=0) window.__runs2d.splice(at+1,0,nr); else window.__runs2d.push(nr);
+    try{ applyReducerDownstream(r); applyReducerDownstream(nr); }catch(_){}
+    return nr.id;
+  };
   window.__stampMark=function(runId, i, alongIn, type){ var r=findRun(runId); if(!r) return false; var p=r.pieces[i]; if(!p||p.kind!=='straight') return false;   // stamp ON the duct — no cutting
     window.__pushRunUndo&&window.__pushRunUndo();
     var rr=!!p.round, w=p.widthIn||r.widthIn||12, d=(p.depthIn!=null?p.depthIn:w);
@@ -4125,9 +4184,24 @@ function refreshSel(){
     p.marks.push(mk);
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus(type==='damper'?('Damper stamped on '+(p.size||'')+' \u00b7 rod '+mk.rodIn+'\u2033 (duct not cut).'):('End cap stamped on '+(p.size||'')+' (duct not cut).')); return true; };
   window.__pcLen=function(id,i,v){ var r=findRun(id); if(!r)return; r.pieces[i].lenIn=Math.max(0.5,parseFloat(v)||r.pieces[i].lenIn); renderItems(); renderPanel(); setStatus('Run now '+fmtFt(runLenIn(r))+'.'); };
-  window.__pcDel=function(id,i){ var r=findRun(id); if(!r)return; window.__pushRunUndo&&window.__pushRunUndo(); r.pieces.splice(i,1); if(!r.pieces.length){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); selRun=null; } else applyReducerDownstream(r); sel.clear(); renderItems(); renderPanel(); };
+  window.__pcDel=function(id,i){ var r=findRun(id); if(!r)return; var _p=r.pieces[i];
+    // A JOINING elbow (_fromJoin) is the weld mergeElbowJoins made between two runs that were separate
+    // until it fired. Deleting it should undo the weld, not just drop a fitting out of a single run.
+    if(_p && _p.kind==='fitting' && _p.turn && _p._fromJoin){
+      var _nid=window.__splitRunAtFitting(id,i);                    // pushes its own undo
+      if(_nid){ sel.clear(); selRun=null; renderItems(); renderPanel();
+        if(typeof setStatus==='function') setStatus('Removed the joining elbow \u2014 the two legs are separate runs again.');
+        return; }
+    }
+    window.__pushRunUndo&&window.__pushRunUndo(); r.pieces.splice(i,1); if(!r.pieces.length){ window.__runs2d=window.__runs2d.filter(function(x){return x.id!==id;}); selRun=null; } else applyReducerDownstream(r); sel.clear(); renderItems(); renderPanel(); };
   window.__selDelPieces=function(){                 // delete the piece(s) you clicked on the plan, pulling the run in (same as the row's red x)
-    if(!sel.size) return; var byRun={}; sel.forEach(function(k){ var pp=k.split(':'); (byRun[pp[0]]=byRun[pp[0]]||[]).push(+pp[1]); });
+    if(!sel.size) return;
+    if(sel.size===1){                               // one joining elbow selected -> unweld instead of splice (see __pcDel)
+      var _k=null; sel.forEach(function(k){ _k=k; });
+      var _pp=String(_k).split(':'), _r=findRun(_pp[0]), _pc=_r&&_r.pieces[+_pp[1]];
+      if(_pc && _pc.kind==='fitting' && _pc.turn && _pc._fromJoin){ window.__pcDel(_pp[0], +_pp[1]); return; }
+    }
+    var byRun={}; sel.forEach(function(k){ var pp=k.split(':'); (byRun[pp[0]]=byRun[pp[0]]||[]).push(+pp[1]); });
     window.__pushRunUndo&&window.__pushRunUndo();
     Object.keys(byRun).forEach(function(id){ var r=findRun(id); if(!r) return;
       byRun[id].sort(function(a,b){return b-a;}).forEach(function(i){ r.pieces.splice(i,1); });   // descending so earlier splices don't shift later indices
