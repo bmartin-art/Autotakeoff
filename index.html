@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.15</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.16</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -6075,71 +6075,10 @@ async function aiTileSweep(){
     return false; }
   var keptNear=kept.filter(function(h){ var u=snapToUser(h.px,h.py); h._u=u; return nearDuct(u[0],u[1]); });
   var noiseDropped=kept.length-keptNear.length; kept=keptNear; added=kept.length;
-  // ---- SNAP TO THE PDF TEXT LAYER -------------------------------------------------------------------
-  // The AI reads the TEXT reliably but only estimates WHERE it is inside its tile, and that estimate is
-  // coarse (the dedupe note above measured copies of one label landing up to 57in apart). On any sheet
-  // plotted from CAD the label is real text with an exact position, so use the AI for WHAT it says and the
-  // text layer for WHERE it is. A tag whose dot sits a text-width off to the side also fails the
-  // proximity test that matches tags to runs, so this lifts the hit rate as well as the placement.
-  var _snapPool=[];
-  try{
-    var _pg=await pdfDoc.getPage(pageNum), _tc=await _pg.getTextContent();
-    (_tc.items||[]).forEach(function(it){
-      if(!it.str||!it.str.trim()) return;
-      var m=it.transform; if(!m||m.length<6) return;
-      if(!isFinite(m[4])||!isFinite(m[5])) return;
-      if(!(Math.hypot(m[0],m[1])>0) && !(Math.hypot(m[2],m[3])>0)) return;   // degenerate/invisible item
-      // CENTRE, not origin. transform[4],[5] is the baseline START of the run, so on a wide label the
-      // origin sits a whole text-width to the left of the glyphs -- and on rotated text (vertical duct
-      // labels) that offset points sideways, which is exactly the "off to the side" placement.
-      var lu=Math.hypot(m[0],m[1])||1, lv=Math.hypot(m[2],m[3])||1;
-      var uxD=m[0]/lu, uyD=m[1]/lu;                            // along the baseline (advance direction)
-      var vxD=m[2]/lv, vyD=m[3]/lv;                            // baseline -> cap height
-      var wI=it.width||0, hI=it.height||lv;
-      _snapPool.push({ux:m[4]+uxD*(wI/2)+vxD*(hI*0.35), uy:m[5]+uyD*(wI/2)+vyD*(hI*0.35), t:_norm(it.str)});
-    });
-  }catch(_){ _snapPool=[]; }
-  function _norm(t){
-    return String(t||'').toUpperCase()
-      .replace(/[\s"\u201d\u2033]/g,'')                        // spaces and inch marks
-      .replace(/[\u00d8\u2300O]/g,'D')                          // any diameter glyph -> D
-      .replace(/DIA|ROUND/g,'D')
-      .replace(/[X\u00d7\/]/g,'X');                             // 18x12 / 18/12 / 18X12 all match
-  }
-  function _matchAt(printed,want){
-    // BOUNDARY-SAFE. A plain indexOf is a substring test, so an 8"\u00d8 tag would match an 18"\u00d8 or 48"\u00d8
-    // label and snap to the wrong duct. Require the match not to sit against another digit on either side,
-    // while still allowing trailing service text: 8D matches 8DSA, and 18X12 matches EX18X12DA.
-    var i=-1;
-    while((i=printed.indexOf(want,i+1))>=0){
-      var b=i>0?printed.charAt(i-1):'', a=(i+want.length<printed.length)?printed.charAt(i+want.length):'';
-      if(!/[0-9]/.test(b) && !/[0-9]/.test(a)) return true;
-    }
-    return false;
-  }
-  var _snapR=Math.max(40, 72*__pxPerIn)/(K0||1);              // ~6ft in user units: the AI's own error band
-  var _snapped=0;
   kept.forEach(function(hh){ var u=hh._u||snapToUser(hh.px,hh.py);                 // frozen screen -> user (zoom-safe)
-    if(_snapPool.length){                                      // exact placement when the sheet has real text
-      var want=_norm(hh.size), best=null, bd=_snapR;
-      for(var si=0;si<_snapPool.length;si++){ var c=_snapPool[si];
-        if(!_matchAt(c.t,want)) continue;                      // the printed text must contain what the AI read
-        var dd=Math.hypot(c.ux-u[0], c.uy-u[1]);
-        if(dd<bd){ bd=dd; best=c; } }
-      if(best){ u=[best.ux,best.uy]; _snapped++; }
-    }
     var nn=(window.__nvt&&typeof applyM==='function')?applyM(window.__nvt,u[0],u[1]):[u[0],u[1]];
     var sc=(typeof viewport!=='undefined'&&viewport)?applyM(viewport.transform,u[0],u[1]):[hh.px,hh.py];   // screen at CURRENT view for the dot
-    tags.push({x:sc[0],y:sc[1],ux:u[0],uy:u[1],nx:nn[0],ny:nn[1],text:hh.size,_ai:true,_tile:true,_snapped:!!(_snapPool.length&&_snapped)}); });
-  // GRACEFUL ON RASTER SHEETS. Scans, photos and flattened plots have no usable text layer -- getTextContent
-  // either throws, returns nothing, or returns only whitespace -- so _snapPool comes back empty and every tag
-  // keeps the AI's own position. Behaviour on those sheets is exactly what it was before this change. A
-  // PARTIAL layer (real title block, raster plan) is handled by geometry rather than a special case: the
-  // ~6ft snap radius is far smaller than the distance from the plan to the title block, so nothing reaches
-  // across to a wrong match.
-  if(!_snapPool.length) console.log('[tags] no usable PDF text layer \u2014 all '+kept.length+' tag(s) keep their AI tile positions');
-  else console.log('[tags] snapped '+_snapped+' of '+kept.length+' tag(s) onto the PDF text layer ('+
-       (kept.length-_snapped)+' left on AI position, '+_snapPool.length+' text items available)');
+    tags.push({x:sc[0],y:sc[1],ux:u[0],uy:u[1],nx:nn[0],ny:nn[1],text:hh.size,_ai:true,_tile:true}); });
   try{ drawOverlay(); }catch(e){}
   out.innerHTML='<div class="hint" style="color:#cce6ff"><b>Tile sweep done.</b> '+added+' tag(s) placed across '+total+' tile'+(total!==1?'s':'')+(noiseDropped?(' \u00b7 '+noiseDropped+' off-duct noise dropped'):'')+(fails?(' \u00b7 <span style="color:#ff8a8a">'+fails+' tile(s) failed</span>'):'')+(blanks?(' \u00b7 <span style="color:#ff8a8a">'+blanks+' tile(s) came back BLANK \u2014 the page render did not complete (heavy sheet): set a Work Area and re-run</span>'):'')+(workArea?' (work area)':' (whole sheet \u2014 set a work area to limit calls)')+'. Markers only \u2014 not wired to runs yet.</div>';
 }
