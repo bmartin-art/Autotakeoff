@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.93</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.98</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3230,6 +3230,64 @@ function refreshSel(){
     return n;
   }
   window.__adoptTagsForScaledRuns=adoptTagsForScaledRuns;
+  // ---- WIDTH AUDIT: measure the wall gap of the actual traced duct UNDER each run and compare it to
+  // the width the run is drawn at. Answers "is this band wider than the duct on the print?" directly,
+  // and spots two runs stacked on one duct (which reads as one over-wide band). Read-only. ----
+  window.__auditWidths=function(){
+    var runs=window.__runs2d||[]; var out=[];
+    if(!runs.length || typeof segments==='undefined' || !segments) return out;
+    runs.forEach(function(r){
+      var fr=runFrames(r), S=[];
+      r.pieces.forEach(function(p,i){ if(p.kind!=='straight') return; var f=fr[i]; if(!f) return;
+        var L=inToPt(p.lenIn||0), n=Math.max(2,Math.min(8,Math.round(L/inToPt(12))));
+        for(var q=1;q<n;q++){ var t=L*q/n; S.push({x:f.x+f.ux*t, y:f.y+f.uy*t, ux:f.ux, uy:f.uy, nx:f.nx, ny:f.ny}); } });
+      if(!S.length) return;
+      var gaps=[];
+      S.forEach(function(P){
+        var pos=null, neg=null;
+        for(var i=0;i<segments.length;i++){ var s=segments[i];
+          if(s.cls!=='duct' || s.nx1==null || s._fill) continue;
+          var vx=s.nx2-s.nx1, vy=s.ny2-s.ny1, sl=Math.hypot(vx,vy); if(sl<inToPt(6)) continue;
+          if(Math.abs((vx/sl)*P.ux+(vy/sl)*P.uy) < 0.9) continue;                 // wall must run along the duct
+          var a1=(s.nx1-P.x)*P.ux+(s.ny1-P.y)*P.uy, a2=(s.nx2-P.x)*P.ux+(s.ny2-P.y)*P.uy;
+          if(Math.min(a1,a2)>0 || Math.max(a1,a2)<0) continue;                    // and span this sample point
+          var perp=(s.nx1-P.x)*P.nx+(s.ny1-P.y)*P.ny;
+          if(Math.abs(perp) > inToPt(72)) continue;
+          if(perp>=0){ if(pos===null||perp<pos) pos=perp; } else { if(neg===null||perp>neg) neg=perp; }
+        }
+        if(pos!==null && neg!==null) gaps.push(ptToIn(pos-neg));
+      });
+      if(gaps.length<2) return;
+      gaps.sort(function(a,b){ return a-b; });
+      var med=gaps[Math.floor(gaps.length/2)];
+      if(!(med>0.5)) return;
+      out.push({run:r.id.slice(0,8), drawn:r.widthIn, printed:Math.round(med*10)/10,
+                ratio:Math.round((r.widthIn/med)*100)/100, samples:gaps.length, _r:r});
+    });
+    // stacked runs: another run's centerline sitting inside this one's footprint reads as one wide band
+    out.forEach(function(o){ var n=0;
+      runs.forEach(function(x){ if(x===o._r) return; var L=runLenIn(o._r), pr=projOnRun(o._r, x.start[0], x.start[1]);
+        if(pr.alongIn>=-6 && pr.alongIn<=L+6 && Math.abs(pr.perpIn) <= (o._r.widthIn||12)/2+2) n++; });
+      o.stackedOn=n; });
+    return out;
+  };
+  window.__reportWidths=function(){
+    var rows=window.__auditWidths();
+    if(!rows.length){ if(typeof setStatus==='function') setStatus('Width audit: could not measure any run against the trace (build runs first).'); return; }
+    var bad=rows.filter(function(o){ return o.ratio>1.4 || o.ratio<0.7 || o.stackedOn>0; });
+    try{ console.table(rows.map(function(o){ return {run:o.run, drawn:o.drawn+'"', printed:o.printed+'"', ratio:o.ratio+'x', stacked:o.stackedOn, samples:o.samples}; })); }catch(_){}
+    rows.forEach(function(o){ if(o.ratio>1.4||o.ratio<0.7) o._r._flag='mismatch'; });
+    try{ renderItems(); renderPanel(); }catch(_){}
+    // A SCALE error moves every run by the SAME factor; per-run chaining/tag errors scatter. Report both
+    // so the two are told apart without guessing.
+    var rs=rows.map(function(o){ return o.ratio; }).sort(function(a,b){ return a-b; });
+    var med=rs[Math.floor(rs.length/2)], lo=rs[0], hi=rs[rs.length-1];
+    var tight=(hi/Math.max(lo,0.01) < 1.35);
+    var verdict = tight
+      ? ('every run is off by about the same '+med+'x \u2014 that IS a scale symptom: try '+(med>1?'a LARGER':'a SMALLER')+' scale (\u00d7'+med+') in the Scale box')
+      : ('ratios scatter '+lo+'x..'+hi+'x with median '+med+'x \u2014 not a scale problem (a wrong scale would shift every run equally); these are per-run chaining/tag errors');
+    if(typeof setStatus==='function') setStatus('Width audit: '+rows.length+' run(s) measured \u00b7 '+bad.length+' disagree with the print \u00b7 '+verdict+'. Table in the console (F12).');
+  };
   // ---- DETECTION SANITY: the geometry outranks the model's label. An 'elbow' where the duct
   // demonstrably runs STRAIGHT THROUGH is not an elbow — if the size steps there it's a
   // sizechange (relabel so the transition machinery gets it); if nothing changes, it's a false
@@ -4486,7 +4544,19 @@ function refreshSel(){
     window.__runs2d=[]; var ci=0, single=0, scaled=0, trans=0, taps=0, elbows=0;
     var GAPMAX=Math.max(inToPt(48),60);                                   // bridge gaps up to ~4' onto a colinear neighbor
     Object.keys(groups).forEach(function(k){
-      var g=groups[k], vert=k[0]==='V', horiz=k[0]==='H';
+      var __gAll=groups[k], vert=k[0]==='V', horiz=k[0]==='H';
+      // SPLIT BY WIDTH CLASS — one bucket can hold a big main and the small branches beside it. Forcing
+      // one width on that chain is wrong either way (first-fragment oversized the branches; dominant-
+      // length undersized the main). Ducts of clearly different size are DIFFERENT runs, so class the
+      // fragments by width (same class while within ~35%) and build each class as its own chain.
+      var __srt=__gAll.slice().sort(function(p,q){ return (p.widthIn||12)-(q.widthIn||12); });
+      var __classes=[], __cur=null;
+      __srt.forEach(function(fr){ var w=fr.widthIn||12;
+        if(__cur && w <= __cur.wMax*1.35+1){ __cur.list.push(fr); __cur.wMax=Math.max(__cur.wMax,w); }
+        else { __cur={wMax:w, list:[fr]}; __classes.push(__cur); } });
+      if(__classes.length>1) console.log('[takeoff chain] '+k+': split into '+__classes.length+' width class(es): '+__classes.map(function(c){ return Math.round(c.wMax)+'"'; }).join(', '));
+      __classes.forEach(function(__cls){
+      var g=__cls.list;
       var sx=0,sy=0,n=0; g.forEach(function(f){ sx+=f.A[0]+f.B[0]; sy+=f.A[1]+f.B[1]; n+=2; });
       var mx=sx/n, my=sy/n, origin, axisDir;
       if(vert){ origin=[mx,0]; axisDir=[0,1]; } else if(horiz){ origin=[0,my]; axisDir=[1,0]; }
@@ -4603,6 +4673,7 @@ function refreshSel(){
         var __chainId=uid();
         window.__runs2d.push({id:__chainId,axis:(vert?'vertical':horiz?'horizontal':ch.frags[0].axis),start:startPt,dir:[axisDir[0],axisDir[1]],normal:[-axisDir[1],axisDir[0]],widthIn:(pieces[0]&&pieces[0].widthIn)||ch.frags[0].widthIn,color:palette[ci%palette.length],label:'',confirmed:true,scaled:!cs.length,tagIdx:allTags,pieces:pieces,singleWall:anySingle,synthetic:ch.frags.some(function(f){return f.synthetic;}),_geomW:grpW,tagW:(cs.length?cs[0].w:null)}); ci++;
         chBranches.forEach(function(b){ window.__runs2d.push({id:uid(),axis:'branch',start:b.start,dir:b.dir,normal:[-b.dir[1],b.dir[0]],widthIn:b.widthIn,color:palette[ci%palette.length],label:'',confirmed:true,scaled:false,tagIdx:[],pieces:b.pieces,_branch:true,_branchParent:__chainId}); ci++; });
+      });
       });
     });
     // KEEP RULE: a run survives only if it carries a size tag, or connects to one that does.
@@ -5119,7 +5190,7 @@ function refreshSel(){
         for(var yi3=0;yi3<ys.length;yi3++){ for(var xi3=0;xi3<xs.length;xi3++){ tileList.push([xs[xi3],ys[yi3]]); }}
       }
       if(greenBoxes) console.log('[takeoff] green-only scan: kept '+tileList.length+' of '+(xs.length*ys.length)+' tiles');
-      var total=tileList.length, done=0, all=[];
+      var total=tileList.length, done=0, all=[], __blankTiles=0;
       var tcv=document.createElement('canvas'); tcv.width=TILE; tcv.height=TILE; var tx=tcv.getContext('2d',{willReadFrequently:true});
       for(var ti=0;ti<tileList.length;ti++){
         var ox=tileList[ti][0], oy=tileList[ti][1];
@@ -5127,6 +5198,9 @@ function refreshSel(){
         if(rc){ tx.drawImage(rc, ox,oy,TILE,TILE, 0,0,TILE,TILE); }
         else { await withPageRender(function(){ return page.render({canvasContext:tx, viewport:rvp, transform:[1,0,0,1,-(ox+waOX),-(oy+waOY)], optionalContentConfigPromise:ocConfig?Promise.resolve(ocConfig):undefined}).promise; }); }
         var d=tx.getImageData(0,0,TILE,TILE).data; var f=new Float32Array(3*TILE*TILE); var n=TILE*TILE;
+        var __bn=0, __bt=0; for(var __q=0;__q<d.length;__q+=64){ __bt++; if(d[__q]<235||d[__q+1]<235||d[__q+2]<235) __bn++; }
+        if(__bt && (__bn/__bt) < 0.0015){ __blankTiles++; done++; continue; }   // blank tile = the render didn't finish;
+                                                                               // running the model on white finds nothing
         for(var i=0;i<n;i++){ f[i]=d[i*4]/255; f[i+n]=d[i*4+1]/255; f[i+2*n]=d[i*4+2]/255; }
         var t=new ort.Tensor('float32',f,[1,3,TILE,TILE]); var feeds={}; feeds[session.inputNames[0]]=t;
         var outMap=await session.run(feeds); var out=outMap[session.outputNames[0]]; var nc=out.dims[1]-4;
@@ -5183,7 +5257,8 @@ function refreshSel(){
       console.log('[takeoff t13] class index breakdown:', idxStr, '| total classes in model output =', (use16?16:8));
       $('yoloOut').innerHTML='<div class="hint" style="color:#bfe0ff"><b>'+kept.length+' fittings</b> on full sheet ('+(use16?'16':'8')+'-class, '+total+' tiles)<br>'+(summary||'none')+'<br><span style="opacity:.6;font-size:10px">'+idxStr+'</span></div>';
       setY('✓ '+kept.length+' on sheet');
-      setStatus('Full-sheet scan done — '+kept.length+' fittings detected'+(nXC?(' · cross-check removed '+nXC+' false sizechange on size tags'):'')+'. Stored for the run-builder.');
+      if(__blankTiles) console.warn('[takeoff] '+__blankTiles+' of '+total+' scan tiles rendered BLANK — the page render did not complete (heavy sheet); use a Work Area');
+      setStatus('Full-sheet scan done — '+kept.length+' fittings detected'+(__blankTiles?(' · ⚠ '+__blankTiles+' of '+total+' tiles rendered BLANK (heavy sheet — set a Work Area and re-scan)'):'')+(nXC?(' · cross-check removed '+nXC+' false sizechange on size tags'):'')+'. Stored for the run-builder.');
     }catch(err){ setY('scan failed'); setStatus('Scan failed: '+((err&&err.message)||err)); console.error(err); $('yoloOut').innerHTML='<div class="hint" style="color:#f99">'+String((err&&err.message)||err).slice(0,300)+'</div>'; }
   });
 })();
@@ -5643,7 +5718,10 @@ async function cropRegionB64(x,y,w,h,frozenK){
       var o=document.createElement('canvas'); o.width=Math.max(8,Math.round(w*f)); o.height=Math.max(8,Math.round(h*f));
       var ctx=o.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,o.width,o.height);
       await withPageRender(function(){ return page.render({canvasContext:ctx, viewport:vp, transform:[1,0,0,1,-x*f,-y*f], optionalContentConfigPromise:(typeof ocConfig!=='undefined'&&ocConfig)?Promise.resolve(ocConfig):undefined}).promise; });
-      return {b64:o.toDataURL('image/png').split(',')[1], x:x,y:y,w:w,h:h};
+      var __ink=1; try{ var __d=ctx.getImageData(0,0,o.width,o.height).data, __n=0, __tot=0;
+        for(var __i=0;__i<__d.length;__i+=64){ __tot++; if(__d[__i]<235||__d[__i+1]<235||__d[__i+2]<235) __n++; }
+        __ink=__tot?(__n/__tot):0; }catch(_){}
+      return {b64:o.toDataURL('image/png').split(',')[1], x:x,y:y,w:w,h:h, ink:__ink};
     }
   }catch(e){}
   var S=Math.min(2,1500/Math.max(w,h,1));
@@ -5680,7 +5758,7 @@ async function aiTileSweep(){
   var TILEU=Math.max(110, Math.min(300, (ux1-ux0)/4.5)), OVERU=Math.round(TILEU*0.36), STEPU=TILEU-OVERU;
   console.log('[takeoff sweep] area '+Math.round(ux1-ux0)+'x'+Math.round(uy1-uy0)+'pt \u00b7 tile '+Math.round(TILEU)+'pt \u00b7 overlap '+OVERU+'pt');
   var nx=Math.max(1,Math.ceil((areaWu-OVERU)/STEPU)), ny=Math.max(1,Math.ceil((areaHu-OVERU)/STEPU)), total=nx*ny;
-  var added=0, done=0, fails=0, hits=[];
+  var added=0, done=0, fails=0, blanks=0, hits=[];
   for(var gy=0; gy<ny; gy++){ for(var gx=0; gx<nx; gx++){
     done++;
     var tux0=ux0+gx*STEPU, tuy0=uy0+gy*STEPU, tux1=Math.min(ux1,tux0+TILEU), tuy1=Math.min(uy1,tuy0+TILEU);
@@ -5692,6 +5770,8 @@ async function aiTileSweep(){
     try{ out.innerHTML='<div class="hint"><span class="spin"></span> \uD83D\uDD12 view locked \u00b7 tile '+done+'/'+total+' \u00b7 '+hits.length+' reads'+(fails?(' \u00b7 '+fails+' failed'):'')+'\u2026'+(workArea?' (work area)':' (whole sheet)')+'</div>'; }catch(e){}
     var crop=null; try{ crop=await cropRegionB64(x,y,w,h,K0); }catch(e){}
     if(!crop||!crop.b64){ fails++; continue; }
+    if(crop.ink!=null && crop.ink < 0.0015){ blanks++; continue; }   // tile came back essentially empty — a render that
+                                                                     // didn't complete. Reading it would only invent tags.
     var prompt='This is a HIGH-RES crop of part of an HVAC duct plan. Find every duct SIZE label PRINTED in THIS image. RECTANGULAR = WIDTHxHEIGHT inches like "20x16". ROUND = one diameter with \u00f8 or DIA like "12\\"\u00f8" -> report as "\u00f812". Size numbers may be ROTATED (vertical) inside the ducts \u2014 include those. For EACH label give a TIGHT bounding box around just that label, as fractions of THIS image: x0,y0 (top-left) and x1,y1 (bottom-right), each 0..1, plus conf (0..1, your confidence you read it correctly). Do NOT invent sizes and do NOT repeat one to fill space; if you cannot clearly read a printed size, return empty. Ignore diffuser/grille/equipment tags (CD-500, EF1, TS) and CFM values. Answer ONLY JSON, no prose: {"sizes":[{"size":"20x16","x0":0.30,"y0":0.55,"x1":0.46,"y1":0.63,"conf":0.95}]} or {"sizes":[]}.';
     try{
       var ctrl=new AbortController(), to=setTimeout(function(){ctrl.abort();},25000);
@@ -5753,7 +5833,7 @@ async function aiTileSweep(){
     var sc=(typeof viewport!=='undefined'&&viewport)?applyM(viewport.transform,u[0],u[1]):[hh.px,hh.py];   // screen at CURRENT view for the dot
     tags.push({x:sc[0],y:sc[1],ux:u[0],uy:u[1],nx:nn[0],ny:nn[1],text:hh.size,_ai:true,_tile:true}); });
   try{ drawOverlay(); }catch(e){}
-  out.innerHTML='<div class="hint" style="color:#cce6ff"><b>Tile sweep done.</b> '+added+' tag(s) placed across '+total+' tile'+(total!==1?'s':'')+(noiseDropped?(' \u00b7 '+noiseDropped+' off-duct noise dropped'):'')+(fails?(' \u00b7 <span style="color:#ff8a8a">'+fails+' tile(s) failed</span>'):'')+(workArea?' (work area)':' (whole sheet \u2014 set a work area to limit calls)')+'. Markers only \u2014 not wired to runs yet.</div>';
+  out.innerHTML='<div class="hint" style="color:#cce6ff"><b>Tile sweep done.</b> '+added+' tag(s) placed across '+total+' tile'+(total!==1?'s':'')+(noiseDropped?(' \u00b7 '+noiseDropped+' off-duct noise dropped'):'')+(fails?(' \u00b7 <span style="color:#ff8a8a">'+fails+' tile(s) failed</span>'):'')+(blanks?(' \u00b7 <span style="color:#ff8a8a">'+blanks+' tile(s) came back BLANK \u2014 the page render did not complete (heavy sheet): set a Work Area and re-run</span>'):'')+(workArea?' (work area)':' (whole sheet \u2014 set a work area to limit calls)')+'. Markers only \u2014 not wired to runs yet.</div>';
 }
 window.aiTileSweep=aiTileSweep;
 
@@ -6259,6 +6339,7 @@ function snapDuctW(w){ w=Math.round(w); if(w<4) return w; return Math.max(4, 2*M
          <button id="frRefresh" style="flex:1;background:#eef1f6;border:1px solid #cdd6e2;color:#37414f;border-radius:8px;padding:6px;cursor:pointer;font-weight:700;font-size:11px">⟳ Refresh summary</button>
          <button id="frNext" style="flex:1;background:#fff3d6;border:1px solid #eecf87;color:#8a5f0a;border-radius:8px;padding:6px;cursor:pointer;font-weight:700;font-size:11px">⏭ Next issue (N)</button>
        </div>
+       <button id="frWidthAudit" onclick="window.__reportWidths&&window.__reportWidths()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#eef4ff;border:1px solid #a9c4ff;color:#2b53a8;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⚖ Check widths against the print</button>
        <button id="frSizeFromTags" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#eef7ee;border:1px solid #a9d3a0;color:#2f6b2a;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⌗ Size unsized runs from nearby tags</button>
        <button id="dtMissingDims" onclick="window.__toggleDimReview&&window.__toggleDimReview()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#fff7e6;border:1px solid #f0cf8a;color:#9a6a12;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">⚠ Highlight ducts missing a size</button>
        <button id="dtFittings" onclick="window.__toggleFitPanel&&window.__toggleFitPanel()" style="display:block;width:100%;text-align:center;margin-bottom:6px;background:#e6fbff;border:1px solid #a5e4ef;color:#0e7490;border-radius:8px;padding:7px 10px;cursor:pointer;font-weight:600;font-size:12px">◎ Review fittings by type</button>
