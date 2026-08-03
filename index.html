@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.90</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.93</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -4475,9 +4475,13 @@ function refreshSel(){
     var frags=[]; sg.forEach(function(r){ var c=r.corners; if(!c||c.length<4) return;
       frags.push({r:r, A:[(c[0][0]+c[3][0])/2,(c[0][1]+c[3][1])/2], B:[(c[1][0]+c[2][0])/2,(c[1][1]+c[2][1])/2], axis:r.axis, widthIn:r.widthIn, tagIdx:r.tagIdx||[], singleWall:!!r.singleWall, synthetic:!!r.synthetic}); });
     // 2) group colinear fragments (same axis + same row/column) so the cursor can hop gaps onto a neighbor
+    // Bucket width is PHYSICAL (~6 real inches), not a fixed 16 points: on a shrunk plot (a big sheet
+    // printed to letter) 16pt is ~11 real inches, so a 30" main and the 6" branches running alongside it
+    // landed in one bucket and became a single chain that took the main's width for its whole length.
+    var __BKT=Math.max(4, inToPt(6));
     var groups={};
     frags.forEach(function(f,idx){ var mx=(f.A[0]+f.B[0])/2, my=(f.A[1]+f.B[1])/2, k;
-      if(f.axis==='vertical') k='V'+Math.round(mx/16); else if(f.axis==='horizontal') k='H'+Math.round(my/16); else k='D'+idx;
+      if(f.axis==='vertical') k='V'+Math.round(mx/__BKT); else if(f.axis==='horizontal') k='H'+Math.round(my/__BKT); else k='D'+idx;
       (groups[k]=groups[k]||[]).push(f); });
     window.__runs2d=[]; var ci=0, single=0, scaled=0, trans=0, taps=0, elbows=0;
     var GAPMAX=Math.max(inToPt(48),60);                                   // bridge gaps up to ~4' onto a colinear neighbor
@@ -4489,7 +4493,12 @@ function refreshSel(){
       else { var f0=g[0],dx=f0.B[0]-f0.A[0],dy=f0.B[1]-f0.A[1],L=Math.hypot(dx,dy)||1; axisDir=[dx/L,dy/L]; origin=[f0.A[0],f0.A[1]]; }
       function along(p){ return (p[0]-origin[0])*axisDir[0]+(p[1]-origin[1])*axisDir[1]; }
       function perp(p){ return (p[0]-origin[0])*(-axisDir[1])+(p[1]-origin[1])*axisDir[0]; }
-      var grpW=g[0].widthIn||12;
+      // width = whichever width covers the most of the chain's LENGTH. First-fragment-wins let a short
+      // wide stub stamp its size onto a long narrow run (a 54in 30" main setting 30" for 209in of duct).
+      var __wl={}; g.forEach(function(f){ var Lf=Math.hypot(f.B[0]-f.A[0], f.B[1]-f.A[1]); var kk=Math.round(f.widthIn||12); __wl[kk]=(__wl[kk]||0)+Lf; });
+      var __wk=Object.keys(__wl).sort(function(a,b){ return __wl[b]-__wl[a]; });
+      var grpW=(__wk.length? +__wk[0] : (g[0].widthIn||12));
+      if(__wk.length>1) console.log('[takeoff chain] mixed widths '+__wk.join('/')+'" in one chain \u2014 using '+grpW+'" (covers the most length)');
       // fragment intervals along the axis
       var ivs=g.map(function(f){ var a=along(f.A), b=along(f.B); if(a>b){var t=a;a=b;b=t;} return {f:f,a:a,b:b}; });
       ivs.sort(function(p,q){return p.a-q.a;});
@@ -5711,10 +5720,19 @@ async function aiTileSweep(){
   // LOCATION-BASED DEDUP: the same printed tag seen by two overlapping tiles lands at ~the same sheet
   // coordinate even if the two reads disagree (24x16 vs 24x10). Cluster by location; per cluster keep the
   // BEST read — more centered in its tile wins, ties broken by confidence.
+  // DEDUPE — overlapping tiles read the same printed label several times, and the AI's in-tile
+  // position estimate differs each time, so the copies can land FEET apart (measured: up to 57in on a
+  // letter-size plot). A flat 30-px radius missed them and every copy became another size event ->
+  // phantom transitions. Radius is now physical: identical text within ~6ft is the same label. A
+  // genuinely repeated size on a long main is labelled far further apart than that, so it survives.
+  var __pxPerIn=(6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125))*(K0||1);
+  var __sameTxtR=Math.max(30, 72*__pxPerIn), __anyR=Math.max(24, 18*__pxPerIn);
   var kept=[];
   hits.forEach(function(h){
     var near=null;
-    for(var i=0;i<kept.length;i++){ if(Math.hypot(kept[i].px-h.px, kept[i].py-h.py) < 30){ near=kept[i]; break; } }
+    for(var i=0;i<kept.length;i++){ var dd=Math.hypot(kept[i].px-h.px, kept[i].py-h.py);
+      var sameTxt=(kept[i].size===h.size);
+      if(dd < (sameTxt?__sameTxtR:__anyR)){ near=kept[i]; break; } }
     if(!near){ kept.push(h); return; }
     var better = (h.cdist < near.cdist - 0.02) || (Math.abs(h.cdist-near.cdist)<=0.02 && h.conf > near.conf);
     if(better){ near.px=h.px; near.py=h.py; near.size=h.size; near.cdist=h.cdist; near.conf=h.conf; }   // replace in place
