@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.98</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.99</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -4543,6 +4543,13 @@ function refreshSel(){
       (groups[k]=groups[k]||[]).push(f); });
     window.__runs2d=[]; var ci=0, single=0, scaled=0, trans=0, taps=0, elbows=0;
     var GAPMAX=Math.max(inToPt(48),60);                                   // bridge gaps up to ~4' onto a colinear neighbor
+    // ELBOW PLACEMENT PHYSICS (not per-print tuning): a chain is COLINEAR fragments, so a 90 can only
+    // exist where the duct leaves that line -- at a chain END. A detection box for that corner must also
+    // straddle the duct it belongs to, not sit a couple of feet off to the side, and must clear the
+    // model's noise floor.
+    var ELB_SCORE_MIN=0.50;                                               // field evidence: real corners score .69-.88, noise .13-.48
+    var ELB_PERP_IN=6;                                                    // half the duct + one fitting throat -- det must be ON this run
+    var ELB_END_IN=6;                                                     // one joint of slack past the corner radius
     Object.keys(groups).forEach(function(k){
       var __gAll=groups[k], vert=k[0]==='V', horiz=k[0]==='H';
       // SPLIT BY WIDTH CLASS — one bucket can hold a big main and the small branches beside it. Forcing
@@ -4586,7 +4593,8 @@ function refreshSel(){
       // YOLO elbow / tee / tap detections near this line (drive turns and branches in the walk)
       var fdets=[]; (window.__yoloDets||[]).forEach(function(d){ if(d.nx==null) return; var base=(d.cls||'').replace(/^(rect|round)-/,'');
         if(base!=='elbow'&&base!=='tee'&&base!=='tap') return;
-        if(Math.abs(perp([d.nx,d.ny])-perpC)>inToPt(grpW/2+30)) return; fdets.push({base:base, along:along([d.nx,d.ny]), nx:d.nx, ny:d.ny}); });
+        var __po=Math.abs(perp([d.nx,d.ny])-perpC);                        // keep the loose band for tee/tap (unchanged); elbows gate tighter below
+        if(__po>inToPt(grpW/2+30)) return; fdets.push({base:base, along:along([d.nx,d.ny]), nx:d.nx, ny:d.ny, perpIn:ptToIn(__po), score:(d.score||0)}); });
       // find a duct fragment leaving a point at ~90° to the trunk (sets an elbow's new heading / a branch's direction)
       function contFrag(px,py){ var best=null, bestd=1e9;
         for(var fi=0;fi<frags.length;fi++){ var fr=frags[fi]; if(g.indexOf(fr)>=0) continue;   // not part of this trunk
@@ -4637,7 +4645,15 @@ function refreshSel(){
           // inject YOLO elbow / tee / tap events — the cursor consumes these as it walks
           fdets.forEach(function(fd){ if(fd.along<ch.a-inToPt(8)||fd.along>ch.b+inToPt(8)) return;
             var posIn=Math.max(0,ptToIn(fd.along-ch.a)), cf=contFrag(fd.nx,fd.ny);
-            if(fd.base==='elbow'){ events.push({type:'elbow', posIn:posIn, cf:cf}); }
+            if(fd.base==='elbow'){
+              // Page-25 evidence: 27 of 36 e90s were emitted here with turn:0 on dead-straight polylines,
+              // snapped from dets up to 38in off-axis scoring as low as 0.13 -- while every genuine corner
+              // (turn +/-90, placed later by the recovery passes) sat within 1.1in of a det scoring >=0.69.
+              if(fd.score < ELB_SCORE_MIN) return;                                  // below the noise floor
+              if(fd.perpIn > grpW/2 + ELB_PERP_IN) return;                          // det belongs to a neighbouring duct
+              if(Math.min(posIn, chLenIn-posIn) > grpW + ELB_END_IN) return;        // mid-span on a colinear chain = impossible
+              events.push({type:'elbow', posIn:posIn, cf:cf});
+            }
             else { var bsz=null; if(cf&&cf.frag&&cf.frag.tagIdx&&cf.frag.tagIdx.length){ var tg=tags[cf.frag.tagIdx[0]], pd=tg&&parseTagDims(tg.text); if(pd) bsz={w:pd.w,h:pd.h,round:!!pd.round,str:pd.round?('\u00f8'+pd.w):(pd.w+'\u00d7'+pd.h)}; }
               events.push({type:'tapY', posIn:posIn, along:fd.along, perp:perp([fd.nx,fd.ny]), cf:cf, bsz:bsz}); }
           });
