@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.82</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.83</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -217,6 +217,11 @@
        <label><input type="checkbox" id="showMaybe" checked> Possible duct</label>
        <span class="ct" id="ctMaybe" style="color:var(--maybe)">0</span>
      </div>
+     <div class="row" style="display:flex;gap:6px;margin:2px 0 4px">
+       <button class="btn duct" id="promoteMaybe" style="flex:1;font-size:11px;padding:6px">✓ Yellow → duct</button>
+       <button class="btn notduct" id="clearMaybe" style="flex:1;font-size:11px;padding:6px">✕ Yellow → not</button>
+     </div>
+     <div class="hint">Turns the yellow <b>possible</b> lines green (or clears them). Select lines first to convert just those; with nothing selected it converts every yellow line on the sheet. Your choices lock, and Undo (Ctrl+Z) puts them back.</div>
      <div class="legend-row">
        <span class="swatch" style="background:var(--not)"></span>
        <label><input type="checkbox" id="showNot"> Not duct</label>
@@ -5176,8 +5181,22 @@ function clearTextAndSymbols(){ pushUndo(); var a=cleanNoise()||0; var b=clearRo
 }
 var __cr=document.getElementById('clearRound'); if(__cr) __cr.onclick=clearTextAndSymbols;
 if($('findDrops'))$('findDrops').onclick=findDrops;
-if($('promoteMaybe'))$('promoteMaybe').onclick=()=>{ pushUndo(); segments.forEach(s=>{ if(s.cls==='maybe'&&s.lock!=='not'){ s.lock='duct'; s._userMark=true; } }); classify(); drawOverlay(); };
-if($('clearMaybe'))$('clearMaybe').onclick =()=>{ pushUndo(); segments.forEach(s=>{ if(s.cls==='maybe'&&s.lock!=='duct'){ s.lock='not'; s._userMark=true; } }); classify(); drawOverlay(); };
+// Yellow ('possible') -> duct / not. Acts on the SELECTION when there is one, else the whole sheet.
+function __convertMaybe(to){
+  pushUndo();
+  var useSel=(typeof selected!=='undefined' && selected.size>0), n=0;
+  function conv(s){ if(s.cls!=='maybe') return; if(to==='duct'&&s.lock==='not') return; if(to==='not'&&s.lock==='duct') return;
+    s.lock=to; s._userMark=true; n++; }
+  if(useSel) selected.forEach(function(i){ var s=segments[i]; if(s) conv(s); });
+  else segments.forEach(conv);
+  var taught=0; try{ if(n){ var idxs=[]; segments.forEach(function(s,i){ if(s._userMark&&s.lock===to) idxs.push(i); }); taught=addExamplesClustered(idxs.slice(0,60),to,6)||0; } }catch(e){}
+  classify(); drawOverlay();
+  if(useSel){ selected.clear(); refreshSel(); }
+  var green=segments.filter(function(s){return s.cls==='duct';}).length;
+  setStatus((to==='duct'?'Promoted ':'Cleared ')+n+' possible line(s)'+(useSel?' in the selection':' on the sheet')+' \u2014 '+green+' duct lines now.'+(taught?(' Taught AI '+taught+' example(s).'):''));
+}
+if($('promoteMaybe'))$('promoteMaybe').onclick=function(){ __convertMaybe('duct'); };
+if($('clearMaybe'))$('clearMaybe').onclick =function(){ __convertMaybe('not'); };
 (function(){ var et=document.getElementById('exportTrace'); if(et) et.onclick=exportTraceOverlay; })();
 (function(){ var sb=document.getElementById('shadeBoxes'); if(sb) sb.onchange=function(){ drawOverlay(); }; })();
 (function(){ var td=document.getElementById('traceAllDark'); if(td) td.onclick=traceAllDark; })();
