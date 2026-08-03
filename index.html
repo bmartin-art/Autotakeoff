@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.83</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v2.85</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3252,22 +3252,30 @@ function refreshSel(){
         else if(aEnd==='end'&&bEnd==='end'){ if(runReversible(B)){ first=A; second=reverseRun(B); } else if(runReversible(A)){ first=B; second=reverseRun(A); } }
         else { /* both starts */ if(runReversible(A)){ first=reverseRun(A); second=B; } else if(runReversible(B)){ first=reverseRun(B); second=A; } }
         if(!first||!second) continue;
-        // SAFETY RAILS — a merge that needs big phantom extensions or a weird angle is a bad pairing;
-        // leave those corners as visual/export joins instead of bending real duct the wrong way.
+        // The corner MUST be the exact intersection of the two legs' own centerlines. Using the
+        // detection/arc centroid instead (it can sit a few inches off) re-anchored the second leg
+        // at that point and only absorbed the ALONG-axis gap — the perpendicular error was silently
+        // baked in, sliding the whole leg off its duct by up to a duct-width.
         var fe=runEnd(first), inH=headingAtEndOf(first);
-        var _ppiM=(6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125));
-        var gapA=((C[0]-fe.x)*inH[0]+(C[1]-fe.y)*inH[1])/_ppiM;
-        var outH0=[second.dir[0],second.dir[1]];
-        var gapB0=((second.start[0]-C[0])*outH0[0]+(second.start[1]-C[1])*outH0[1])/_ppiM;
-        var turn0=Math.atan2(inH[0]*outH0[1]-inH[1]*outH0[0], inH[0]*outH0[0]+inH[1]*outH0[1]);
-        var perpOffA=Math.abs((C[0]-fe.x)*(-inH[1])+(C[1]-fe.y)*inH[0])/_ppiM;
-        if(Math.abs(gapA)>30 || Math.abs(gapB0)>30 || perpOffA>18 || Math.abs(turn0)<Math.PI/6 || Math.abs(turn0)>Math.PI*0.85){ continue; }
-        window.__pushRunUndo&&window.__pushRunUndo();
-        for(var k1=first.pieces.length-1;k1>=0;k1--){ if(first.pieces[k1].kind==='straight'){ first.pieces[k1].lenIn=Math.max(1, Math.round((first.pieces[k1].lenIn+gapA)*10)/10); break; } }
         var outH=[second.dir[0],second.dir[1]];
-        var gapB=((second.start[0]-C[0])*outH[0]+(second.start[1]-C[1])*outH[1])/(6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125));
+        var _ppiM=(6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125));
+        var turn0=Math.atan2(inH[0]*outH[1]-inH[1]*outH[0], inH[0]*outH[0]+inH[1]*outH[1]);
+        var _det=inH[0]*(-outH[1]) - (-outH[0])*inH[1];
+        if(Math.abs(_det)<1e-9) continue;                                        // parallel legs: not a corner
+        var _bx=second.start[0]-fe.x, _by=second.start[1]-fe.y;
+        var tA=(_bx*(-outH[1]) - (-outH[0])*_by)/_det;                            // fe -> P along the first leg
+        var tB=(inH[0]*_by - inH[1]*_bx)/_det;                                    // P -> second.start along the second leg
+        var P=[fe.x+inH[0]*tA, fe.y+inH[1]*tA];                                   // exact geometric corner (on BOTH centerlines)
+        var gapA=tA/_ppiM, gapB=-tB/_ppiM;
+        var offC=Math.hypot(P[0]-C[0], P[1]-C[1])/_ppiM;                          // how far the recorded corner sat from the real one
+        // SAFETY RAILS — a merge needing big phantom extensions, a weird angle, or a corner far from
+        // where it was detected is a bad pairing: leave it as a visual/export join instead.
+        if(Math.abs(gapA)>30 || Math.abs(gapB)>30 || offC>36 || Math.abs(turn0)<Math.PI/6 || Math.abs(turn0)>Math.PI*0.85){ continue; }
+        window.__pushRunUndo&&window.__pushRunUndo();
+        C=[P[0],P[1]];                                                            // snap the corner onto both centerlines
+        for(var k1=first.pieces.length-1;k1>=0;k1--){ if(first.pieces[k1].kind==='straight'){ first.pieces[k1].lenIn=Math.max(1, Math.round((first.pieces[k1].lenIn+gapA)*10)/10); break; } }
         for(var k2=0;k2<second.pieces.length;k2++){ if(second.pieces[k2].kind==='straight'){ second.pieces[k2].lenIn=Math.max(1, Math.round((second.pieces[k2].lenIn+gapB)*10)/10); break; } }
-        var turn=Math.atan2(inH[0]*outH[1]-inH[1]*outH[0], inH[0]*outH[0]+inH[1]*outH[1]);
+        var turn=turn0;
         var is45=Math.abs(Math.abs(turn)-Math.PI/4) < Math.abs(Math.abs(turn)-Math.PI/2);
         var rr=!!j.round, w=j.widthIn||first.widthIn||12;
         var lastW=w, lastD=null; for(var k3=first.pieces.length-1;k3>=0;k3--){ if(first.pieces[k3].kind==='straight'){ lastW=first.pieces[k3].widthIn||w; lastD=first.pieces[k3].depthIn; break; } }
@@ -3615,7 +3623,7 @@ function refreshSel(){
     var curW=null,curD=null,curSize=null,curRound=null;
     run.pieces.forEach(function(p){
       if(p.kind==='fitting' && (p.cid==='reducer'||p.cid==='s2r'||p.cid==='tr')){
-        if(p.outW){ curW=p.outW; curD=p.outD||p.outW; curRound=!!p.round; curSize=curRound?(curW+'\u00f8'):(curW+'x'+curD); }
+        if(p.outW){ curW=p.outW; curD=p.outD||p.outW; curRound=!!p.round; curSize=curRound?('\u00f8'+curW):(curW+'\u00d7'+curD); }
       } else if(p.kind==='straight' && curSize){ p.widthIn=curW; p.depthIn=curD; p.size=curSize; p.round=curRound; p.cid=curRound?'spiral':'st'; p.camduct=curRound?'Spiral':'Straight Duct'; }
     });
   }
@@ -4354,12 +4362,30 @@ function refreshSel(){
     if(!nums||!nums.length){ el.style.borderColor='#e55'; el.focus(); return; }
     var w=parseFloat(nums[0]), h2=(nums[1]?parseFloat(nums[1]):null);
     window.__pushRunUndo&&window.__pushRunUndo();
-    var n=0, lastStr='';
+    var n=0, lastStr='', __setStraights={};
     sel.forEach(function(k){ var pr=k.split(':'), r=findRun(pr[0]); if(!r)return; var pc=r.pieces[+pr[1]]; if(!pc)return;
+      if(pc.kind==='straight'){ (__setStraights[pr[0]]=__setStraights[pr[0]]||[]).push(+pr[1]); }
       var rnd = explicitRound ? true : (explicitRect ? false : (nums.length<2));   // a lone number = round diameter; W x H = rect
       var d = rnd ? w : (h2!=null ? h2 : w), sizeStr = rnd ? ('\u00f8'+w) : (w+'\u00d7'+d); lastStr=sizeStr;
       if(pc.kind==='straight'){ pc.widthIn=w; pc.depthIn=d; pc.round=rnd; pc.size=sizeStr; pc.cid=rnd?'spiral':'st'; pc.camduct=rnd?'Spiral':'Straight Duct'; pc._scaled=false; n++; }
       else { pc.widthIn=w; pc.depthIn=d; pc.round=rnd; if(pc._sizeStep){ pc._newW=w; pc._newD=d; pc._newR=rnd; pc._newS=sizeStr; pc.outW=w; pc.outD=d; } n++; } });
+    // A HAND-TYPED SIZE WINS: a straight downstream of a transition/reducer would be overwritten by
+    // applyReducerDownstream (it re-applies the fitting's outlet to everything after it). So retarget
+    // the governing size-step's OUTLET to what the user just typed, then propagation agrees with them.
+    try{ Object.keys(__setStraights).forEach(function(id){ var r=findRun(id); if(!r) return;
+      __setStraights[id].forEach(function(i){ var pc=r.pieces[i]; if(!pc||pc.kind!=='straight') return;
+        for(var b=i-1;b>=0;b--){ var q=r.pieces[b];
+          if(q.kind==='fitting' && (q._sizeStep||q.cid==='tr'||q.cid==='reducer'||q.cid==='s2r')){
+            q.outW=pc.widthIn; q.outD=(pc.depthIn!=null?pc.depthIn:pc.widthIn);
+            q._newW=q.outW; q._newD=q.outD; q._newR=!!pc.round; q._newS=pc.size;
+            q.widthIn=pc.widthIn; q.depthIn=pc.depthIn; q.round=!!pc.round; q.size=pc.size;   // the row reads "-> new size"
+            break; }
+        }
+        for(var fwd=i+1;fwd<r.pieces.length;fwd++){ var q2=r.pieces[fwd];
+          if(q2.kind==='fitting' && (q2._sizeStep||q2.cid==='tr'||q2.cid==='reducer'||q2.cid==='s2r')){
+            q2.inW=pc.widthIn; q2.inD=(pc.depthIn!=null?pc.depthIn:pc.widthIn); break; }   // its inlet is now this duct
+        }
+      }); }); }catch(_){}
     try{ var ids=new Set(); sel.forEach(function(k){ids.add(k.split(':')[0]);}); ids.forEach(function(id){ var r=findRun(id); if(r) applyReducerDownstream(r); }); }catch(_){}
     renderItems(); renderPanel(); setStatus('Set '+n+' piece(s) to '+lastStr+'.'); };
   window.__stamp=null;
