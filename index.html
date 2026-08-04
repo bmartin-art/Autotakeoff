@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.17</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.18</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -6530,6 +6530,7 @@ $('exportBtn').onclick=()=>{
   const ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);   // pt per real-inch at current scale
   const r4=v=>Math.round(v*10000)/10000;
   const yoloOut=(window.__yoloDets||[]).map(d=>({cls:d.cls,clsIdx:d.clsIdx,score:d.score,
+    lowProp:!!d._lowProp, used:!!d._used,
     nx:round(d.nx),ny:round(d.ny),nx0:round(d.nx0),ny0:round(d.ny0),nx1:round(d.nx1),ny1:round(d.ny1)}));
   const runOut=(window.__runs2d||[]).map(r=>{
     const Lpt=(typeof r._Lpt==='number'&&r._Lpt>0)?r._Lpt:(r.pieces||[]).reduce((a,b)=>a+(b.lenIn||0),0)*ppi;
