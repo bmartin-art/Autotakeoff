@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.23</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.26</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2397,7 +2397,7 @@ function refreshSel(){
     var u=ad, v=[-bd[0],-bd[1]];                                  // A heads into corner along ad; leaving toward B is -bd
     var turn=Math.atan2(u[0]*v[1]-u[1]*v[0], u[0]*v[0]+u[1]*v[1]);
     var w=A.widthIn, dep=(A.pieces[0]&&A.pieces[0].depthIn)||null;
-    var elb={kind:'fitting',cid:'e90',camduct:(round?'90 Elbow (round)':'90 Elbow'),round:!!round,lenIn:0,turn:turn,widthIn:w,depthIn:dep,size:(round?('\u00f8'+w):(w+'\u00d7'+(dep!=null?dep:'?'))),_elbow:true};
+    var elb={kind:'fitting',_src:'connect-elbow',cid:'e90',camduct:(round?'90 Elbow (round)':'90 Elbow'),round:!!round,lenIn:0,turn:turn,widthIn:w,depthIn:dep,size:(round?('\u00f8'+w):(w+'\u00d7'+(dep!=null?dep:'?'))),_elbow:true};
     if(endA==='start') A.pieces.unshift(elb); else A.pieces.push(elb);
     // ---- size/shape step: if A and B differ, morph A's size into B's through the corner ----
     var aRound=!!(A.pieces[0]&&A.pieces[0].round), bRound=!!(B.pieces[0]&&B.pieces[0].round);
@@ -2415,7 +2415,7 @@ function refreshSel(){
       // order runFrames walks them, and drop the applyReducerDownstream call that was rewriting every
       // straight in A to B's size (which on a start-connect meant the whole run).
       var bDep=(bRound?bW:bD), atStart=(endA==='start');
-      var step={kind:'fitting',cid:cid,camduct:name,round:bRound,lenIn:6,widthIn:bW,depthIn:(bRound?null:bD),
+      var step={kind:'fitting',_src:'connect-elbow-step',cid:cid,camduct:name,round:bRound,lenIn:6,widthIn:bW,depthIn:(bRound?null:bD),
                 size:bSize,_sizeStep:true,_newSide:(atStart?'start':'end'),
                 _newW:bW,_newD:bDep,_newR:bRound,_newS:bSize,
                 inW:(atStart?bW:aW),  inD:(atStart?bDep:aD),
@@ -2532,7 +2532,7 @@ function refreshSel(){
     var tapBR=(cpi>=0?!!cross.pieces[cpi].round:!!(cross.pieces[0]&&cross.pieces[0].round));
     var L=trunk.pieces[pi].lenIn||0, a=Math.max(0,Math.min(L,aIn));
     function mkS(len){ return {kind:'straight',lenIn:Math.round(Math.max(0,len)*10)/10,widthIn:w,depthIn:dep,size:sz,cid:rr?'spiral':'st',camduct:rr?'Spiral':'Straight Duct',round:rr}; }
-    function mkTap(side){ return {kind:'fitting',cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:w,depthIn:dep,size:sz,_tap:true,branchSide:side,branchW:tapBW,branchLenIn:10,throatIn:10,mainRound:rr,branchRound:tapBR}; }
+    function mkTap(side){ return {kind:'fitting',_src:'connect-tap',cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:w,depthIn:dep,size:sz,_tap:true,branchSide:side,branchW:tapBW,branchLenIn:10,throatIn:10,mainRound:rr,branchRound:tapBR}; }
     var ins=[mkS(a)]; sides.forEach(function(sd){ ins.push(mkTap(sd)); }); ins.push(mkS(L-a));
     trunk.pieces.splice.apply(trunk.pieces,[pi,1].concat(ins)); trunk.color=color;
     window.__runs2d=(window.__runs2d||[]).filter(function(r){return r.id!==cross.id;}).concat(branches);
@@ -2579,7 +2579,7 @@ function refreshSel(){
     var atStart=(endA==='start');
     var inW_ =atStart? bW  : aW,  inD_ =atStart? bDep : aD;
     var outW_=atStart? aW  : bW,  outD_=atStart? aD   : bDep;
-    var step={kind:'fitting',cid:cid,camduct:name,round:bR,lenIn:6,widthIn:bW,depthIn:(bR?null:bD),size:bSize,
+    var step={kind:'fitting',_src:'connect-reducer',cid:cid,camduct:name,round:bR,lenIn:6,widthIn:bW,depthIn:(bR?null:bD),size:bSize,
               _sizeStep:true,_newSide:(atStart?'start':'end'),
               _newW:bW,_newD:bDep,_newR:bR,_newS:bSize,
               inW:inW_, inD:inD_, outW:outW_, outD:outD_};
@@ -2603,7 +2603,7 @@ function refreshSel(){
     if(along<=inToPt(2)){ if(typeof setStatus==='function')setStatus('Offset connect: the 2nd end isn\u2019t ahead of the 1st \u2014 try the other ends.'); return false; }
     window.__pushRunUndo&&window.__pushRunUndo();
     var w=A.widthIn, dep=(A.pieces[0]&&A.pieces[0].depthIn)!=null?A.pieces[0].depthIn:null, rr=!!(A.pieces[0]&&A.pieces[0].round);
-    var offp={kind:'fitting',cid:'offset',camduct:'Offset',round:rr,lenIn:Math.max(2,Math.round(along/ppi)),widthIn:w,depthIn:dep,
+    var offp={kind:'fitting',_src:'connect-offset',cid:'offset',camduct:'Offset',round:rr,lenIn:Math.max(2,Math.round(along/ppi)),widthIn:w,depthIn:dep,
       size:(rr?('\u00f8'+w):(w+(dep!=null?('\u00d7'+dep):'"'))),_offset:true,offsetIn:Math.round(Math.abs(off)/ppi),offsetSide:(off>=0?1:-1)};
     if(endA==='start') A.pieces.unshift(offp); else A.pieces.push(offp);
     var shared=A.color||B.color||'#5b8def'; A.color=shared; B.color=shared;
@@ -2727,19 +2727,19 @@ function refreshSel(){
     var w=p.widthIn, dep=(p.depthIn!=null?p.depthIn:null), rr=!!p.round, sz=p.size;
     function mkS(len){ return {kind:'straight',lenIn:rnd(Math.max(0,len)),widthIn:w,depthIn:dep,size:sz,cid:rr?'spiral':'st',camduct:rr?'Spiral':'Straight Duct',round:rr}; }
     var before=mkS(a), after=mkS(L-a), t=spec.type;
-    if(t==='cap'){ pieces.splice(pieceIdx, pieces.length-pieceIdx, before, {kind:'fitting',cid:'cap',camduct:'End Cap',round:rr,lenIn:0,widthIn:w,depthIn:dep,size:sz,_cap:true}); renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Capped the duct here.'); return true; }
+    if(t==='cap'){ pieces.splice(pieceIdx, pieces.length-pieceIdx, before, {kind:'fitting',_src:'stamp-cap',cid:'cap',camduct:'End Cap',round:rr,lenIn:0,widthIn:w,depthIn:dep,size:sz,_cap:true}); renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Capped the duct here.'); return true; }
     if(t==='straight'){ var add={kind:'straight',lenIn:24,widthIn:w,depthIn:dep,size:sz,cid:rr?'spiral':'st',camduct:rr?'Spiral':'Straight Duct',round:rr}; pieces.splice(pieceIdx,1,before,add,after); renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Added 24" of straight \u2014 drag-end to adjust.'); return true; }
     if(t==='damper'){ var dRod=Math.round(((w||12)+4)*10)/10;
-      var dmp={kind:'fitting',cid:'damper',camduct:(rr?'Custom VD Burn Blade - Loose':'Rect Damper Loose'),round:rr,lenIn:0,widthIn:w,depthIn:dep,size:sz,_damper:true,rodIn:dRod};
+      var dmp={kind:'fitting',_src:'stamp-damper',cid:'damper',camduct:(rr?'Custom VD Burn Blade - Loose':'Rect Damper Loose'),round:rr,lenIn:0,widthIn:w,depthIn:dep,size:sz,_damper:true,rodIn:dRod};
       pieces.splice(pieceIdx,1,before,dmp,after);
       for(var zd=pieces.length-1;zd>=0;zd--){ if(pieces[zd]!==dmp && pieces[zd].kind==='straight' && (pieces[zd].lenIn||0)<=0.4) pieces.splice(zd,1); }
       renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Stamped a '+(rr?'round':'rect')+' damper '+sz+' (rod '+dRod+'\u2033).'); return true; }
-    if(t==='endcap'){ var ec={kind:'fitting',cid:'cap',camduct:(rr?'End Cap - SE':'End Cap - Connector'),round:rr,lenIn:0,widthIn:w,depthIn:dep,size:sz,_cap:true};
+    if(t==='endcap'){ var ec={kind:'fitting',_src:'insert-endcap',cid:'cap',camduct:(rr?'End Cap - SE':'End Cap - Connector'),round:rr,lenIn:0,widthIn:w,depthIn:dep,size:sz,_cap:true};
       pieces.splice(pieceIdx,1,before,ec,after);
       for(var ze=pieces.length-1;ze>=0;ze--){ if(pieces[ze]!==ec && pieces[ze].kind==='straight' && (pieces[ze].lenIn||0)<=0.4) pieces.splice(ze,1); }
       renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Stamped a '+(rr?'round':'rect')+' end cap ('+sz+').'); return true; }
     if(t==='tap'){ var bW=spec.branchW||Math.max(6,Math.round(w/2)), bSide=spec.branchSide||1, bRound=!!spec.branchRound, bD=(spec.branchD!=null?spec.branchD:(bRound?bW:null)), bSize=bRound?('\u00f8'+bW):(bW+'\u00d7'+(bD!=null?bD:'?'));
-      var tap={kind:'fitting',cid:'stap',camduct:(spec.shopTap?'Shop Tap':'Tap'),round:false,lenIn:0,widthIn:w,depthIn:dep,size:sz,_tap:true,shopTap:!!spec.shopTap,branchSide:bSide,branchW:bW,branchLenIn:10,throatIn:10,mainRound:(spec.mainRound!=null?!!spec.mainRound:rr),branchRound:bRound};
+      var tap={kind:'fitting',_src:'insert-tap',cid:'stap',camduct:(spec.shopTap?'Shop Tap':'Tap'),round:false,lenIn:0,widthIn:w,depthIn:dep,size:sz,_tap:true,shopTap:!!spec.shopTap,branchSide:bSide,branchW:bW,branchLenIn:10,throatIn:10,mainRound:(spec.mainRound!=null?!!spec.mainRound:rr),branchRound:bRound};
       pieces.splice(pieceIdx,1,before,tap,after);
       if(spec.branch){ var fr=runFrames(run), f=fr[pieceIdx+1]; if(f){
         var brId='br'+Date.now().toString(36);
@@ -2747,22 +2747,22 @@ function refreshSel(){
         window.__runs2d=window.__runs2d||[];
         window.__runs2d.push({ id:brId, start:[f.x, f.y],                    // START AT THE TAP POINT on the trunk so it's truly attached
           dir:[f.nx*bSide, f.ny*bSide], widthIn:bW, color:run.color,
-          pieces:[{kind:'fitting',cid:'stap',camduct:(spec.shopTap?'Shop Tap':'Tap'),round:false,lenIn:0,widthIn:bW,depthIn:(bD!=null?bD:bW),size:bSize,_tap:true,_tapRef:true,branchSide:bSide,branchW:bW,mainRound:(spec.mainRound!=null?!!spec.mainRound:rr),branchRound:bRound},
+          pieces:[{kind:'fitting',_src:'insert-tap-branch',cid:'stap',camduct:(spec.shopTap?'Shop Tap':'Tap'),round:false,lenIn:0,widthIn:bW,depthIn:(bD!=null?bD:bW),size:bSize,_tap:true,_tapRef:true,branchSide:bSide,branchW:bW,mainRound:(spec.mainRound!=null?!!spec.mainRound:rr),branchRound:bRound},
                   {kind:'straight',lenIn:(spec.branchLenIn||24),widthIn:bW,depthIn:bD,size:bSize,cid:bRound?'spiral':'st',camduct:bRound?'Spiral':'Straight Duct',round:bRound}],
           _branch:true, _tapRunId:run.id }); } }
       renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Added a tap'+(spec.branch?' + '+bSize+' branch \u2014 drag its end to length':'')+'.'); return true; }
     var fit;
     if(t==='elbow90'||t==='elbow45'){ var ang=(t==='elbow45'?Math.PI/4:Math.PI/2)*((spec.dir==='L')?1:-1);
       var er=(spec.round!=null?!!spec.round:rr);
-      fit={kind:'fitting',cid:(t==='elbow45'?'e45':'e90'),camduct:(t==='elbow45'?'45 Elbow':'90 Elbow')+(er?' (round)':''),round:er,lenIn:0,turn:ang,widthIn:w,depthIn:dep,size:(er?('\u00f8'+w):sz),_elbow:true};
+      fit={kind:'fitting',_src:'insert-elbow',cid:(t==='elbow45'?'e45':'e90'),camduct:(t==='elbow45'?'45 Elbow':'90 Elbow')+(er?' (round)':''),round:er,lenIn:0,turn:ang,widthIn:w,depthIn:dep,size:(er?('\u00f8'+w):sz),_elbow:true};
       if((after.lenIn||0) < 2){ after.lenIn = 12; after.round=er; after.cid=er?'spiral':'st'; after.camduct=er?'Spiral':'Straight Duct'; if(er) after.size='\u00f8'+w; }   // inserted at the END -> add a 12" starter leg in the new direction to flip/drag/extend
     }
-    else if(t==='offset'){ fit={kind:'fitting',cid:'offset',camduct:'Offset',round:rr,lenIn:(spec.lenIn||12),widthIn:w,depthIn:dep,size:sz,_offset:true,offsetIn:(spec.offsetIn||12),offsetSide:(spec.offsetSide||1)}; }
+    else if(t==='offset'){ fit={kind:'fitting',_src:'insert-offset',cid:'offset',camduct:'Offset',round:rr,lenIn:(spec.lenIn||12),widthIn:w,depthIn:dep,size:sz,_offset:true,offsetIn:(spec.offsetIn||12),offsetSide:(spec.offsetSide||1)}; }
     else if(t==='transition'||t==='reducer'||t==='s2r'){
       var sp=spec.size||{}, nW=sp.w||w, nR=(t==='s2r')?true:!!sp.round, nD=nR?nW:(sp.h!=null?sp.h:dep), nS=nR?('\u00f8'+nW):(nW+'\u00d7'+(nD!=null?nD:'?'));
       var cid=(t==='s2r')?'s2r':(nR?'reducer':'tr'), cn=(t==='s2r')?'Sq to Round':(nR?'Reducer':'Transition');
       var toEnd=(spec.dir!=='start');
-      fit={kind:'fitting',cid:cid,camduct:cn,round:nR,lenIn:12,widthIn:nW,depthIn:nD,size:nS,inW:(toEnd?w:nW),outW:(toEnd?nW:w),outD:nD,_sizeStep:true,_newSide:(toEnd?'end':'start'),_newW:nW,_newD:nD,_newR:nR,_newS:nS};
+      fit={kind:'fitting',_src:'insert-sizestep',cid:cid,camduct:cn,round:nR,lenIn:12,widthIn:nW,depthIn:nD,size:nS,inW:(toEnd?w:nW),outW:(toEnd?nW:w),outD:nD,_sizeStep:true,_newSide:(toEnd?'end':'start'),_newW:nW,_newD:nD,_newR:nR,_newS:nS};
     } else { return false; }
     var flen=fit.lenIn||0; if(flen>0){ if((after.lenIn||0)>=flen) after.lenIn=rnd(after.lenIn-flen); else if((before.lenIn||0)>=flen) before.lenIn=rnd(before.lenIn-flen); }
     pieces.splice(pieceIdx,1,before,fit,after);
@@ -2881,7 +2881,7 @@ function refreshSel(){
             var rc='tr', rn='Transition';
             if(prevRound!==null && prevRound!==s.round){ rc='s2r'; rn='Sq to Round'; }   // round<->rect = square-to-round
             else if(s.round){ rc='reducer'; rn='Reducer'; }                              // round->round = reducer
-            pieces.push({kind:'fitting',cid:rc,camduct:rn,round:s.round,lenIn:0,widthIn:s.w,depthIn:depth,size:s.str,_sizeStep:true});
+            pieces.push({kind:'fitting',_src:'review-sizestep',cid:rc,camduct:rn,round:s.round,lenIn:0,widthIn:s.w,depthIn:depth,size:s.str,_sizeStep:true});
           }
           var rem=Math.max(0,sp.b-sp.a), jl=s.round?120:JOINT_DEFAULT;
           while(rem>0.5){ var L=Math.min(jl,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:s.w,depthIn:depth,size:s.str,cid:s.round?'spiral':'st',camduct:s.round?'Spiral':'Straight Duct',round:s.round}); rem-=L; }
@@ -2956,11 +2956,11 @@ function refreshSel(){
         var perp=Math.abs(pr.perpIn); if(perp> (run.widthIn/2 + (window.__yoloGreenScoped?30:12))) return;  // must sit on the duct (wider slack when green-scoped)
         if(perp<bestPerp){ bestPerp=perp; best=pr; bestRun=run; }
       });
-      if(!bestRun){ skipNoRun++; return; }   // no run lay on this detection's centerline within reach (e.g. fitting at a corner where no run was built)
+      if(!bestRun){ skipNoRun++; window.__detNote(d,'yolo-swap','SKIPPED: no run on the detection centerline within reach'); return; }   // no run lay on this detection's centerline within reach (e.g. fitting at a corner where no run was built)
       // walk the chain to find which piece the 'along' position lands in, split there, insert the fitting
       var run=bestRun, posIn=Math.max(0,best.alongIn), acc=0, idx=-1, into=0;
       for(var i=0;i<run.pieces.length;i++){ var pl=run.pieces[i].lenIn; if(posIn<=acc+pl || i===run.pieces.length-1){ idx=i; into=posIn-acc; break; } acc+=pl; }
-      if(idx<0){ skipNoPiece++; return; }
+      if(idx<0){ skipNoPiece++; window.__detNote(d,'yolo-swap','SKIPPED: run found but no piece under the detection'); return; }
       var piece=run.pieces[idx];
       // resolve coarse YOLO class -> the SHAPE-CORRECT CamDuct fitting, using the run's
       // own known shape (piece.round, set from the size tag: Wx H = rect, Nø = round).
@@ -2990,7 +2990,7 @@ function refreshSel(){
       // green trace; letting a detected elbow impose its own 90 turn was jumbling straight runs. Real corners
       // are handled by the run geometry / run-joins; the user turns the occasional inline elbow by hand.
       // split the straight piece at 'into'
-      var mkFit=function(){ var o={kind:'fitting',cid:cid,camduct:name,round:isRound,lenIn:fitLenIn,widthIn:piece.widthIn,depthIn:piece.depthIn,fromYolo:true,score:d.score}; if(target==='e90'&&turnV){ o.turn=turnV; o._elbow=true; } return o; };
+      var mkFit=function(){ var o={kind:'fitting',_src:'yolo-swap',cid:cid,camduct:name,round:isRound,lenIn:fitLenIn,widthIn:piece.widthIn,depthIn:piece.depthIn,fromYolo:true,score:d.score}; if(target==='e90'&&turnV){ o.turn=turnV; o._elbow=true; } return o; };
       var newPieces=[];
       if(piece.kind==='straight' && into>2 && into<piece.lenIn-2){
         var a=Object.assign({},piece); a.lenIn=Math.round(into*10)/10;
@@ -3000,7 +3000,7 @@ function refreshSel(){
         newPieces=[mkFit()];
       }
       run.pieces.splice.apply(run.pieces,[idx, (piece.kind==='straight'&&into>2&&into<piece.lenIn-2)?1:0].concat(newPieces));
-      placed++;
+      placed++; window.__detNote(d,'yolo-swap','placed');
     });
     // re-apply downstream sizing for any reducers we inserted
     window.__runs2d.forEach(function(r){ try{ applyReducerDownstream(r); }catch(e){} });
@@ -3069,6 +3069,7 @@ function refreshSel(){
       (window.__elbowJoins=window.__elbowJoins||[]).push({
         trunkId:trunk.id, branchId:branch.id, atX:d.nx, atY:d.ny, turn:turn,
         round:elbRound, widthIn:lastP.widthIn||trunk.widthIn, score:d.score });
+      window.__detNote(d,'join','joined '+trunk.id+'+'+branch.id);
       d._used=true; joined++;
     });
     return joined;
@@ -3218,7 +3219,7 @@ function refreshSel(){
     dets.forEach(function(d){
       if(d._used || d.nx==null) return;
       var b=base(d.cls); if(b!=='sizechange'&&b!=='reducer'&&b!=='transition'&&b!=='sq2round') return;
-      function why(rsn){ _disp.push({score:Math.round((d.score||0)*100)/100, x:Math.round(d.nx), y:Math.round(d.ny), why:rsn}); }
+      function why(rsn){ _disp.push({score:Math.round((d.score||0)*100)/100, x:Math.round(d.nx), y:Math.round(d.ny), why:rsn}); window.__detNote(d,'bridge-sizechange',rsn); }
       if((d.score||0) < (window.__yoloGreenScoped?0.18:0.30)){ why('below score floor'); return; }
       var reach=inToPt(36), hits=[];
       runs.forEach(function(r){ var re2=runEnd(r);
@@ -3232,7 +3233,7 @@ function refreshSel(){
       if((A.out[0]*B.out[0]+A.out[1]*B.out[1]) > -0.7){ why('run ends do not face each other (corner, not an in-line step)'); return; }
       if(Math.hypot(A.p[0]-B.p[0], A.p[1]-B.p[1]) > inToPt(72)){ why('gap between ends over 72\u2033'); return; }
       var up=( (A.r.widthIn||0) >= (B.r.widthIn||0) ) ? A : B, dn=(up===A)?B:A; // step from the larger run down
-      try{ if(window.__connectReducer && window.__connectReducer(up.r.id, up.end, dn.r.id, dn.end)){ d._used=true; made++; }
+      try{ if(window.__connectReducer && window.__connectReducer(up.r.id, up.end, dn.r.id, dn.end)){ window.__detNote(d,'bridge-sizechange','bridged '+up.r.id+' -> '+dn.r.id); d._used=true; made++; }
            else why('connectReducer declined'); }catch(e){ console.warn('bridgeSizechanges', e); why('error: '+((e&&e.message)||e)); }
     });
     window.__sizechangeDisp=_disp;
@@ -3242,6 +3243,60 @@ function refreshSel(){
     return made;
   }
   window.__bridgeSizechanges=bridgeSizechanges;
+  // ---- INFER SIZE STEPS FROM RUN ENDS (v3.24) --------------------------------------------------
+  // Transitions are drawn as short angled tapers, so line-selection skips them the same way it skips
+  // elbow arcs: the fitting is ALWAYS a hole in the green. bridgeSizechanges could only fill that hole
+  // when YOLO happened to fire on the taper -- and it rarely does -- so nearly every transition was
+  // missed even when the straight duct on BOTH sides was cleanly traced at two different widths.
+  // But that trace pattern IS the transition: two collinear runs, ends facing across a fitting-sized
+  // gap, centerlines aligned, widths a real step apart. No detection needed; the geometry is the
+  // evidence. Gates, each physical:
+  //   facing:   dot < -0.9            (head-on continuation, not a corner)
+  //   gap:      4..48in               (a taper's length; 0-gap is a coupling, 4ft+ is missing duct)
+  //   aligned:  centerline offset <= half the larger width (in-line, not a lateral jog)
+  //   step:     widths differ >= 2in and ratio <= 3        (a real step, not tag noise / not two systems)
+  //   substance: both runs >= 18in     (fragments don't get welded into fittings)
+  function inferSizeStepsFromEnds(){
+    var runs=window.__runs2d||[]; if(runs.length<2) return 0;
+    function endsOf(r){ var e=runEnd(r);
+      return [{end:'start', p:[r.start[0],r.start[1]], out:[-r.dir[0],-r.dir[1]], r:r},
+              {end:'end',   p:[e.x,e.y],               out:[r.dir[0],r.dir[1]],   r:r}]; }
+    var E=[]; runs.forEach(function(r){ if(runLenIn(r)>=18) endsOf(r).forEach(function(x){ E.push(x); }); });
+    var cands=[];
+    for(var i=0;i<E.length;i++) for(var k=i+1;k<E.length;k++){
+      var A=E[i], B=E[k]; if(A.r===B.r) continue;
+      var wA=A.r.widthIn||0, wB=B.r.widthIn||0; if(!wA||!wB) continue;
+      if(Math.abs(wA-wB)<2) continue;
+      if(Math.max(wA,wB)>Math.min(wA,wB)*3) continue;
+      if((A.out[0]*B.out[0]+A.out[1]*B.out[1]) > -0.9) continue;
+      var vx=B.p[0]-A.p[0], vy=B.p[1]-A.p[1];
+      var along=vx*A.out[0]+vy*A.out[1];                       // B must be AHEAD of A's end
+      if(along<inToPt(4)||along>inToPt(48)) continue;
+      var perp=Math.abs(vx*(-A.out[1])+vy*A.out[0]);
+      // OVERLAP, not alignment: real transitions are routinely FLAT ON ONE SIDE, so an 18\u2033 into a 7\u2033
+      // carries a designed centerline offset of (18-7)/2 plus trace slop. Page-2 evidence: 3 of this
+      // sheet's 6 real facing-pairs (14\u21926 at 9.4\u2033 off, 18\u21927 at 11.5\u2033 and 11.9\u2033) were blocked by the old
+      // half-width gate. The physical requirement is only that the two duct bands OVERLAP laterally:
+      // offset < (wA+wB)/2. Side-by-side parallel ducts still can't pass -- they don't have facing ends.
+      if(perp>inToPt((wA+wB)/2)) continue;
+      cands.push({A:A,B:B,gap:along});
+    }
+    cands.sort(function(a,b){ return a.gap-b.gap; });
+    var used={}, made=0, log=[];
+    cands.forEach(function(c){
+      var kA=c.A.r.id+':'+c.A.end, kB=c.B.r.id+':'+c.B.end;
+      if(used[kA]||used[kB]) return;
+      var up=((c.A.r.widthIn||0)>=(c.B.r.widthIn||0))?c.A:c.B, dn=(up===c.A)?c.B:c.A;
+      try{ if(window.__connectReducer && window.__connectReducer(up.r.id, up.end, dn.r.id, dn.end)){
+        used[kA]=used[kB]=true; made++;
+        log.push({from:(up.r.widthIn||0)+'\u2033', to:(dn.r.widthIn||0)+'\u2033', gapIn:Math.round(ptToIn(c.gap))});
+      } }catch(e){ console.warn('inferSizeSteps', e); }
+    });
+    if(made){ console.log('[takeoff] inferred '+made+' transition(s) from facing run ends (no detection needed)');
+      try{ console.table(log); }catch(_){ } }
+    return made;
+  }
+  window.__inferSizeStepsFromEnds=inferSizeStepsFromEnds;
   // ---- TAP GAP BRIDGE: a tap detection sitting between a branch run's END and another run's BODY
   // means the branch never attached (the walker only taps events on its own spine). Auto-connect it
   // with the same machinery as Connect > Tap. ----
@@ -3392,8 +3447,8 @@ function refreshSel(){
           var a0=acc, a1=acc+(pc.lenIn||0); acc=a1;
           if(a1<=hostPr.alongIn) wA=pc.widthIn; else if(wB==null && a0>=hostPr.alongIn) wB=pc.widthIn; }
         stepped=(wA!=null&&wB!=null&&Math.abs(wA-wB)>=2);
-        if(stepped){ d.cls=pref(d.cls)+'sizechange'; relabeled++; }
-        else { d._used=true; dropped++; }
+        if(stepped){ window.__detNote(d,'sanitize','relabeled elbow->sizechange: mid-run where size steps'); d.cls=pref(d.cls)+'sizechange'; relabeled++; }
+        else { window.__detNote(d,'sanitize','DROPPED: mid-run, duct runs straight through'); d._used=true; dropped++; }
         return;
       }
       // (b) in an in-line GAP between two ends that FACE each other -> a fitting, not a corner
@@ -3508,7 +3563,7 @@ function refreshSel(){
         var is45=Math.abs(Math.abs(turn)-Math.PI/4) < Math.abs(Math.abs(turn)-Math.PI/2);
         var rr=!!j.round, w=j.widthIn||first.widthIn||12;
         var lastW=w, lastD=null; for(var k3=first.pieces.length-1;k3>=0;k3--){ if(first.pieces[k3].kind==='straight'){ lastW=first.pieces[k3].widthIn||w; lastD=first.pieces[k3].depthIn; break; } }
-        var elbow={kind:'fitting',cid:(is45?'e45':'e90'),camduct:(rr?(is45?'45o Fixed Elbow':'90o Fixed Elbow'):(is45?'Angled Elbow':'Square Elbow')),round:rr,lenIn:0,turn:turn,widthIn:lastW,depthIn:lastD,size:(rr?('\u00f8'+lastW):(lastW+'\u00d7'+(lastD!=null?lastD:lastW))),_elbow:true,_fromJoin:true};
+        var elbow={kind:'fitting',_src:'merge-join',cid:(is45?'e45':'e90'),camduct:(rr?(is45?'45o Fixed Elbow':'90o Fixed Elbow'):(is45?'Angled Elbow':'Square Elbow')),round:rr,lenIn:0,turn:turn,widthIn:lastW,depthIn:lastD,size:(rr?('\u00f8'+lastW):(lastW+'\u00d7'+(lastD!=null?lastD:lastW))),_elbow:true,_fromJoin:true};
         first.pieces.push(elbow);
         second.pieces.forEach(function(p){ first.pieces.push(p); });
         if(!first.sectionLabel && second.sectionLabel){ first.sectionLabel=second.sectionLabel; first.sectionId=second.sectionId; }
@@ -3682,7 +3737,7 @@ function refreshSel(){
       var prevRound=null;
       spans.forEach(function(sp,si){ var s=sp.size, depth=s.round?s.w:s.h;
         if(si>0){ var rc='tr',rn='Transition'; if(prevRound!==null&&prevRound!==s.round){rc='s2r';rn='Sq to Round';} else if(s.round){rc='reducer';rn='Reducer';}
-          pieces.push({kind:'fitting',cid:rc,camduct:rn,round:s.round,lenIn:0,widthIn:s.w,depthIn:depth,size:s.str,_sizeStep:true}); }
+          pieces.push({kind:'fitting',_src:'walk-preview-sizestep',cid:rc,camduct:rn,round:s.round,lenIn:0,widthIn:s.w,depthIn:depth,size:s.str,_sizeStep:true}); }
         var rem=Math.max(0,sp.b-sp.a), jl=s.round?120:JOINT_DEFAULT;
         while(rem>0.5){ var L=Math.min(jl,rem); pieces.push({kind:'straight',lenIn:rnd(L),widthIn:s.w,depthIn:depth,size:s.str,cid:s.round?'spiral':'st',camduct:s.round?'Spiral':'Straight Duct',round:s.round}); rem-=L; }
         prevRound=s.round; });
@@ -3950,7 +4005,7 @@ function refreshSel(){
             if(nS!==p.size && p.kind==='straight' && confirm('Size differs from this duct. Insert a transition here and resize the downstream duct to '+nS+'?')){
               var oR=!!p.round, cid=(oR!==nR)?'s2r':(nR?'reducer':'tr'), cn=(cid==='s2r')?'Sq to Round':(cid==='reducer'?'Reducer':'Transition');
               if(p.lenIn>13) p.lenIn=rnd(p.lenIn-12);                                 // make room for the 12" transition
-              run.pieces.splice(i+1,0,{kind:'fitting',cid:cid,camduct:cn,round:nR,lenIn:12,widthIn:nW,depthIn:nD,size:nS,inW:p.widthIn,outW:nW,outD:nD,_sizeStep:true});
+              run.pieces.splice(i+1,0,{kind:'fitting',_src:'sanity-sizestep',cid:cid,camduct:cn,round:nR,lenIn:12,widthIn:nW,depthIn:nD,size:nS,inW:p.widthIn,outW:nW,outD:nD,_sizeStep:true});
               applyReducerDownstream(run); renderItems(); renderPanel(); setStatus('Inserted transition \u2192 '+nS+'. Downstream resized.'); return;
             }
             p.widthIn=nW; p.depthIn=nD; p.round=nR; p.size=nS; if(p.kind==='straight'){ p.cid=nR?'spiral':'st'; p.camduct=nR?'Spiral':'Straight Duct'; }
@@ -3968,7 +4023,7 @@ function refreshSel(){
             var fx=ms[0]+md[0]*projT(bp), fy=ms[1]+md[1]*projT(bp), nxn=-md[1], nyn=md[0];
             var side=(((bp[0]-fx)*nxn+(bp[1]-fy)*nyn)>=0)?1:-1;
             var bw=br.widthIn||12, b0=br.pieces&&br.pieces[0], bsz=(b0&&b0.size)||(bw+'\u2033');
-            var tap={kind:'fitting',cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:main.widthIn,depthIn:main.widthIn,size:bsz,_tap:true,branchSide:side,branchW:bw,throatIn:10};
+            var tap={kind:'fitting',_src:'synth-tap',cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:main.widthIn,depthIn:main.widthIn,size:bsz,_tap:true,branchSide:side,branchW:bw,throatIn:10};
             var acc=0, idx=-1, into=0;
             for(var kk=0;kk<main.pieces.length;kk++){ var pl=main.pieces[kk].lenIn||0; if(main.pieces[kk].kind==='straight' && posIn<=acc+pl){ idx=kk; into=posIn-acc; break; } acc+=pl; }
             if(idx>=0){ var pc=main.pieces[idx], a=Object.assign({},pc); a.lenIn=rnd(into); var b=Object.assign({},pc); b.lenIn=rnd((pc.lenIn||0)-into); main.pieces.splice(idx,1,a,tap,b); }
@@ -3984,7 +4039,7 @@ function refreshSel(){
             if(kind.indexOf('elb')===0){
               var lr=((prompt('Turn which way?  L = left  |  R = right','R')||'R').trim().toLowerCase()[0]==='l')?1:-1;
               var deg90=((prompt('Angle?  45  or  90','90')||'90').indexOf('45')>=0)?45:90;
-              var elb={kind:'fitting',cid:(deg90===45?'e45':'e90'),camduct:(deg90===45?'45 Elbow':'90 Elbow')+(rr?' (round)':''),round:rr,lenIn:0,turn:lr*deg90*Math.PI/180,widthIn:w,depthIn:dep,size:szStr,_elbow:true};
+              var elb={kind:'fitting',_src:'synth-elbow',cid:(deg90===45?'e45':'e90'),camduct:(deg90===45?'45 Elbow':'90 Elbow')+(rr?' (round)':''),round:rr,lenIn:0,turn:lr*deg90*Math.PI/180,widthIn:w,depthIn:dep,size:szStr,_elbow:true};
               var leg={kind:'straight',lenIn:12,widthIn:w,depthIn:dep,size:szStr,cid:rr?'spiral':'st',camduct:rr?'Spiral':'Straight Duct',round:rr};   // 12" starter leg to flip/drag/extend
               if(atEnd) run.pieces.push(elb, leg); else run.pieces.unshift(leg, elb);
               renderItems(); renderPanel(); setStatus('Inserted '+deg90+'\u00b0 elbow + 12" leg at the '+(atEnd?'end':'start')+'. Flip it or drag-end to steer.'); return;
@@ -3994,13 +4049,13 @@ function refreshSel(){
               var pd=parseTagDims(os); if(!pd){ setStatus('Couldn\u2019t read \u201c'+os+'\u201d \u2014 try like 12x8 or 10\u00f8.'); return; }
               var nW=pd.w,nD=pd.round?pd.w:pd.h,nR=!!pd.round,nS=pd.round?('\u00f8'+pd.w):(pd.w+'\u00d7'+pd.h);
               var cid=(rr!==nR)?'s2r':(nR?'reducer':'tr'), cn=(cid==='s2r')?'Sq to Round':(cid==='reducer'?'Reducer':'Transition');
-              var tr={kind:'fitting',cid:cid,camduct:cn,round:nR,lenIn:12,widthIn:nW,depthIn:nD,size:nS,inW:w,outW:nW,outD:nD,_sizeStep:true};
+              var tr={kind:'fitting',_src:'synth-sizestep',cid:cid,camduct:cn,round:nR,lenIn:12,widthIn:nW,depthIn:nD,size:nS,inW:w,outW:nW,outD:nD,_sizeStep:true};
               if(atEnd) run.pieces.push(tr); else run.pieces.unshift(tr);
               try{ applyReducerDownstream(run); }catch(_){}
               renderItems(); renderPanel(); setStatus('Inserted transition \u2192 '+nS+' at the '+(atEnd?'end':'start')+'.'); return;
             }
             if(kind.indexOf('off')===0){
-              var off={kind:'fitting',cid:'offset',camduct:'Offset',round:rr,lenIn:12,widthIn:w,depthIn:dep,size:szStr,_offset:true};
+              var off={kind:'fitting',_src:'synth-offset',cid:'offset',camduct:'Offset',round:rr,lenIn:12,widthIn:w,depthIn:dep,size:szStr,_offset:true};
               if(atEnd) run.pieces.push(off); else run.pieces.unshift(off);
               renderItems(); renderPanel(); setStatus('Inserted offset at the '+(atEnd?'end':'start')+'.'); return;
             }
@@ -4118,6 +4173,8 @@ function refreshSel(){
   if(typeof drawOverlay==='function'){ var _od2=drawOverlay; drawOverlay=function(){ var r=_od2.apply(this,arguments); try{renderItems();}catch(e){} return r; }; }
 
   function findRun(id){ return (window.__runs2d||[]).find(function(r){return r.id===id;}); }
+  // detection decision trail (v3.26): every pass that touches a detection records what it did and why
+  window.__detNote=function(d,pass,note){ try{ (d._notes=d._notes||[]).push(pass+': '+note); }catch(_){} };
   // ---------- Layer-4 adjudicator: score every elbow's evidence, keep the reasons ----------
   window.__adjudicateElbows=function(){
     var runs=window.__runs2d||[]; if(!runs.length) return 0;
@@ -4156,7 +4213,7 @@ function refreshSel(){
         var isOff=(_cid==='offset'||p._offset);
         if(!(isElb||isTap||isStep||isCap||isOff)) continue;
         var f=fr[i]; if(!f) continue;
-        var ev={runId:r.id, pieceIdx:i, x:f.x, y:f.y, widthIn:w, kind:_cid, reasons:[], score:0};
+        var ev={runId:r.id, pieceIdx:i, x:f.x, y:f.y, widthIn:w, kind:_cid, src:(p._src||null), reasons:[], score:0};
         // Evidence ADDS and SUBTRACTS, and structural contradictions cap the verdict at review.
         // Each fitting type has its own physics: an elbow must turn; a tap sits MID-run with trunk on
         // both sides; a cap sits at an END; a transition must actually change size; an offset needs a
@@ -4184,7 +4241,16 @@ function refreshSel(){
           else if(wA!=null&&wB!=null){ ev.score-=0.10; ev.reasons.push('trunk size changes AT the tap'); }
         } else if(isStep){
           var iw=p.inW!=null?p.inW:wA, ow=p.outW!=null?p.outW:wB;
-          if(iw!=null&&ow!=null&&Math.abs(iw-ow)>=1){ ev.score+=0.30; ev.reasons.push('steps '+iw+'\u2033\u2192'+ow+'\u2033'); }
+          // depth counts too: an 8x12 -> 8x8 transition is width-equal but REAL. Judging widths alone
+          // graded one of those 'changes nothing / suspect 0%' on page 2 -- and the human kept it.
+          var dA=null,dB=null;
+          for(var a3=i-1;a3>=0;a3--){ if(pcs[a3].kind==='straight'){ dA=(pcs[a3].depthIn!=null?pcs[a3].depthIn:pcs[a3].widthIn); break; } }
+          for(var b3=i+1;b3<pcs.length;b3++){ if(pcs[b3].kind==='straight'){ dB=(pcs[b3].depthIn!=null?pcs[b3].depthIn:pcs[b3].widthIn); break; } }
+          var idp=p.inD!=null?p.inD:dA, odp=p.outD!=null?p.outD:dB;
+          var wStep=(iw!=null&&ow!=null&&Math.abs(iw-ow)>=1);
+          var dStep=(idp!=null&&odp!=null&&Math.abs(idp-odp)>=1);
+          if(wStep||dStep){ ev.score+=0.30;
+            ev.reasons.push('steps '+(iw!=null?iw:'?')+'\u00d7'+(idp!=null?idp:'?')+' \u2192 '+(ow!=null?ow:'?')+'\u00d7'+(odp!=null?odp:'?')); }
           else { ev.score-=0.25; capReview=true; ev.reasons.push('changes nothing ('+(iw!=null?iw:'?')+'\u2033\u2192'+(ow!=null?ow:'?')+'\u2033)'); }
           if(before>=6 && after>=6){ ev.score+=0.20; ev.reasons.push('duct both sides'); }
           else { ev.score-=0.05; ev.reasons.push('at a run end (connector)'); }
@@ -4291,7 +4357,7 @@ function refreshSel(){
       var i=(window.__elbowLedger||[]).indexOf(e);
       var col=e.verdict==='confirmed'?'#2c6e49':(e.verdict==='review'?'#8a6d1a':'#7e2c35');
       h+='<div id="elstrip-c'+i+'" onmouseenter="__stripCircle('+e.x.toFixed(1)+','+e.y.toFixed(1)+')" style="border:1px solid '+col+';border-left:5px solid '+col+';border-radius:7px;padding:5px 7px;margin-bottom:6px">'
-        +'<div style="display:flex;justify-content:space-between"><b>'+(e.kind||'').toUpperCase()+' \u00b7 '+e.verdict.toUpperCase()+' '+(e.score*100|0)+'%</b><span class="act">'
+        +'<div style="display:flex;justify-content:space-between"><b>'+(e.kind||'').toUpperCase()+(e.src?(' ['+e.src+']'):'')+' \u00b7 '+e.verdict.toUpperCase()+' '+(e.score*100|0)+'%</b><span class="act">'
         +'<button onclick="__stripKeep('+i+')" style="background:#1d3a2a;color:#bfe8cd;border:1px solid #2c6e49;border-radius:5px;cursor:pointer;margin-right:4px">\u2713</button>'
         +'<button onclick="__stripDel('+i+')" style="background:#3a1d22;color:#e8bfc7;border:1px solid #7e2c35;border-radius:5px;cursor:pointer">\u2717</button></span></div>'
         +'<div style="color:#9fb2c8">'+e.reasons.join(' \u00b7 ')+'</div></div>';
@@ -5065,16 +5131,16 @@ function refreshSel(){
           events.forEach(function(ev){
             if(ev.type==='tr'){ emitStraight(Math.max(0,ev.posIn-TRLEN/2), curSize);   // in-line size step
               var s=ev.size, depth=s.round?s.w:s.h, rcc='tr',rn='Transition'; if(prevRound!==null&&prevRound!==s.round){rcc='s2r';rn='Sq to Round';} else if(s.round){rcc='reducer';rn='Reducer';}
-              pieces.push({kind:'fitting',cid:rcc,camduct:rn,round:s.round,lenIn:TRLEN,widthIn:s.w,depthIn:depth,size:s.str,inW:curSize.w,outW:s.w,_sizeStep:true}); trans++;
+              pieces.push({kind:'fitting',_src:'walk-sizestep',cid:rcc,camduct:rn,round:s.round,lenIn:TRLEN,widthIn:s.w,depthIn:depth,size:s.str,inW:curSize.w,outW:s.w,_sizeStep:true}); trans++;
               cursorIn=ev.posIn+TRLEN/2; curSize=s;
             } else if(ev.type==='elbow'){                                  // ELBOW placeholder — do NOT turn the run. The green spine already sets direction; auto-turning toward a "continuing fragment" swung runs down branches. Drops an inline marker; the user turns real corners by hand.
               emitStraight(ev.posIn, curSize);
-              pieces.push({kind:'fitting',cid:'e90',camduct:'90 Elbow',round:curSize.round,lenIn:0,turn:0,widthIn:curSize.w,depthIn:(curSize.round?curSize.w:curSize.h),size:curSize.str,_elbow:true,fromYolo:true}); elbows++;
+              pieces.push({kind:'fitting',_src:'walk-elbow-marker',cid:'e90',camduct:'90 Elbow',round:curSize.round,lenIn:0,turn:0,widthIn:curSize.w,depthIn:(curSize.round?curSize.w:curSize.h),size:curSize.str,_elbow:true,fromYolo:true}); elbows++;
             } else {                                                       // TAP / TEE / off-shape branch — trunk continues, branch off the side
               emitStraight(ev.posIn, curSize);
               var bt=ev.bt||ev.bsz||{w:curSize.w,h:curSize.h,round:curSize.round,str:curSize.str};
               var pvT=(ev.perp!=null?ev.perp:(ev.bt?ev.bt.perp:perpC)), bSide=((pvT-perpC)>=0)?1:-1;
-              pieces.push({kind:'fitting',cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:curSize.w,depthIn:(curSize.round?curSize.w:curSize.h),size:bt.str,_tap:true,branchSide:bSide,branchW:bt.w,throatIn:10}); taps++;
+              pieces.push({kind:'fitting',_src:'walk-tap',cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:curSize.w,depthIn:(curSize.round?curSize.w:curSize.h),size:bt.str,_tap:true,branchSide:bSide,branchW:bt.w,throatIn:10}); taps++;
               var bAlong=(ev.along!=null?ev.along:(ev.bt?ev.bt.along:ch.a+inToPt(ev.posIn)));
               var tp=[origin[0]+axisDir[0]*bAlong, origin[1]+axisDir[1]*bAlong];
               var pd; if(ev.cf&&ev.cf.dir){ pd=ev.cf.dir; } else { pd=[-axisDir[1]*bSide, axisDir[0]*bSide]; }
@@ -5162,6 +5228,7 @@ function refreshSel(){
     try{ _rSyn=(window.__synthElbowLegs?window.__synthElbowLegs():0)||0; }catch(e){ console.warn('synth',e); }
     try{ _rArc=(window.__arcCornerJoins?window.__arcCornerJoins():0)||0; }catch(e){ console.warn('arc',e); }
     try{ _rBr=(window.__bridgeSizechanges?window.__bridgeSizechanges():0)||0; }catch(e){ console.warn('bridge',e); }
+    try{ _rBr+=(window.__inferSizeStepsFromEnds?window.__inferSizeStepsFromEnds():0)||0; }catch(e){ console.warn('inferSteps',e); }
     var _rTap=0; try{ _rTap=(window.__bridgeTaps?window.__bridgeTaps():0)||0; }catch(e){ console.warn('tapbridge',e); }
     if(_rJoin||_rSyn||_rArc||_rBr||_rTap) console.log('[takeoff recovery] corners:'+_rJoin+' legs:'+_rSyn+' arc-elbows:'+_rArc+' reducer-bridges:'+_rBr+' tap-bridges:'+_rTap);
     var _rInf=0; try{ _rInf=(window.__inferCornersFromEnds?window.__inferCornersFromEnds():0)||0; }catch(e){ console.warn('infer',e); }
@@ -6748,7 +6815,7 @@ $('exportBtn').onclick=()=>{
       widthIn:r.widthIn,lenPt:round(Lpt),start:[round(r.start[0]),round(r.start[1])],end:[round(end[0]),round(end[1])],dir:[r4(r.dir[0]),r4(r.dir[1])],
       tagIdx:r.tagIdx||[],nPieces:(r.pieces||[]).length,
       poly:(window.__runPoly?window.__runPoly(r):[[round(r.start[0]),round(r.start[1])],[round(end[0]),round(end[1])]]),
-      pieces:(r.pieces||[]).map(p=>({kind:p.kind,cid:p.cid,camduct:p.camduct,size:p.size,lenIn:p.lenIn,widthIn:p.widthIn,depthIn:p.depthIn,round:!!p.round,turn:(p.turn!=null?p.turn:null),sizeStep:!!p._sizeStep}))};
+      pieces:(r.pieces||[]).map(p=>({kind:p.kind,cid:p.cid,camduct:p.camduct,size:p.size,lenIn:p.lenIn,widthIn:p.widthIn,depthIn:p.depthIn,round:!!p.round,turn:(p.turn!=null?p.turn:null),sizeStep:!!p._sizeStep,src:(p._src||null)}))};
   });
   const clOut=(window.__sgRuns||[]).map(r=>{ const c=r.corners; if(!c||c.length<4) return null;
     const gapPt=Math.hypot(c[0][0]-c[3][0], c[0][1]-c[3][1]);                 // perpendicular gap between the two green walls
@@ -6763,9 +6830,15 @@ $('exportBtn').onclick=()=>{
     // and they DO export to CAMduct as e90/e45 fittings. Leaving them out of this file made every elbow
     // count taken from it wrong: refusing a merge moved an elbow out of `runs` without removing it from
     // the drawing or the takeoff. Export them so the real elbow total is runs-pieces PLUS this list.
+    yoloFitStats:(window.__yoloFitStats||null),
+    sizechangeDisp:(window.__sizechangeDisp||[]),
+    detDecisions:((window.__yoloDets||[]).map(function(d){
+      return {cls:d.cls, score:d.score, lowProp:!!d._lowProp, used:!!d._used,
+              x:round(d.nx), y:round(d.ny), notes:(d._notes||[])};
+    })),
     fittingLedger:((window.__elbowLedger||[]).map(function(e){
       return {runId:e.runId||null, pieceIdx:(e.pieceIdx!=null?e.pieceIdx:null), joins:e.joins||null,
-              x:round(e.x), y:round(e.y), kind:e.kind, score:Math.round(e.score*100)/100,
+              x:round(e.x), y:round(e.y), kind:e.kind, src:(e.src||null), score:Math.round(e.score*100)/100,
               verdict:e.verdict, human:e.human||null, reasons:e.reasons};
     })),
     elbowJoins:((window.__elbowJoins||[]).map(function(j){
