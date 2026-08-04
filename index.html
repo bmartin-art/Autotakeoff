@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.16</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.17</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -4996,6 +4996,16 @@ function refreshSel(){
       for(var k=kill.length-1;k>=0;k--){ pcs.splice(kill[k],1); _rDup++; }   // descending: earlier splices can't shift later indices
     }); }catch(e){ console.warn('elbow de-dupe',e); }
     if(_rDup) console.log('[takeoff] removed '+_rDup+' duplicate placeholder elbow(s) stacked on a real corner');
+    // ELBOW-RECALL DISPOSITION — the honest ledger for stage 1: how many extra (below-slider) elbow
+    // proposals existed, and what the geometry gate did with each. 'seated' means a join or piece consumed
+    // it; 'rejected' means it found no perpendicular pair of run ends and died quietly, which is the design.
+    try{ if(window.__elbowRecallMode){
+      var _lp=(window.__yoloDets||[]).filter(function(d){ return d._lowProp; });
+      if(_lp.length){ var _st=_lp.filter(function(d){ return d._used; }).length;
+        console.log('[recall] low-confidence elbow proposals: '+_lp.length+' \u00b7 seated by geometry: '+_st+' \u00b7 rejected: '+(_lp.length-_st));
+        console.log('[recall] rejected proposals (score, x, y):', _lp.filter(function(d){ return !d._used; }).map(function(d){ return [Math.round((d.score||0)*100)/100, Math.round(d.nx||0), Math.round(d.ny||0)]; })); }
+      else console.log('[recall] no below-slider elbow proposals this scan');
+    } }catch(_){}
     sel.clear(); selRun=null; renderItems(); renderPanel();
     setStatus('Track-walk [beta]: '+window.__runs2d.length+' run(s) \u00b7 '+trans+' transition(s) \u00b7 '+elbows+' elbow(s) \u00b7 '+taps+' tap/branch \u00b7 '+single+' single-wall \u00b7 '+scaled+' scaled'+(__keep.TWdropped.length?(' \u00b7 '+__keep.TWdropped.length+' unsupported dropped'):'')+(__keep.TWflagged?(' \u00b7 '+__keep.TWflagged+' flagged'):'')+((_rJoin+_rSyn+_rArc+_rBr+_rTap)?(' \u00b7 recovered: '+_rJoin+' corner(s), '+_rSyn+' leg(s), '+_rArc+' arc elbow(s), '+_rBr+' reducer bridge(s), '+_rTap+' tap bridge(s)'):'')+((typeof _rInf!=='undefined'&&_rInf)?(' \u00b7 '+_rInf+' corner(s) inferred from geometry'):'')+((typeof _rMg!=='undefined'&&_rMg)?(' \u00b7 '+_rMg+' corner(s) merged into one run'):'')+'.'); try{ __ductDiag('track-walk'); }catch(e){}
   }
@@ -5227,7 +5237,11 @@ function refreshSel(){
   $('yoloShowChk') && ($('yoloShowChk').onchange=function(){ window.__yoloVisible=this.checked; try{renderYolo();}catch(e){} });
   window.__yoloMinScore=0.10;
   window.__applyYoloFilter=function(){ var all=window.__yoloAll||window.__yoloDets||[]; if(!window.__yoloAll) window.__yoloAll=all.slice();
-    window.__yoloDets=(window.__yoloAll||[]).filter(function(d){ return (d.score==null?1:d.score) >= (window.__yoloMinScore||0); });
+    window.__yoloDets=(window.__yoloAll||[]).filter(function(d){
+      if((d.score==null?1:d.score) >= (window.__yoloMinScore||0)) return true;
+      // elbow-recall proposals ride below the slider on purpose: the geometry gate at the join is their filter
+      return !!(window.__elbowRecallMode && d._lowProp && /elbow/.test(d.cls||''));
+    });
     try{renderYolo();}catch(e){} };
   $('yoloUseMin') && ($('yoloUseMin').oninput=function(){ window.__yoloMinScore=parseFloat(this.value)||0; var v=$('yoloUseMinV'); if(v)v.textContent=(window.__yoloMinScore).toFixed(2); window.__applyYoloFilter(); if(typeof setStatus==='function'){ var n=(window.__yoloDets||[]).length, tot=(window.__yoloAll||[]).length; setStatus('Showing '+n+' of '+tot+' detections (score \u2265 '+window.__yoloMinScore.toFixed(2)+'). Re-build to apply to the takeoff.'); } });
   // First-run nudge: prompt to load the fitting model if none is loaded yet
@@ -5284,13 +5298,23 @@ function refreshSel(){
     return new ort.Tensor('float32',f,[1,3,IMSZ,IMSZ]);
   }
   // YOLOv8 output: [1, 4+nc, 8400]; decode -> boxes in letterboxed px
+  // ELBOW-RECALL MODE — stage 1 of the two-stage design: propose low, verify hard. The decode floor
+  // (yoloConf slider, default 0.2) throws away weak elbow proposals before ANY downstream logic sees
+  // them, and elbows are exactly the class where recall hurts most: the green trace skips corners, so a
+  // weak corner det is often the only evidence an elbow exists. With the joins now gated on geometry
+  // (two run ends, perpendicular, in reach -- v3.05..3.11), a weak proposal that can't seat on real
+  // duct dies at the gate instead of becoming a phantom, so proposing low is safe where it wasn't in
+  // v3.03. Scoped to elbows only; every other class keeps the slider's floor.
+  window.__elbowRecallMode = (window.__elbowRecallMode!==false);       // on by default; set false to disable
+  var ELB_PROPOSE_MIN = 0.06;
   function decode(out, nc, confT){
     var data=out.data, dims=out.dims; var nb=dims[2], ch=dims[1];
     var res=[];
     for(var i=0;i<nb;i++){
       var best=-1,bc=0;
       for(var c=0;c<nc;c++){ var v=data[(4+c)*nb+i]; if(v>best){best=v;bc=c;} }
-      if(best<confT) continue;
+      var _effT=(window.__elbowRecallMode?Math.min(confT,ELB_PROPOSE_MIN):confT);
+      if(best<_effT) continue;                                   // class-aware trim happens post-NMS where names exist
       var cx=data[0*nb+i], cy=data[1*nb+i], w=data[2*nb+i], h=data[3*nb+i];
       res.push({x:cx-w/2,y:cy-h/2,w:w,h:h,cls:bc,score:best});
     }
@@ -5329,6 +5353,9 @@ function refreshSel(){
       var nc=out.dims[1]-4;
       var confT=parseFloat($('yoloConf').value)||0.2;
       var raw=decode(out,nc,confT); var kept=nms(raw,0.45);
+      var names=(nc===16?NAMES16:(typeof NAMES!=='undefined'&&nc===8?NAMES:null));   // same mapping the full-sweep path uses
+      if(window.__elbowRecallMode) kept=kept.filter(function(b){ var nm=(names&&names[b.cls])||''; var isElb=/elbow/.test(nm);
+        if(b.score>=confT) return true; if(isElb){ b._lowProp=true; return true; } return false; });
       var ms=Math.round(performance.now()-t0);
       // map letterboxed px -> canvas/overlay px -> draw
       var lay=$('yoloLayer'); lay.innerHTML='';
@@ -5458,12 +5485,16 @@ function refreshSel(){
       }
       // NMS across the whole sheet (render px)
       var kept=nms(all,0.45);
-      // map render px -> overlay px, and -> normalized nvt coords for the run-builder
-      var oScale=(baseScale*scale)/rScale;       // render px -> current overlay px
+      // resolve class names BEFORE the recall filter -- `var names` further down hoists as undefined, so
+      // filtering first would silently classify every box as not-an-elbow and drop all low proposals
       var names=null;
       var maxCls=0; kept.forEach(function(d){ if(d.cls>maxCls)maxCls=d.cls; });
       var use16=(maxCls>7);
       names=use16?NAMES16:NAMES;
+      if(window.__elbowRecallMode) kept=kept.filter(function(b){ var nm=(names&&names[b.cls])||''; var isElb=/elbow/.test(nm);
+        if(b.score>=confT) return true; if(isElb){ b._lowProp=true; return true; } return false; });
+      // map render px -> overlay px, and -> normalized nvt coords for the run-builder
+      var oScale=(baseScale*scale)/rScale;       // render px -> current overlay px
       var dets=[], counts={};
       kept.forEach(function(d){
         // box corners in render px -> normalized nvt coords (so they stick through zoom/pan)
@@ -5471,7 +5502,7 @@ function refreshSel(){
         function r2n(rx,ry){ var ox=rx*oScale, oy=ry*oScale; var u=invVP(ox,oy); return applyM(window.__nvt,u[0],u[1]); }
         var nC=r2n(cxr,cyr), n0=r2n(d.x,d.y), n1=r2n(d.x+d.w,d.y+d.h);
         var nm=names[d.cls]!=null?names[d.cls]:('cls'+d.cls); counts[nm]=(counts[nm]||0)+1;
-        dets.push({cls:nm, clsIdx:d.cls, score:+d.score.toFixed(3),
+        dets.push({cls:nm, clsIdx:d.cls, score:+d.score.toFixed(3), _lowProp:!!d._lowProp,
           nx:nC[0], ny:nC[1], nx0:n0[0], ny0:n0[1], nx1:n1[0], ny1:n1[1] });
       });
       window.__yoloDets=dets;
