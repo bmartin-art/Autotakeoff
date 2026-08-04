@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.27</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.29</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -4266,6 +4266,17 @@ function refreshSel(){
           else { ev.score-=0.20; capReview=true; ev.reasons.push('zero lateral offset'); }
           if(before>=6 && after>=6){ ev.score+=0.20; ev.reasons.push('duct both sides'); }
         }
+        // CROSS-PRINT PRIOR (v3.29): what generalizes between drawings is not WHERE you clicked but
+        // WHAT KIND OF THING you keep rejecting. Each (kind, source) pair's keep/delete history across
+        // every print in the bank nudges the score: a source you delete 5-of-5 starts every future
+        // fitting it makes at a deficit; a source you always keep gets a head start. Needs >=5 decisions
+        // before it says anything, capped at +/-0.15 so evidence on THIS sheet always outweighs history.
+        var tr_=(window.__trackRecord||{})[(_cid||'')+'|'+(p._src||'')];
+        if(tr_ && tr_.n>=5){
+          var nudge=0.15*((tr_.kept/tr_.n)-0.5)*2;
+          ev.score+=nudge;
+          ev.reasons.push('track record: '+tr_.kept+'/'+tr_.n+' kept across prints'+(nudge<0?' (penalty)':nudge>0?' (bonus)':''));
+        }
         ev.score=Math.max(0,Math.min(1,ev.score));
         ev.verdict = ev.score>=0.60 ? 'confirmed' : (ev.score>=0.30 ? 'review' : 'suspect');
         if(capReview && ev.verdict==='confirmed') ev.verdict='review';
@@ -4336,18 +4347,69 @@ function refreshSel(){
     r.setAttribute('fill','rgba(255,170,40,0.12)'); r.setAttribute('stroke','#ffa028'); r.setAttribute('stroke-width','3'); r.setAttribute('stroke-dasharray','6 5');
     var ov=document.getElementById('overlay'); if(ov) ov.appendChild(r);
   };
-  window.__stripKeep=function(i){ var e=(window.__elbowLedger||[])[i]; if(!e) return;
-    e.human='kept'; window.__bankPut({kind:e.kind,verdict:e.verdict,score:e.score,human:'kept',x:e.x,y:e.y,widthIn:e.widthIn,reasons:e.reasons}); var el=document.getElementById('elstrip-c'+i); if(el){ el.style.opacity=.45; el.querySelector('.act').textContent='\u2713 kept'; } };
-  window.__stripDel=function(i){ var e=(window.__elbowLedger||[])[i]; if(!e) return;
-    e.human='deleted'; window.__bankPut({kind:e.kind,verdict:e.verdict,score:e.score,human:'deleted',x:e.x,y:e.y,widthIn:e.widthIn,reasons:e.reasons});
+  window.__stripKeep=function(i,auto){ var e=(window.__elbowLedger||[])[i]; if(!e) return;
+    e.human='kept'; if(!auto) window.__bankPut({kind:e.kind,src:e.src||null,verdict:e.verdict,score:e.score,human:'kept',x:e.x,y:e.y,widthIn:e.widthIn,reasons:e.reasons}); var el=document.getElementById('elstrip-c'+i); if(el){ el.style.opacity=.45; el.querySelector('.act').textContent='\u2713 kept'; } };
+  window.__stripDel=function(i,auto){ var e=(window.__elbowLedger||[])[i]; if(!e) return;
+    e.human='deleted'; if(!auto) window.__bankPut({kind:e.kind,src:e.src||null,verdict:e.verdict,score:e.score,human:'deleted',x:e.x,y:e.y,widthIn:e.widthIn,reasons:e.reasons});
     if(e.runId!=null){ window.__pcDel(e.runId, e.pieceIdx); }
     else { window.__elbowJoins=(window.__elbowJoins||[]).filter(function(j){ return !(j._adj===e); }); renderItems(); }
     var el=document.getElementById('elstrip-c'+i); if(el){ el.style.opacity=.35; el.querySelector('.act').textContent='\u2717 deleted'; } };
+  // ---- DECISION MEMORY (v3.28): your past checks and X's on THIS sheet apply themselves ----
+  // Re-running Auto Takeoff used to resurrect every phantom you had already deleted and re-question
+  // every fitting you had already confirmed. The bank stores each decision with its document, page,
+  // fitting kind and position -- so on every build, decisions replay: a past X within one duct width
+  // of a same-kind fitting deletes it again (through the proper unweld path); a past check marks it
+  // kept and drops it to the bottom of the strip. Say no ONCE. The model's weights change at retrain;
+  // the tool's behavior changes NOW.
+  window.__refreshTrackRecord=function(){
+    window.__bankDB(function(db){
+      var rq=db.transaction('reviews').objectStore('reviews').getAll();
+      rq.onsuccess=function(){
+        var t={};
+        (rq.result||[]).forEach(function(b){ if(!b.kind) return;
+          var k=(b.kind||'')+'|'+(b.src||'');
+          (t[k]=t[k]||{n:0,kept:0}).n++;
+          if(b.human==='kept') t[k].kept++;
+        });
+        window.__trackRecord=t;
+      };
+    });
+  };
+  try{ window.__refreshTrackRecord(); }catch(_){}
+  window.__applyBankMemory=function(){
+    var L=window.__elbowLedger||[]; if(!L.length) return;
+    var doc=(window.__docName||document.title||''), pg=(typeof pageNum!=='undefined'?pageNum:null);
+    window.__bankDB(function(db){
+      var rq=db.transaction('reviews').objectStore('reviews').getAll();
+      rq.onsuccess=function(){
+        var mine=(rq.result||[]).filter(function(b){ return b.doc===doc && b.page===pg && b.x!=null; });
+        if(!mine.length) return;
+        var vetoed=0, confirmed=0;
+        // latest decision wins per location: iterate newest-first, first match claims the entry
+        mine.sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
+        L.forEach(function(e,i){
+          if(e.human) return;
+          var tolPt=inToPt(Math.max(10, e.widthIn||12));
+          for(var k=0;k<mine.length;k++){ var b=mine[k];
+            if(b.kind!==e.kind) continue;
+            if(Math.hypot((b.x||0)-e.x,(b.y||0)-e.y)>tolPt) continue;
+            if(b.human==='deleted'){ e.reasons.push('memory: you deleted this here before'); window.__stripDel(i,true); vetoed++; }
+            else { e.reasons.push('memory: you kept this here before'); window.__stripKeep(i,true); confirmed++; }
+            break;
+          }
+        });
+        if(vetoed||confirmed){
+          console.log('[memory] replayed your decisions on this sheet: '+vetoed+' auto-removed, '+confirmed+' auto-confirmed');
+          try{ window.__showElbowStrip(); }catch(_){}
+        }
+      };
+    });
+  };
   window.__showElbowStrip=function(){
     var old=document.getElementById('elstrip'); if(old) old.remove();
     var L=(window.__elbowLedger||[]).slice(); if(!L.length) return;
     var order={suspect:0,review:1,confirmed:2};
-    L.sort(function(a,b){ return order[a.verdict]-order[b.verdict] || a.score-b.score; });
+    L.sort(function(a,b){ return (a.human?1:0)-(b.human?1:0) || order[a.verdict]-order[b.verdict] || a.score-b.score; });
     var box=document.createElement('div'); box.id='elstrip';
     box.style.cssText='position:fixed;right:10px;bottom:34px;width:295px;max-height:46vh;overflow:auto;z-index:9998;background:rgba(10,16,24,.96);border:1px solid #2c3d52;border-radius:10px;padding:8px;font:12px system-ui;color:#dfe8f2';
     var confirmedN=L.filter(function(e){return e.verdict==='confirmed';}).length;
@@ -5265,6 +5327,8 @@ function refreshSel(){
     // nothing is added or removed by the adjudicator; it grades what the build produced so the review
     // strip (and the export) can show WHY each elbow exists and which ones deserve a human look first.
     try{ window.__adjudicateElbows(); }catch(e){ console.warn('adjudicate',e); }
+    try{ window.__applyBankMemory(); }catch(e){ console.warn('bank memory',e); }
+    try{ window.__refreshTrackRecord(); }catch(e){}   // recompute for the NEXT build (async; this build used the cached copy)
     // ELBOW-RECALL DISPOSITION — the honest ledger for stage 1: how many extra (below-slider) elbow
     // proposals existed, and what the geometry gate did with each. 'seated' means a join or piece consumed
     // it; 'rejected' means it found no perpendicular pair of run ends and died quietly, which is the design.
