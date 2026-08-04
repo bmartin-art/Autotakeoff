@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.18</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.20</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -4112,6 +4112,116 @@ function refreshSel(){
   if(typeof drawOverlay==='function'){ var _od2=drawOverlay; drawOverlay=function(){ var r=_od2.apply(this,arguments); try{renderItems();}catch(e){} return r; }; }
 
   function findRun(id){ return (window.__runs2d||[]).find(function(r){return r.id===id;}); }
+  // ---------- Layer-4 adjudicator: score every elbow's evidence, keep the reasons ----------
+  window.__adjudicateElbows=function(){
+    var runs=window.__runs2d||[]; if(!runs.length) return 0;
+    var dets=(window.__yoloDets||[]).filter(function(d){ return d.nx!=null && /elbow/.test(d.cls||''); });
+    var out=[];
+    function detNear(x,y,wIn){
+      var best=null;
+      dets.forEach(function(d){ var m=Math.hypot(d.nx-x,d.ny-y); if(!best||m<best.m) best={m:m,d:d}; });
+      if(!best) return {have:false};
+      return {have:true, distIn:ptToIn(best.m), xw:ptToIn(best.m)/(wIn||12), score:best.d.score||0, low:!!best.d._lowProp};
+    }
+    runs.forEach(function(r){
+      var pcs=r.pieces||[]; if(!pcs.length) return;
+      var fr; try{ fr=runFrames(r); }catch(_){ return; }
+      var w=r.widthIn||12, Ltot=0; pcs.forEach(function(p){ Ltot+=(p.lenIn||0); });
+      var acc=0;
+      for(var i=0;i<pcs.length;i++){
+        var p=pcs[i];
+        var before=acc; if(p.kind==='straight') acc+=(p.lenIn||0);
+        if(!(p.kind==='fitting' && (p.cid==='e90'||p.cid==='e45'||p._elbow))) continue;
+        var f=fr[i]; if(!f) continue;
+        var ev={runId:r.id, pieceIdx:i, x:f.x, y:f.y, widthIn:w, kind:(p.cid||'e90'), reasons:[], score:0};
+        // Evidence both ADDS and SUBTRACTS -- the first cut only added, and 'turns + has legs' alone
+        // (0.55) confirmed a marker 12.8 duct-widths from any detection. Bad evidence must cost, and two
+        // findings cap the verdict at review outright: a fitting that doesn't turn isn't an elbow yet,
+        // and a gross size step at a corner is two ducts, not one.
+        var capReview=false;
+        // (a) does it actually turn?
+        if(p.turn){ ev.score+=0.30; ev.reasons.push('turns '+Math.round(p.turn*180/Math.PI)+'\u00b0'); }
+        else { ev.score-=0.35; capReview=true; ev.reasons.push('NO TURN \u2014 marker only'); }
+        // (b) detection support, scaled to duct width
+        var dn=detNear(f.x,f.y,w);
+        if(dn.have && dn.xw<=1.5){ ev.score+=0.40*Math.min(1,dn.score*1.4); ev.reasons.push('det '+dn.score.toFixed(2)+' at '+dn.xw.toFixed(2)+'\u00d7W'+(dn.low?' (low-prop)':'')); }
+        else if(dn.have){ ev.score-=0.15; ev.reasons.push('nearest det '+dn.xw.toFixed(1)+'\u00d7W away'); }
+        else { ev.score-=0.10; ev.reasons.push('no elbow detection on sheet'); }
+        // (c) legs: real duct on both sides?
+        var after=0; for(var q=i+1;q<pcs.length;q++){ if(pcs[q].kind==='straight') after+=(pcs[q].lenIn||0); }
+        if(before>=6 && after>=6){ ev.score+=0.20; ev.reasons.push('legs '+Math.round(before)+'\u2033 / '+Math.round(after)+'\u2033'); }
+        else { ev.score-=0.10; ev.reasons.push('leg short: '+Math.round(before)+'\u2033 / '+Math.round(after)+'\u2033'); }
+        // (d) size continuity across the corner
+        var wA=null,wB=null;
+        for(var a2=i-1;a2>=0;a2--){ if(pcs[a2].kind==='straight'){ wA=pcs[a2].widthIn; break; } }
+        for(var b2=i+1;b2<pcs.length;b2++){ if(pcs[b2].kind==='straight'){ wB=pcs[b2].widthIn; break; } }
+        if(wA!=null&&wB!=null){ if(Math.max(wA,wB)<=Math.min(wA,wB)*1.35+1){ ev.score+=0.10; }
+          else { ev.score-=0.15; capReview=true; ev.reasons.push('size steps '+wA+'\u2033\u2192'+wB+'\u2033 at the corner'); } }
+        ev.score=Math.max(0,Math.min(1,ev.score));
+        ev.verdict = ev.score>=0.60 ? 'confirmed' : (ev.score>=0.30 ? 'review' : 'suspect');
+        if(capReview && ev.verdict==='confirmed') ev.verdict='review';
+        p._adj=ev; out.push(ev);
+      }
+    });
+    // unmerged joins get graded too -- they draw and export as elbows
+    (window.__elbowJoins||[]).forEach(function(j){
+      var ev={joins:[j.trunkId,j.branchId], x:j.atX, y:j.atY, widthIn:j.widthIn||12, kind:'join', reasons:[], score:0};
+      if(j.turn){ ev.score+=0.25; ev.reasons.push('turn '+Math.round(j.turn*180/Math.PI)+'\u00b0'); }
+      if(j.score!=null){ ev.score+=0.35*Math.min(1,(j.score||0)*1.4); ev.reasons.push('det '+(j.score||0).toFixed(2)); }
+      else ev.reasons.push(j._inferred?'inferred from run ends (no detection)':'no score recorded');
+      var A=findRun(j.trunkId), B=findRun(j.branchId);
+      if(A&&B){ ev.score+=0.15; ev.reasons.push('both runs still present (unmerged)'); }
+      ev.verdict = ev.score>=0.60 ? 'confirmed' : (ev.score>=0.35 ? 'review' : 'suspect');
+      j._adj=ev; out.push(ev);
+    });
+    window.__elbowLedger=out;
+    var c={confirmed:0,review:0,suspect:0}; out.forEach(function(e){ c[e.verdict]++; });
+    console.log('[adjudicator] elbows graded: '+out.length+' \u00b7 confirmed '+c.confirmed+' \u00b7 review '+c.review+' \u00b7 suspect '+c.suspect);
+    try{ window.__showElbowStrip(); }catch(_){}
+    return out.length;
+  };
+  // ---------- review strip: worst first, circle on hover, keep/delete ----------
+  window.__stripCircle=function(x,y){
+    var ex=document.getElementById('aihl'); if(ex) ex.remove();
+    if(!window.__nvt||!viewport) return;
+    var m=window.__nvt,a=m[0],b=m[1],c=m[2],d=m[3],e=m[4],f=m[5],det=(a*d-b*c)||1;
+    var ux=(d*(x-e)-c*(y-f))/det, uy=(-b*(x-e)+a*(y-f))/det;
+    var P=applyM(viewport.transform,ux,uy);
+    var r=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    r.setAttribute('id','aihl'); r.setAttribute('cx',P[0]); r.setAttribute('cy',P[1]); r.setAttribute('r',30);
+    r.setAttribute('fill','rgba(255,170,40,0.12)'); r.setAttribute('stroke','#ffa028'); r.setAttribute('stroke-width','3'); r.setAttribute('stroke-dasharray','6 5');
+    var ov=document.getElementById('overlay'); if(ov) ov.appendChild(r);
+  };
+  window.__stripKeep=function(i){ var e=(window.__elbowLedger||[])[i]; if(!e) return;
+    e.human='kept'; var el=document.getElementById('elstrip-c'+i); if(el){ el.style.opacity=.45; el.querySelector('.act').textContent='\u2713 kept'; } };
+  window.__stripDel=function(i){ var e=(window.__elbowLedger||[])[i]; if(!e) return;
+    e.human='deleted';
+    if(e.runId!=null){ window.__pcDel(e.runId, e.pieceIdx); }
+    else { window.__elbowJoins=(window.__elbowJoins||[]).filter(function(j){ return !(j._adj===e); }); renderItems(); }
+    var el=document.getElementById('elstrip-c'+i); if(el){ el.style.opacity=.35; el.querySelector('.act').textContent='\u2717 deleted'; } };
+  window.__showElbowStrip=function(){
+    var old=document.getElementById('elstrip'); if(old) old.remove();
+    var L=(window.__elbowLedger||[]).slice(); if(!L.length) return;
+    var order={suspect:0,review:1,confirmed:2};
+    L.sort(function(a,b){ return order[a.verdict]-order[b.verdict] || a.score-b.score; });
+    var box=document.createElement('div'); box.id='elstrip';
+    box.style.cssText='position:fixed;right:10px;bottom:34px;width:295px;max-height:46vh;overflow:auto;z-index:9998;background:rgba(10,16,24,.96);border:1px solid #2c3d52;border-radius:10px;padding:8px;font:12px system-ui;color:#dfe8f2';
+    var confirmedN=L.filter(function(e){return e.verdict==='confirmed';}).length;
+    var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b>Elbow review \u00b7 '+L.length+'</b>'+
+      '<span style="color:#8fa4bb">'+confirmedN+' confirmed</span>'+
+      '<button onclick="document.getElementById(\'elstrip\').remove();var e=document.getElementById(\'aihl\');if(e)e.remove();" style="background:#222;color:#ccc;border:1px solid #555;border-radius:5px;cursor:pointer">\u00d7</button></div>';
+    L.forEach(function(e){
+      var i=(window.__elbowLedger||[]).indexOf(e);
+      var col=e.verdict==='confirmed'?'#2c6e49':(e.verdict==='review'?'#8a6d1a':'#7e2c35');
+      h+='<div id="elstrip-c'+i+'" onmouseenter="__stripCircle('+e.x.toFixed(1)+','+e.y.toFixed(1)+')" style="border:1px solid '+col+';border-left:5px solid '+col+';border-radius:7px;padding:5px 7px;margin-bottom:6px">'
+        +'<div style="display:flex;justify-content:space-between"><b>'+e.verdict.toUpperCase()+' '+(e.score*100|0)+'%</b><span class="act">'
+        +'<button onclick="__stripKeep('+i+')" style="background:#1d3a2a;color:#bfe8cd;border:1px solid #2c6e49;border-radius:5px;cursor:pointer;margin-right:4px">\u2713</button>'
+        +'<button onclick="__stripDel('+i+')" style="background:#3a1d22;color:#e8bfc7;border:1px solid #7e2c35;border-radius:5px;cursor:pointer">\u2717</button></span></div>'
+        +'<div style="color:#9fb2c8">'+e.reasons.join(' \u00b7 ')+'</div></div>';
+    });
+    box.innerHTML=h;
+    document.body.appendChild(box);
+  };
 
   function renderPanel(){
     try{ window.__selRunId=selRun; }catch(_){}
@@ -4996,6 +5106,12 @@ function refreshSel(){
       for(var k=kill.length-1;k>=0;k--){ pcs.splice(kill[k],1); _rDup++; }   // descending: earlier splices can't shift later indices
     }); }catch(e){ console.warn('elbow de-dupe',e); }
     if(_rDup) console.log('[takeoff] removed '+_rDup+' duplicate placeholder elbow(s) stacked on a real corner');
+    // ================= ELBOW ADJUDICATOR (v3.20) =================
+    // One evidence ledger per elbow -- every gate this file applies is scored HERE, together, with the
+    // reasons kept, instead of each pass silently vetoing on its own. OBSERVATION ONLY in this version:
+    // nothing is added or removed by the adjudicator; it grades what the build produced so the review
+    // strip (and the export) can show WHY each elbow exists and which ones deserve a human look first.
+    try{ window.__adjudicateElbows(); }catch(e){ console.warn('adjudicate',e); }
     // ELBOW-RECALL DISPOSITION — the honest ledger for stage 1: how many extra (below-slider) elbow
     // proposals existed, and what the geometry gate did with each. 'seated' means a join or piece consumed
     // it; 'rejected' means it found no perpendicular pair of run ends and died quietly, which is the design.
@@ -5397,7 +5513,16 @@ function refreshSel(){
       var rScale = (ptPerIn>0 ? (TARGET_PXIN/ptPerIn) : Math.min(3.0, 3000/un.width)) * detail;
       if(!(rScale>0.3)) rScale=2.0;
       rScale=Math.max(0.5, Math.min(8, rScale));
-      var MAXDIM=8000;                                                    // keep the tiled canvas from blowing up memory
+      // RESOLUTION CLAMP — was MAXDIM=8000, which silently defeated the auto-resolution above: a 1/8"
+      // sheet needs rScale 4.67 to hit the 3.5 px-per-real-inch the model was trained at, and the clamp
+      // cut it to 2.65 (2.0 px/in) on portrait sheets and 3.09 (2.3 px/in) on landscape -- by DIFFERENT
+      // amounts depending on nothing but paper size. Small-duct sheets starved worst: an 8-inch elbow at
+      // 2 px/in is a ~16px feature, at the floor of what any detector scores confidently. That is the
+      // per-print inconsistency, with a mechanism. The clamp is not needed for memory: the single-canvas
+      // fast path is separately guarded by the 16e6-pixel check just below, and past that the loop
+      // renders each 1024x1024 tile straight from the PDF, so per-tile memory is bounded at ANY rScale.
+      // Keep only a sanity ceiling so a pathological scale/detail combo can't create a huge tile grid.
+      var MAXDIM=26000;                                                   // virtual grid cap (~30x30 tiles), not a canvas size
       if(un.width*rScale>MAXDIM) rScale=MAXDIM/un.width;
       if(un.height*rScale>MAXDIM) rScale=MAXDIM/un.height;
       console.log('[takeoff build t10] scan render scale =',rScale.toFixed(3),'| page',Math.round(un.width)+'x'+Math.round(un.height),'| detail',detail,'| scaleIPF',(typeof scaleIPF!=='undefined'?scaleIPF:'?'),'| ~px/real-in',(ptPerIn>0?(ptPerIn*rScale).toFixed(1):'n/a'));
@@ -6554,6 +6679,11 @@ $('exportBtn').onclick=()=>{
     // and they DO export to CAMduct as e90/e45 fittings. Leaving them out of this file made every elbow
     // count taken from it wrong: refusing a merge moved an elbow out of `runs` without removing it from
     // the drawing or the takeoff. Export them so the real elbow total is runs-pieces PLUS this list.
+    elbowLedger:((window.__elbowLedger||[]).map(function(e){
+      return {runId:e.runId||null, pieceIdx:(e.pieceIdx!=null?e.pieceIdx:null), joins:e.joins||null,
+              x:round(e.x), y:round(e.y), kind:e.kind, score:Math.round(e.score*100)/100,
+              verdict:e.verdict, human:e.human||null, reasons:e.reasons};
+    })),
     elbowJoins:((window.__elbowJoins||[]).map(function(j){
       return {trunkId:j.trunkId, branchId:j.branchId, x:round(j.atX), y:round(j.atY),
               turnDeg:(j.turn!=null?Math.round(j.turn*180/Math.PI):null), widthIn:j.widthIn,
