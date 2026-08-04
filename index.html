@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.22</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.23</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3214,25 +3214,31 @@ function refreshSel(){
   function bridgeSizechanges(){
     var dets=window.__yoloDets||[], runs=window.__runs2d||[]; if(!dets.length||runs.length<2) return 0;
     function base(c){ return (c||'').replace(/^(rect|round)-/,''); }
-    var made=0;
+    var made=0, _disp=[];
     dets.forEach(function(d){
       if(d._used || d.nx==null) return;
       var b=base(d.cls); if(b!=='sizechange'&&b!=='reducer'&&b!=='transition'&&b!=='sq2round') return;
-      if((d.score||0) < (window.__yoloGreenScoped?0.18:0.30)) return;
+      function why(rsn){ _disp.push({score:Math.round((d.score||0)*100)/100, x:Math.round(d.nx), y:Math.round(d.ny), why:rsn}); }
+      if((d.score||0) < (window.__yoloGreenScoped?0.18:0.30)){ why('below score floor'); return; }
       var reach=inToPt(36), hits=[];
       runs.forEach(function(r){ var re2=runEnd(r);
         [{end:'start', p:[r.start[0],r.start[1]], out:[-r.dir[0],-r.dir[1]]},
          {end:'end',   p:[re2.x,re2.y],           out:[r.dir[0],r.dir[1]]}].forEach(function(E){
           var dd=Math.hypot(E.p[0]-d.nx, E.p[1]-d.ny); if(dd<=reach) hits.push({r:r, end:E.end, p:E.p, out:E.out, dd:dd}); }); });
       var byRun={}; hits.forEach(function(hh){ if(!byRun[hh.r.id]||hh.dd<byRun[hh.r.id].dd) byRun[hh.r.id]=hh; });
-      var ids=Object.keys(byRun); if(ids.length!==2) return;
+      var ids=Object.keys(byRun);
+      if(ids.length!==2){ why(ids.length===1?'only ONE run end near \u2014 duct past the taper never traced':(ids.length===0?'no run ends within 36\u2033':'more than 2 run ends near ('+ids.length+')')); return; }
       var A=byRun[ids[0]], B=byRun[ids[1]];
-      if((A.out[0]*B.out[0]+A.out[1]*B.out[1]) > -0.7) return;                 // ends must FACE each other (in-line gap, not a corner)
-      if(Math.hypot(A.p[0]-B.p[0], A.p[1]-B.p[1]) > inToPt(72)) return;        // sanity: the gap itself is fitting-sized
+      if((A.out[0]*B.out[0]+A.out[1]*B.out[1]) > -0.7){ why('run ends do not face each other (corner, not an in-line step)'); return; }
+      if(Math.hypot(A.p[0]-B.p[0], A.p[1]-B.p[1]) > inToPt(72)){ why('gap between ends over 72\u2033'); return; }
       var up=( (A.r.widthIn||0) >= (B.r.widthIn||0) ) ? A : B, dn=(up===A)?B:A; // step from the larger run down
-      try{ if(window.__connectReducer && window.__connectReducer(up.r.id, up.end, dn.r.id, dn.end)){ d._used=true; made++; } }catch(e){ console.warn('bridgeSizechanges', e); }
+      try{ if(window.__connectReducer && window.__connectReducer(up.r.id, up.end, dn.r.id, dn.end)){ d._used=true; made++; }
+           else why('connectReducer declined'); }catch(e){ console.warn('bridgeSizechanges', e); why('error: '+((e&&e.message)||e)); }
     });
+    window.__sizechangeDisp=_disp;
     if(made) console.log('[takeoff] bridged '+made+' size change(s) between run ends');
+    if(_disp.length){ console.log('[sizechange] '+_disp.length+' detection(s) found but NOT inserted \u2014 reasons:');
+      try{ console.table(_disp); }catch(_){ console.log(_disp); } }
     return made;
   }
   window.__bridgeSizechanges=bridgeSizechanges;
@@ -4982,6 +4988,12 @@ function refreshSel(){
       // YOLO elbow / tee / tap detections near this line (drive turns and branches in the walk)
       var fdets=[]; (window.__yoloDets||[]).forEach(function(d){ if(d.nx==null) return; var base=(d.cls||'').replace(/^(rect|round)-/,'');
         if(base!=='elbow'&&base!=='tee'&&base!=='tap') return;
+        // v3.21 REGRESSION FIX: low-confidence recall proposals (_lowProp, decoded down to 0.06) were
+        // flowing in here, and while elbow EVENTS are gated at ELB_SCORE_MIN, tap/tee events are NOT --
+        // so 0.06 tap boxes became phantom branch points that changed how the walk split runs, which is
+        // why this build placed fewer elbows. Low proposals are for SEEING (boxes + ledger), never for
+        // steering the build.
+        if(d._lowProp) return;
         var __po=Math.abs(perp([d.nx,d.ny])-perpC);                        // keep the loose band for tee/tap (unchanged); elbows gate tighter below
         if(__po>inToPt(grpW/2+30)) return; fdets.push({base:base, along:along([d.nx,d.ny]), nx:d.nx, ny:d.ny, perpIn:ptToIn(__po), score:(d.score||0)}); });
       // find a duct fragment leaving a point at ~90° to the trunk (sets an elbow's new heading / a branch's direction)
