@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.26</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.27</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2579,7 +2579,7 @@ function refreshSel(){
     var atStart=(endA==='start');
     var inW_ =atStart? bW  : aW,  inD_ =atStart? bDep : aD;
     var outW_=atStart? aW  : bW,  outD_=atStart? aD   : bDep;
-    var step={kind:'fitting',_src:'connect-reducer',cid:cid,camduct:name,round:bR,lenIn:6,widthIn:bW,depthIn:(bR?null:bD),size:bSize,
+    var step={kind:'fitting',_src:(window.__connSrc||'connect-reducer'),cid:cid,camduct:name,round:bR,lenIn:6,widthIn:bW,depthIn:(bR?null:bD),size:bSize,
               _sizeStep:true,_newSide:(atStart?'start':'end'),
               _newW:bW,_newD:bDep,_newR:bR,_newS:bSize,
               inW:inW_, inD:inD_, outW:outW_, outD:outD_};
@@ -3233,7 +3233,7 @@ function refreshSel(){
       if((A.out[0]*B.out[0]+A.out[1]*B.out[1]) > -0.7){ why('run ends do not face each other (corner, not an in-line step)'); return; }
       if(Math.hypot(A.p[0]-B.p[0], A.p[1]-B.p[1]) > inToPt(72)){ why('gap between ends over 72\u2033'); return; }
       var up=( (A.r.widthIn||0) >= (B.r.widthIn||0) ) ? A : B, dn=(up===A)?B:A; // step from the larger run down
-      try{ if(window.__connectReducer && window.__connectReducer(up.r.id, up.end, dn.r.id, dn.end)){ window.__detNote(d,'bridge-sizechange','bridged '+up.r.id+' -> '+dn.r.id); d._used=true; made++; }
+      try{ var _ok=false; try{ window.__connSrc='bridge-sizechange'; _ok=!!(window.__connectReducer && window.__connectReducer(up.r.id, up.end, dn.r.id, dn.end)); } finally{ window.__connSrc=null; } if(_ok){ window.__detNote(d,'bridge-sizechange','bridged '+up.r.id+' -> '+dn.r.id); d._used=true; made++; }
            else why('connectReducer declined'); }catch(e){ console.warn('bridgeSizechanges', e); why('error: '+((e&&e.message)||e)); }
     });
     window.__sizechangeDisp=_disp;
@@ -3287,10 +3287,12 @@ function refreshSel(){
       var kA=c.A.r.id+':'+c.A.end, kB=c.B.r.id+':'+c.B.end;
       if(used[kA]||used[kB]) return;
       var up=((c.A.r.widthIn||0)>=(c.B.r.widthIn||0))?c.A:c.B, dn=(up===c.A)?c.B:c.A;
-      try{ if(window.__connectReducer && window.__connectReducer(up.r.id, up.end, dn.r.id, dn.end)){
+      try{ window.__connSrc='infer-step';
+        if(window.__connectReducer && window.__connectReducer(up.r.id, up.end, dn.r.id, dn.end)){
         used[kA]=used[kB]=true; made++;
         log.push({from:(up.r.widthIn||0)+'\u2033', to:(dn.r.widthIn||0)+'\u2033', gapIn:Math.round(ptToIn(c.gap))});
       } }catch(e){ console.warn('inferSizeSteps', e); }
+      finally{ window.__connSrc=null; }
     });
     if(made){ console.log('[takeoff] inferred '+made+' transition(s) from facing run ends (no detection needed)');
       try{ console.table(log); }catch(_){ } }
