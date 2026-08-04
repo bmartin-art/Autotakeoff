@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.20</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.22</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -4115,11 +4115,21 @@ function refreshSel(){
   // ---------- Layer-4 adjudicator: score every elbow's evidence, keep the reasons ----------
   window.__adjudicateElbows=function(){
     var runs=window.__runs2d||[]; if(!runs.length) return 0;
-    var dets=(window.__yoloDets||[]).filter(function(d){ return d.nx!=null && /elbow/.test(d.cls||''); });
+    var allDets=(window.__yoloDets||[]).filter(function(d){ return d.nx!=null; });
     var out=[];
-    function detNear(x,y,wIn){
+    // which detection class vouches for which fitting kind
+    function detClassFor(cid){
+      if(cid==='e90'||cid==='e45') return /elbow/;
+      if(cid==='stap'||cid==='tap'||cid==='tee') return /tap|tee/;
+      if(cid==='tr'||cid==='reducer'||cid==='s2r') return /sizechange|reducer|sq2round|transition/;
+      if(cid==='cap') return /cap/;
+      if(cid==='offset') return /offset/;
+      return null;
+    }
+    function detNear(x,y,wIn,rx){
       var best=null;
-      dets.forEach(function(d){ var m=Math.hypot(d.nx-x,d.ny-y); if(!best||m<best.m) best={m:m,d:d}; });
+      allDets.forEach(function(d){ if(rx && !rx.test(d.cls||'')) return;
+        var m=Math.hypot(d.nx-x,d.ny-y); if(!best||m<best.m) best={m:m,d:d}; });
       if(!best) return {have:false};
       return {have:true, distIn:ptToIn(best.m), xw:ptToIn(best.m)/(wIn||12), score:best.d.score||0, low:!!best.d._lowProp};
     }
@@ -4131,32 +4141,57 @@ function refreshSel(){
       for(var i=0;i<pcs.length;i++){
         var p=pcs[i];
         var before=acc; if(p.kind==='straight') acc+=(p.lenIn||0);
-        if(!(p.kind==='fitting' && (p.cid==='e90'||p.cid==='e45'||p._elbow))) continue;
+        if(p.kind!=='fitting') continue;
+        var _cid=p.cid||'';
+        var isElb=(_cid==='e90'||_cid==='e45'||p._elbow);
+        var isTap=(_cid==='stap'||_cid==='tap'||_cid==='tee'||p._tap);
+        var isStep=(_cid==='tr'||_cid==='reducer'||_cid==='s2r'||p._sizeStep);
+        var isCap=(_cid==='cap'||p._cap);
+        var isOff=(_cid==='offset'||p._offset);
+        if(!(isElb||isTap||isStep||isCap||isOff)) continue;
         var f=fr[i]; if(!f) continue;
-        var ev={runId:r.id, pieceIdx:i, x:f.x, y:f.y, widthIn:w, kind:(p.cid||'e90'), reasons:[], score:0};
-        // Evidence both ADDS and SUBTRACTS -- the first cut only added, and 'turns + has legs' alone
-        // (0.55) confirmed a marker 12.8 duct-widths from any detection. Bad evidence must cost, and two
-        // findings cap the verdict at review outright: a fitting that doesn't turn isn't an elbow yet,
-        // and a gross size step at a corner is two ducts, not one.
+        var ev={runId:r.id, pieceIdx:i, x:f.x, y:f.y, widthIn:w, kind:_cid, reasons:[], score:0};
+        // Evidence ADDS and SUBTRACTS, and structural contradictions cap the verdict at review.
+        // Each fitting type has its own physics: an elbow must turn; a tap sits MID-run with trunk on
+        // both sides; a cap sits at an END; a transition must actually change size; an offset needs a
+        // lateral step. Detection support is scored the same way for all, against its OWN class.
         var capReview=false;
-        // (a) does it actually turn?
-        if(p.turn){ ev.score+=0.30; ev.reasons.push('turns '+Math.round(p.turn*180/Math.PI)+'\u00b0'); }
-        else { ev.score-=0.35; capReview=true; ev.reasons.push('NO TURN \u2014 marker only'); }
-        // (b) detection support, scaled to duct width
-        var dn=detNear(f.x,f.y,w);
-        if(dn.have && dn.xw<=1.5){ ev.score+=0.40*Math.min(1,dn.score*1.4); ev.reasons.push('det '+dn.score.toFixed(2)+' at '+dn.xw.toFixed(2)+'\u00d7W'+(dn.low?' (low-prop)':'')); }
-        else if(dn.have){ ev.score-=0.15; ev.reasons.push('nearest det '+dn.xw.toFixed(1)+'\u00d7W away'); }
-        else { ev.score-=0.10; ev.reasons.push('no elbow detection on sheet'); }
-        // (c) legs: real duct on both sides?
         var after=0; for(var q=i+1;q<pcs.length;q++){ if(pcs[q].kind==='straight') after+=(pcs[q].lenIn||0); }
-        if(before>=6 && after>=6){ ev.score+=0.20; ev.reasons.push('legs '+Math.round(before)+'\u2033 / '+Math.round(after)+'\u2033'); }
-        else { ev.score-=0.10; ev.reasons.push('leg short: '+Math.round(before)+'\u2033 / '+Math.round(after)+'\u2033'); }
-        // (d) size continuity across the corner
         var wA=null,wB=null;
         for(var a2=i-1;a2>=0;a2--){ if(pcs[a2].kind==='straight'){ wA=pcs[a2].widthIn; break; } }
         for(var b2=i+1;b2<pcs.length;b2++){ if(pcs[b2].kind==='straight'){ wB=pcs[b2].widthIn; break; } }
-        if(wA!=null&&wB!=null){ if(Math.max(wA,wB)<=Math.min(wA,wB)*1.35+1){ ev.score+=0.10; }
-          else { ev.score-=0.15; capReview=true; ev.reasons.push('size steps '+wA+'\u2033\u2192'+wB+'\u2033 at the corner'); } }
+        var dn=detNear(f.x,f.y,w,detClassFor(_cid));
+        if(dn.have && dn.xw<=1.5){ ev.score+=0.40*Math.min(1,dn.score*1.4); ev.reasons.push('det '+dn.score.toFixed(2)+' at '+dn.xw.toFixed(2)+'\u00d7W'+(dn.low?' (low-prop)':'')); }
+        else if(dn.have){ ev.score-=0.15; ev.reasons.push('nearest det '+dn.xw.toFixed(1)+'\u00d7W away'); }
+        else { ev.score-=0.10; ev.reasons.push('no matching detection on sheet'); }
+        if(isElb){
+          if(p.turn){ ev.score+=0.30; ev.reasons.push('turns '+Math.round(p.turn*180/Math.PI)+'\u00b0'); }
+          else { ev.score-=0.35; capReview=true; ev.reasons.push('NO TURN \u2014 marker only'); }
+          if(before>=6 && after>=6){ ev.score+=0.20; ev.reasons.push('legs '+Math.round(before)+'\u2033 / '+Math.round(after)+'\u2033'); }
+          else { ev.score-=0.10; ev.reasons.push('leg short: '+Math.round(before)+'\u2033 / '+Math.round(after)+'\u2033'); }
+          if(wA!=null&&wB!=null){ if(Math.max(wA,wB)<=Math.min(wA,wB)*1.35+1){ ev.score+=0.10; }
+            else { ev.score-=0.15; capReview=true; ev.reasons.push('size steps '+wA+'\u2033\u2192'+wB+'\u2033 at the corner'); } }
+        } else if(isTap){
+          if(before>=6 && after>=6){ ev.score+=0.30; ev.reasons.push('mid-run, trunk '+Math.round(before)+'\u2033 / '+Math.round(after)+'\u2033'); }
+          else { ev.score-=0.20; capReview=true; ev.reasons.push('tap at a run end \u2014 trunk missing one side'); }
+          if(wA!=null&&wB!=null&&Math.max(wA,wB)<=Math.min(wA,wB)*1.35+1){ ev.score+=0.15; }
+          else if(wA!=null&&wB!=null){ ev.score-=0.10; ev.reasons.push('trunk size changes AT the tap'); }
+        } else if(isStep){
+          var iw=p.inW!=null?p.inW:wA, ow=p.outW!=null?p.outW:wB;
+          if(iw!=null&&ow!=null&&Math.abs(iw-ow)>=1){ ev.score+=0.30; ev.reasons.push('steps '+iw+'\u2033\u2192'+ow+'\u2033'); }
+          else { ev.score-=0.25; capReview=true; ev.reasons.push('changes nothing ('+(iw!=null?iw:'?')+'\u2033\u2192'+(ow!=null?ow:'?')+'\u2033)'); }
+          if(before>=6 && after>=6){ ev.score+=0.20; ev.reasons.push('duct both sides'); }
+          else { ev.score-=0.05; ev.reasons.push('at a run end (connector)'); }
+        } else if(isCap){
+          if(after<=2 || before<=2){ ev.score+=0.35; ev.reasons.push('at a run end'); }
+          else { ev.score-=0.30; capReview=true; ev.reasons.push('cap MID-RUN \u2014 duct continues past it'); }
+          if(Math.max(before,after)>=6){ ev.score+=0.10; }
+        } else if(isOff){
+          var oi=p.offsetIn||0;
+          if(oi>0){ ev.score+=0.25; ev.reasons.push('offsets '+Math.round(oi)+'\u2033'); }
+          else { ev.score-=0.20; capReview=true; ev.reasons.push('zero lateral offset'); }
+          if(before>=6 && after>=6){ ev.score+=0.20; ev.reasons.push('duct both sides'); }
+        }
         ev.score=Math.max(0,Math.min(1,ev.score));
         ev.verdict = ev.score>=0.60 ? 'confirmed' : (ev.score>=0.30 ? 'review' : 'suspect');
         if(capReview && ev.verdict==='confirmed') ev.verdict='review';
@@ -4176,9 +4211,44 @@ function refreshSel(){
     });
     window.__elbowLedger=out;
     var c={confirmed:0,review:0,suspect:0}; out.forEach(function(e){ c[e.verdict]++; });
-    console.log('[adjudicator] elbows graded: '+out.length+' \u00b7 confirmed '+c.confirmed+' \u00b7 review '+c.review+' \u00b7 suspect '+c.suspect);
+    console.log('[adjudicator] fittings graded: '+out.length+' \u00b7 confirmed '+c.confirmed+' \u00b7 review '+c.review+' \u00b7 suspect '+c.suspect);
     try{ window.__showElbowStrip(); }catch(_){}
     return out.length;
+  };
+  // ---------- REVIEW BANK (v3.22): every \u2713/\u2717 persists in IndexedDB ----------
+  // The ledger lived only in page memory, so review work survived ONLY if the Duct JSON was exported
+  // before a refresh. IndexedDB survives refreshes, browser restarts, and service-worker cache busts
+  // (it is separate storage from the SW cache), so banked reviews accumulate across sessions until
+  // exported for the retrain. Nothing leaves the machine; export is a manual download.
+  window.__bankDB=function(cb){
+    var rq=indexedDB.open('bt-review-bank',1);
+    rq.onupgradeneeded=function(e){ var db=e.target.result;
+      if(!db.objectStoreNames.contains('reviews')) db.createObjectStore('reviews',{autoIncrement:true}); };
+    rq.onsuccess=function(e){ cb(e.target.result); };
+    rq.onerror=function(){ console.warn('review bank unavailable'); };
+  };
+  window.__bankPut=function(entry){
+    try{ window.__bankDB(function(db){
+      var tx=db.transaction('reviews','readwrite');
+      entry.ts=Date.now(); entry.page=(typeof pageNum!=='undefined'?pageNum:null);
+      entry.doc=(window.__docName||document.title||'');
+      tx.objectStore('reviews').add(entry);
+      tx.oncomplete=function(){ window.__bankCount(function(n){ var el=document.getElementById('bankN'); if(el) el.textContent=n; }); };
+    }); }catch(e){ console.warn('bank put',e); }
+  };
+  window.__bankCount=function(cb){
+    try{ window.__bankDB(function(db){ var rq=db.transaction('reviews').objectStore('reviews').count();
+      rq.onsuccess=function(){ cb(rq.result); }; }); }catch(_){ cb(0); }
+  };
+  window.__bankExport=function(){
+    try{ window.__bankDB(function(db){ var rq=db.transaction('reviews').objectStore('reviews').getAll();
+      rq.onsuccess=function(){
+        var blob=new Blob([JSON.stringify({exported:new Date().toISOString(), reviews:rq.result},null,1)],{type:'application/json'});
+        var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+        a.download='review-bank-'+new Date().toISOString().slice(0,10)+'.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        console.log('[bank] exported '+rq.result.length+' review decision(s)');
+      }; }); }catch(e){ console.warn('bank export',e); }
   };
   // ---------- review strip: worst first, circle on hover, keep/delete ----------
   window.__stripCircle=function(x,y){
@@ -4193,9 +4263,9 @@ function refreshSel(){
     var ov=document.getElementById('overlay'); if(ov) ov.appendChild(r);
   };
   window.__stripKeep=function(i){ var e=(window.__elbowLedger||[])[i]; if(!e) return;
-    e.human='kept'; var el=document.getElementById('elstrip-c'+i); if(el){ el.style.opacity=.45; el.querySelector('.act').textContent='\u2713 kept'; } };
+    e.human='kept'; window.__bankPut({kind:e.kind,verdict:e.verdict,score:e.score,human:'kept',x:e.x,y:e.y,widthIn:e.widthIn,reasons:e.reasons}); var el=document.getElementById('elstrip-c'+i); if(el){ el.style.opacity=.45; el.querySelector('.act').textContent='\u2713 kept'; } };
   window.__stripDel=function(i){ var e=(window.__elbowLedger||[])[i]; if(!e) return;
-    e.human='deleted';
+    e.human='deleted'; window.__bankPut({kind:e.kind,verdict:e.verdict,score:e.score,human:'deleted',x:e.x,y:e.y,widthIn:e.widthIn,reasons:e.reasons});
     if(e.runId!=null){ window.__pcDel(e.runId, e.pieceIdx); }
     else { window.__elbowJoins=(window.__elbowJoins||[]).filter(function(j){ return !(j._adj===e); }); renderItems(); }
     var el=document.getElementById('elstrip-c'+i); if(el){ el.style.opacity=.35; el.querySelector('.act').textContent='\u2717 deleted'; } };
@@ -4207,20 +4277,22 @@ function refreshSel(){
     var box=document.createElement('div'); box.id='elstrip';
     box.style.cssText='position:fixed;right:10px;bottom:34px;width:295px;max-height:46vh;overflow:auto;z-index:9998;background:rgba(10,16,24,.96);border:1px solid #2c3d52;border-radius:10px;padding:8px;font:12px system-ui;color:#dfe8f2';
     var confirmedN=L.filter(function(e){return e.verdict==='confirmed';}).length;
-    var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b>Elbow review \u00b7 '+L.length+'</b>'+
+    var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b>Fitting review \u00b7 '+L.length+'</b>'+
       '<span style="color:#8fa4bb">'+confirmedN+' confirmed</span>'+
+      '<span style="color:#7fc7a4;cursor:pointer;text-decoration:underline" title="Download every banked \u2713/\u2717 across all sessions" onclick="__bankExport()">bank: <span id="bankN">\u2026</span></span>'+
       '<button onclick="document.getElementById(\'elstrip\').remove();var e=document.getElementById(\'aihl\');if(e)e.remove();" style="background:#222;color:#ccc;border:1px solid #555;border-radius:5px;cursor:pointer">\u00d7</button></div>';
     L.forEach(function(e){
       var i=(window.__elbowLedger||[]).indexOf(e);
       var col=e.verdict==='confirmed'?'#2c6e49':(e.verdict==='review'?'#8a6d1a':'#7e2c35');
       h+='<div id="elstrip-c'+i+'" onmouseenter="__stripCircle('+e.x.toFixed(1)+','+e.y.toFixed(1)+')" style="border:1px solid '+col+';border-left:5px solid '+col+';border-radius:7px;padding:5px 7px;margin-bottom:6px">'
-        +'<div style="display:flex;justify-content:space-between"><b>'+e.verdict.toUpperCase()+' '+(e.score*100|0)+'%</b><span class="act">'
+        +'<div style="display:flex;justify-content:space-between"><b>'+(e.kind||'').toUpperCase()+' \u00b7 '+e.verdict.toUpperCase()+' '+(e.score*100|0)+'%</b><span class="act">'
         +'<button onclick="__stripKeep('+i+')" style="background:#1d3a2a;color:#bfe8cd;border:1px solid #2c6e49;border-radius:5px;cursor:pointer;margin-right:4px">\u2713</button>'
         +'<button onclick="__stripDel('+i+')" style="background:#3a1d22;color:#e8bfc7;border:1px solid #7e2c35;border-radius:5px;cursor:pointer">\u2717</button></span></div>'
         +'<div style="color:#9fb2c8">'+e.reasons.join(' \u00b7 ')+'</div></div>';
     });
     box.innerHTML=h;
     document.body.appendChild(box);
+    window.__bankCount(function(n){ var el=document.getElementById('bankN'); if(el) el.textContent=n; });
   };
 
   function renderPanel(){
@@ -5118,7 +5190,7 @@ function refreshSel(){
     try{ if(window.__elbowRecallMode){
       var _lp=(window.__yoloDets||[]).filter(function(d){ return d._lowProp; });
       if(_lp.length){ var _st=_lp.filter(function(d){ return d._used; }).length;
-        console.log('[recall] low-confidence elbow proposals: '+_lp.length+' \u00b7 seated by geometry: '+_st+' \u00b7 rejected: '+(_lp.length-_st));
+        console.log('[recall] low-confidence elbow/tap proposals: '+_lp.length+' \u00b7 seated by geometry: '+_st+' \u00b7 rejected: '+(_lp.length-_st));
         console.log('[recall] rejected proposals (score, x, y):', _lp.filter(function(d){ return !d._used; }).map(function(d){ return [Math.round((d.score||0)*100)/100, Math.round(d.nx||0), Math.round(d.ny||0)]; })); }
       else console.log('[recall] no below-slider elbow proposals this scan');
     } }catch(_){}
@@ -5356,7 +5428,7 @@ function refreshSel(){
     window.__yoloDets=(window.__yoloAll||[]).filter(function(d){
       if((d.score==null?1:d.score) >= (window.__yoloMinScore||0)) return true;
       // elbow-recall proposals ride below the slider on purpose: the geometry gate at the join is their filter
-      return !!(window.__elbowRecallMode && d._lowProp && /elbow/.test(d.cls||''));
+      return !!(window.__elbowRecallMode && d._lowProp && /elbow|tap|tee/.test(d.cls||''));
     });
     try{renderYolo();}catch(e){} };
   $('yoloUseMin') && ($('yoloUseMin').oninput=function(){ window.__yoloMinScore=parseFloat(this.value)||0; var v=$('yoloUseMinV'); if(v)v.textContent=(window.__yoloMinScore).toFixed(2); window.__applyYoloFilter(); if(typeof setStatus==='function'){ var n=(window.__yoloDets||[]).length, tot=(window.__yoloAll||[]).length; setStatus('Showing '+n+' of '+tot+' detections (score \u2265 '+window.__yoloMinScore.toFixed(2)+'). Re-build to apply to the takeoff.'); } });
@@ -5470,7 +5542,7 @@ function refreshSel(){
       var confT=parseFloat($('yoloConf').value)||0.2;
       var raw=decode(out,nc,confT); var kept=nms(raw,0.45);
       var names=(nc===16?NAMES16:(typeof NAMES!=='undefined'&&nc===8?NAMES:null));   // same mapping the full-sweep path uses
-      if(window.__elbowRecallMode) kept=kept.filter(function(b){ var nm=(names&&names[b.cls])||''; var isElb=/elbow/.test(nm);
+      if(window.__elbowRecallMode) kept=kept.filter(function(b){ var nm=(names&&names[b.cls])||''; var isElb=/elbow|tap|tee/.test(nm);
         if(b.score>=confT) return true; if(isElb){ b._lowProp=true; return true; } return false; });
       var ms=Math.round(performance.now()-t0);
       // map letterboxed px -> canvas/overlay px -> draw
@@ -5616,7 +5688,7 @@ function refreshSel(){
       var maxCls=0; kept.forEach(function(d){ if(d.cls>maxCls)maxCls=d.cls; });
       var use16=(maxCls>7);
       names=use16?NAMES16:NAMES;
-      if(window.__elbowRecallMode) kept=kept.filter(function(b){ var nm=(names&&names[b.cls])||''; var isElb=/elbow/.test(nm);
+      if(window.__elbowRecallMode) kept=kept.filter(function(b){ var nm=(names&&names[b.cls])||''; var isElb=/elbow|tap|tee/.test(nm);
         if(b.score>=confT) return true; if(isElb){ b._lowProp=true; return true; } return false; });
       // map render px -> overlay px, and -> normalized nvt coords for the run-builder
       var oScale=(baseScale*scale)/rScale;       // render px -> current overlay px
@@ -6679,7 +6751,7 @@ $('exportBtn').onclick=()=>{
     // and they DO export to CAMduct as e90/e45 fittings. Leaving them out of this file made every elbow
     // count taken from it wrong: refusing a merge moved an elbow out of `runs` without removing it from
     // the drawing or the takeoff. Export them so the real elbow total is runs-pieces PLUS this list.
-    elbowLedger:((window.__elbowLedger||[]).map(function(e){
+    fittingLedger:((window.__elbowLedger||[]).map(function(e){
       return {runId:e.runId||null, pieceIdx:(e.pieceIdx!=null?e.pieceIdx:null), joins:e.joins||null,
               x:round(e.x), y:round(e.y), kind:e.kind, score:Math.round(e.score*100)/100,
               verdict:e.verdict, human:e.human||null, reasons:e.reasons};
