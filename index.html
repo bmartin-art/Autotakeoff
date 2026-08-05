@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.43</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.45</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3303,10 +3303,23 @@ function refreshSel(){
           var dd=Math.hypot(E.p[0]-d.nx, E.p[1]-d.ny); if(dd<=reach) hits.push({r:r, end:E.end, p:E.p, out:E.out, dd:dd}); }); });
       var byRun={}; hits.forEach(function(hh){ if(!byRun[hh.r.id]||hh.dd<byRun[hh.r.id].dd) byRun[hh.r.id]=hh; });
       var ids=Object.keys(byRun);
-      if(ids.length!==2){ why(ids.length===1?'only ONE run end near \u2014 duct past the taper never traced':(ids.length===0?'no run ends within 36\u2033':'more than 2 run ends near ('+ids.length+')')); return; }
-      var A=byRun[ids[0]], B=byRun[ids[1]];
-      if((A.out[0]*B.out[0]+A.out[1]*B.out[1]) > -0.7){ why('run ends do not face each other (corner, not an in-line step)'); return; }
-      if(Math.hypot(A.p[0]-B.p[0], A.p[1]-B.p[1]) > inToPt(72)){ why('gap between ends over 72\u2033'); return; }
+      if(ids.length<2){ why(ids.length===1?'only ONE run end near \u2014 duct past the taper never traced':'no run ends within 36\u2033'); return; }
+      // SELECT, don't surrender (v3.45). Field data: five sizechange dets scoring 0.47-0.88 died with
+      // 'more than 2 run ends near' -- fitting CLUSTERS (a corner + transition composite, a run segmented
+      // by back-to-back steps) legitimately crowd 3-5 ends into 36in. The det marks a real step; the job
+      // is to pick WHICH pair: the best FACING pair (head-on, aligned, closest), judged exactly like the
+      // 2-end case was. Only genuinely unpairable clusters (no facing pair at all) still decline.
+      var A=null,B=null,bestQ=1e9;
+      for(var qi=0;qi<ids.length;qi++) for(var qk=qi+1;qk<ids.length;qk++){
+        var a2=byRun[ids[qi]], b2=byRun[ids[qk]];
+        var dot2=a2.out[0]*b2.out[0]+a2.out[1]*b2.out[1];
+        if(dot2 > -0.7) continue;
+        var gp=Math.hypot(a2.p[0]-b2.p[0], a2.p[1]-b2.p[1]);
+        if(gp > inToPt(72)) continue;
+        var q=gp*(1.6+dot2);                       // closer + more head-on wins (dot=-1 => weight 0.6)
+        if(q<bestQ){ bestQ=q; A=a2; B=b2; }
+      }
+      if(!A){ why(ids.length===2?'run ends do not face each other (corner, not an in-line step)':'no facing pair among '+ids.length+' nearby ends'); return; }
       var up=( (A.r.widthIn||0) >= (B.r.widthIn||0) ) ? A : B, dn=(up===A)?B:A; // step from the larger run down
       try{ var _ok=false; try{ window.__connSrc='bridge-sizechange'; _ok=!!(window.__connectReducer && window.__connectReducer(up.r.id, up.end, dn.r.id, dn.end)); } finally{ window.__connSrc=null; } if(_ok){ window.__detNote(d,'bridge-sizechange','bridged '+up.r.id+' -> '+dn.r.id); d._used=true; made++; }
            else why('connectReducer declined'); }catch(e){ console.warn('bridgeSizechanges', e); why('error: '+((e&&e.message)||e)); }
@@ -4573,6 +4586,36 @@ function refreshSel(){
       else if(e.verdict==='suspect' || (rate!=null&&rate<=0.25)) e.machine='no';
       else e.machine='you';
     });
+    // ROGUE DUCT SWEEP (v3.44). Field measurement on page 1: 18 of 68 runs -- 85 LF, a fifth of the
+    // takeoff -- were isolated bands with no size tag, no fittings, connected to nothing (ceiling grid,
+    // linear diffusers, soffit lines paired as duct). Real duct comes FROM somewhere: it ties into the
+    // tagged system through fittings. Components with no tag, no fitting, and no join anywhere in them
+    // are flagged as machine-NO run cards -- jump to them, one \u2717 removes the whole band, one \u2713 keeps
+    // it (and memory + track record learn either way). Nothing is auto-deleted.
+    try{
+      var _rn=window.__runs2d||[], _by={}, _adj={};
+      _rn.forEach(function(r){ _by[r.id]=r; _adj[r.id]=[]; });
+      function _nr(a,pt){ var e2=runEnd(a);
+        return Math.hypot(a.start[0]-pt[0],a.start[1]-pt[1])<=inToPt(14) || Math.hypot(e2.x-pt[0],e2.y-pt[1])<=inToPt(14); }
+      for(var i2=0;i2<_rn.length;i2++) for(var k2=i2+1;k2<_rn.length;k2++){
+        var A2=_rn[i2],B2=_rn[k2],eB=runEnd(B2);
+        if(_nr(A2,[B2.start[0],B2.start[1]])||_nr(A2,[eB.x,eB.y])){ _adj[A2.id].push(B2.id); _adj[B2.id].push(A2.id); } }
+      var _seen={};
+      _rn.forEach(function(r0){ if(_seen[r0.id]) return;
+        var st=[r0.id], comp=[];
+        while(st.length){ var x3=st.pop(); if(_seen[x3]) continue; _seen[x3]=1; comp.push(x3); st=st.concat(_adj[x3]); }
+        var vouched=comp.some(function(id2){ var r3=_by[id2];
+          return (r3.tagIdx&&r3.tagIdx.length) || (r3.pieces||[]).some(function(p3){ return p3.kind==='fitting'; }); });
+        if(vouched) return;
+        comp.forEach(function(id2){ var r3=_by[id2]; r3._rogue=true;
+          var e3=runEnd(r3), mx=(r3.start[0]+e3.x)/2, my=(r3.start[1]+e3.y)/2;
+          out.push({runId:r3.id, pieceIdx:null, x:mx, y:my, widthIn:(r3.widthIn||12), kind:'run',
+            src:'rogue-sweep', score:0.15, verdict:'suspect',
+            reasons:['isolated band: no size tag, no fittings, connects to nothing tagged',
+                     Math.round(runLenIn(r3)/12)+' LF at '+(r3.widthIn||'?')+'\u2033']});
+        });
+      });
+    }catch(e4){ console.warn('rogue sweep',e4); }
     window.__elbowLedger=out;
     var c={confirmed:0,review:0,suspect:0}; out.forEach(function(e){ c[e.verdict]++; });
     console.log('[adjudicator] fittings graded: '+out.length+' \u00b7 confirmed '+c.confirmed+' \u00b7 review '+c.review+' \u00b7 suspect '+c.suspect);
@@ -4654,7 +4697,8 @@ function refreshSel(){
     e.human='kept'; if(!auto) window.__bankPut({kind:e.kind,src:e.src||null,verdict:e.verdict,score:e.score,human:'kept',x:e.x,y:e.y,widthIn:e.widthIn,reasons:e.reasons,img:window.__fitCrop(e,160)}); var el=document.getElementById('elstrip-c'+i); if(el){ el.style.opacity=.45; el.querySelector('.act').textContent='\u2713 kept'; } };
   window.__stripDel=function(i,auto){ var e=(window.__elbowLedger||[])[i]; if(!e) return;
     e.human='deleted'; if(!auto) window.__bankPut({kind:e.kind,src:e.src||null,verdict:e.verdict,score:e.score,human:'deleted',x:e.x,y:e.y,widthIn:e.widthIn,reasons:e.reasons,img:window.__fitCrop(e,160)});
-    if(e.runId!=null){ window.__pcDel(e.runId, e.pieceIdx); }
+    if(e.kind==='run'){ window.__runs2d=(window.__runs2d||[]).filter(function(r){ return r.id!==e.runId; }); try{ renderItems(); renderPanel(); }catch(_){ } }
+    else if(e.runId!=null){ window.__pcDel(e.runId, e.pieceIdx); }
     else { window.__elbowJoins=(window.__elbowJoins||[]).filter(function(j){ return !(j._adj===e); }); renderItems(); }
     var el=document.getElementById('elstrip-c'+i); if(el){ el.style.opacity=.35; el.querySelector('.act').textContent='\u2717 deleted'; } };
   // ---- DECISION MEMORY (v3.28): your past checks and X's on THIS sheet apply themselves ----
