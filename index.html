@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.35</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.39</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -1190,7 +1190,22 @@ function classify(){
   var __chains={H:[],V:[]};
   ['H','V'].forEach(function(o){
     var items=segments.filter(function(s){return s._u.o===o;}).map(function(s){ return {fix:s._u.fix, lo:s._u.lo, hi:s._u.hi, s:s}; });
-    __chains[o]=chainBucket(items, 1.2, 12);
+    // JOIN GAP IN REAL INCHES, NOT POINTS (v3.36). The fixed 12pt gap meant 16 real inches at 1/8"
+    // scale but only 8 at 1/4" -- smaller than a typical branch opening, so at taps the trunk wall's
+    // stubs never chained, stayed individually short, failed the length gate, and the green stopped
+    // dead AT every tap on 1/4" prints while flowing through them on 1/8" ones. One constant, two
+    // behaviors, set by nothing but the scale dropdown. A tap opening is branch width plus collar --
+    // physically up to ~18in -- so the chain gap is 18 real inches at ANY scale (floor of 12pt keeps
+    // 3/32" and smaller sheets no tighter than they were).
+    var __joinGapPt=Math.max(12, (typeof inToPt==='function'?inToPt(18):12));
+    // CHAIN MERGE TOLERANCE 1.2 -> 2.4pt (v3.37). Admitting shorter segments doubled the pool, and a
+    // heavy duct wall extracts as fragments whose axis position jitters by the stroke's own thickness
+    // (~+/-1.4pt edge to edge). At 1.2pt those fragments formed TWIN chains of the same physical wall;
+    // the twin survived pairing unconsumed and paired OUTWARD with clutter 20-32in away -- the "duct
+    // outside the lines" bands, 17 of them on page 1, zero before. 2.4pt merges the twins and starves
+    // the phantoms at the source. Safe: distinct duct walls are never closer than a 4in duct (6pt at
+    // 1/4in scale), so nothing real merges.
+    __chains[o]=chainBucket(items, 2.4, __joinGapPt);
   });
   // parallel-pair detection within H and V buckets — on LOGICAL CHAINS, measured in real points
   ['H','V'].forEach(o=>{
@@ -1596,6 +1611,44 @@ function buildSegmentRuns(){
   // walls whose dimension matches the wall gap. Pockets don't (tags live on the ducts, ~half a
   // duct-width away). So tag-confirmed pairs claim their walls first; whatever's left must be clearly
   // elongated to count, which kills the squarish pockets.
+  // ---- LEADER FOLLOWING (v3.38): a tag connected to its duct by an arrow/leader line means THAT
+  // duct, however far away the text sits. The leader is a vector segment already in `segments`: one
+  // end at the text, the other at the duct. Follow it (one bend allowed -- drafters elbow their
+  // leaders) and give the tag an EFFECTIVE position at the far end; the normal matcher (position pads,
+  // v3.31 width tolerance) then runs from that point. Deterministic -- no model involved. Leaders are
+  // thin annotation lines, so duct-classified and wall-paired segments are excluded from candidacy.
+  (function(){
+    var NEAR=12, HOP=3;                                    // pt: text-to-leader grab, bend continuity
+    for(var ti=0; ti<tags.length; ti++){ var tg=tags[ti];
+      tg._lx=null; tg._ly=null;
+      if(tg.nx==null) continue;
+      var best=null;
+      for(var si=0; si<segments.length; si++){ var sg=segments[si];
+        if(sg.nx1==null || sg.cls==='duct' || sg.wallPair) continue;
+        var L2=Math.hypot(sg.nx2-sg.nx1, sg.ny2-sg.ny1); if(L2<6||L2>inToPt(120)) continue;
+        var d1=Math.hypot(sg.nx1-tg.nx, sg.ny1-tg.ny), d2=Math.hypot(sg.nx2-tg.nx, sg.ny2-tg.ny);
+        var dmin=Math.min(d1,d2);
+        if(dmin>NEAR) continue;
+        var far=(d1<d2)?[sg.nx2,sg.ny2]:[sg.nx1,sg.ny1];
+        if(!best || dmin<best.d) best={d:dmin, far:far, seg:sg};
+      }
+      if(!best) continue;
+      // one bend: a second thin segment continuing from the leader's far end
+      var far=best.far;
+      for(var s2=0; s2<segments.length; s2++){ var g2=segments[s2];
+        if(g2===best.seg || g2.nx1==null || g2.cls==='duct' || g2.wallPair) continue;
+        var L3=Math.hypot(g2.nx2-g2.nx1, g2.ny2-g2.ny1); if(L3<4||L3>inToPt(120)) continue;
+        var e1=Math.hypot(g2.nx1-far[0], g2.ny1-far[1]), e2=Math.hypot(g2.nx2-far[0], g2.ny2-far[1]);
+        if(Math.min(e1,e2)<=HOP){ far=(e1<e2)?[g2.nx2,g2.ny2]:[g2.nx1,g2.ny1]; break; }
+      }
+      // only adopt if it actually MOVES the tag meaningfully (a real leader, not a tick under the text)
+      if(Math.hypot(far[0]-tg.nx, far[1]-tg.ny) >= inToPt(6)){ tg._lx=far[0]; tg._ly=far[1]; }
+    }
+  })();
+  // effective tag position: vector-followed leader (exact) beats the AI-read leader tip (any print,
+  // including flattened/raster where no vector segments exist) beats the text position.
+  function tgX(tg){ return tg._lx!=null?tg._lx:(tg._lxAI!=null?tg._lxAI:tg.nx); }
+  function tgY(tg){ return tg._ly!=null?tg._ly:(tg._lyAI!=null?tg._lyAI:tg.ny); }
   var PAIRANG=0.12, MINW=3, MAXW=130, OVFRAC=0.30, MINOV=inToPt(8);
   var ASPECT=2.0;                                   // an unconfirmed run must be >=2x long as wide
   var PADAX=inToPt(6), PADPERP=inToPt(8);
@@ -1614,9 +1667,9 @@ function buildSegmentRuns(){
     // tolerance is too: a tag may read up to 3\u2033 UNDER the raw gap, but no more than 2\u2033 over it.
     var inside=[], matchTis=[], wtolUnder=Math.max(3,gIn*0.2), wtolOver=2;
     for(var ti=0; ti<tags.length; ti++){ var tg=tags[ti]; if(tg.nx==null) continue; var pd=parseTagDims(tg.text); if(!pd) continue;
-      var ax=A.ux*tg.nx+A.uy*tg.ny; if(ax<t0r-PADAX||ax>t1r+PADAX) continue;
-      var of=A.nxn*tg.nx+A.nyn*tg.ny; if(of<loOff-PADPERP||of>hiOff+PADPERP) continue;
-      inside.push({ti:ti,ta:ax,nx:tg.nx,ny:tg.ny,dims:pd});
+      var ax=A.ux*tgX(tg)+A.uy*tgY(tg); if(ax<t0r-PADAX||ax>t1r+PADAX) continue;
+      var of=A.nxn*tgX(tg)+A.nyn*tgY(tg); if(of<loOff-PADPERP||of>hiOff+PADPERP) continue;
+      inside.push({ti:ti,ta:ax,nx:tgX(tg),ny:tgY(tg),dims:pd});
       if((gIn-pd.w)<=wtolUnder && (pd.w-gIn)<=wtolOver) matchTis.push(ti);   // WIDTH only: in top-down plan the wall gap is the duct's width (1st number); height goes into the page. (round: w===h)
     }
     inside.sort(function(p,q){ if(axis==='horizontal') return p.nx-q.nx; if(axis==='vertical') return p.ny-q.ny; return p.ta-q.ta; });
@@ -1639,9 +1692,24 @@ function buildSegmentRuns(){
     var gp=gband(p.gap), gq=gband(q.gap); if(gp!==gq) return gp-gq;             // else nearest parallel partner
     return q.ov-p.ov;
   });
-  var used={}, usedTags={}, runs=[], squares=0;
+  var used={}, usedTags={}, runs=[], squares=0, _acceptedWalls={H:[],V:[]};
   cands.forEach(function(P){ if(used[P.ai]||used[P.bi]) return;
     if(P.lenP<inToPt(8)) return;                                               // too small to be a run
+    // NO WALL INSIDE THE BAND (v3.37). Admitting shorter segments doubled the chain pool, and pairing
+    // started spanning ACROSS ducts: one duct's wall paired with a parallel line far beyond it, putting
+    // 20-32in bands on a sheet whose largest tag is 25x5 -- "duct on the outside of the lines". The
+    // physical rule: a real duct's interior is empty between its walls; a band that CONTAINS a wall
+    // already claimed by a nearer (earlier-accepted) pair is spanning across a duct, not enclosing one.
+    // Liner lines in internally-lined duct never pair, so lined duct is untouched by this veto.
+    var _lo=Math.min(P.off1,P.off2)+2, _hi=Math.max(P.off1,P.off2)-2;
+    if(_hi>_lo){
+      var _aw=_acceptedWalls[P.axis==='H'?'H':'V'];
+      for(var _q=0;_q<_aw.length;_q++){ var W2=_aw[_q];
+        if(W2.fix<=_lo||W2.fix>=_hi) continue;
+        var _ov2=Math.min(P.t1r,W2.t1)-Math.max(P.t0r,W2.t0);
+        if(_ov2 > 0.4*(P.t1r-P.t0r)){ squares++; return; }                     // claimed wall runs down this band's middle -> phantom span
+      }
+    }
     var freeMatch=(P.matchTis||[]).filter(function(ti){return !usedTags[ti];}); // width-matching tags not already claimed by a better run
     var eff=freeMatch.length>0;                                                 // CONFIRMED = this run can claim a width-matching tag (one tag -> one run)
     if(tagOnly && !eff){ squares++; return; }
@@ -1650,6 +1718,7 @@ function buildSegmentRuns(){
     if(!eff){ var _wS=snapDuctW(P.gap/k6), _lf=(P.lenP/k6)/12;                    // NO TAG -> the gap must be a plausible untagged-duct size, else it's not duct
       if(_wS>32 || _wS<5){ squares++; return; } }                                 // >32" (architectural span) or <5" (doubled wall-line / thickness, not a rect duct) = phantom pair
     used[P.ai]=1; used[P.bi]=1; freeMatch.forEach(function(ti){ usedTags[ti]=1; }); // claim the matched tag(s) so nothing else can confirm on them
+    _acceptedWalls[P.axis==='H'?'H':'V'].push({fix:P.off1,t0:P.t0r,t1:P.t1r},{fix:P.off2,t0:P.t0r,t1:P.t1r});
     function pt(off,t){ return [off*P.A.nxn+t*P.A.ux, off*P.A.nyn+t*P.A.uy]; }
     var corners=[pt(P.off1,P.t0r),pt(P.off1,P.t1r),pt(P.off2,P.t1r),pt(P.off2,P.t0r)];
     var dimOf={}; P.inside.forEach(function(o){ dimOf[o.ti]=o.dims; });
@@ -1666,8 +1735,8 @@ function buildSegmentRuns(){
     if(used[wi]) continue; var W0=walls[wi]; if(W0.len < inToPt(10)) continue;
     var myTags=[];
     for(var ti2=0; ti2<tags.length; ti2++){ var tg2=tags[ti2]; if(tg2.nx==null) continue; var pd2=parseTagDims(tg2.text); if(!pd2) continue;
-      var ax2=W0.ux*tg2.nx+W0.uy*tg2.ny; if(ax2<W0.t0-PADAX||ax2>W0.t1+PADAX) continue;
-      var of2=W0.nxn*tg2.nx+W0.nyn*tg2.ny-W0.c; if(Math.abs(of2)>inToPt(pd2.w)+inToPt(3)) continue;   // tag must sit within ~one duct-width of THIS wall
+      var ax2=W0.ux*tgX(tg2)+W0.uy*tgY(tg2); if(ax2<W0.t0-PADAX||ax2>W0.t1+PADAX) continue;
+      var of2=W0.nxn*tgX(tg2)+W0.nyn*tgY(tg2)-W0.c; if(Math.abs(of2)>inToPt(pd2.w)+inToPt(3)) continue;   // tag must sit within ~one duct-width of THIS wall
       myTags.push({ti:ti2,ta:ax2,dims:pd2,side:of2>=0?1:-1});
     }
     if(!myTags.length) continue;
@@ -6532,7 +6601,7 @@ async function aiTileSweep(){
     if(!crop||!crop.b64){ fails++; continue; }
     if(crop.ink!=null && crop.ink < 0.0015){ blanks++; continue; }   // tile came back essentially empty — a render that
                                                                      // didn't complete. Reading it would only invent tags.
-    var prompt='This is a HIGH-RES crop of part of an HVAC duct plan. Find every duct SIZE label PRINTED in THIS image. RECTANGULAR = WIDTHxHEIGHT inches like "20x16". ROUND = one diameter with \u00f8 or DIA like "12\\"\u00f8" -> report as "\u00f812". Size numbers may be ROTATED (vertical) inside the ducts \u2014 include those. For EACH label give a TIGHT bounding box around just that label, as fractions of THIS image: x0,y0 (top-left) and x1,y1 (bottom-right), each 0..1, plus conf (0..1, your confidence you read it correctly). Do NOT invent sizes and do NOT repeat one to fill space; if you cannot clearly read a printed size, return empty. Ignore diffuser/grille/equipment tags (CD-500, EF1, TS) and CFM values. Answer ONLY JSON, no prose: {"sizes":[{"size":"20x16","x0":0.30,"y0":0.55,"x1":0.46,"y1":0.63,"conf":0.95}]} or {"sizes":[]}.';
+    var prompt='This is a HIGH-RES crop of part of an HVAC duct plan. Find every duct SIZE label PRINTED in THIS image. RECTANGULAR = WIDTHxHEIGHT inches like "20x16". ROUND = one diameter with \u00f8 or DIA like "12\\"\u00f8" -> report as "\u00f812". Size numbers may be ROTATED (vertical) inside the ducts \u2014 include those. For EACH label give a TIGHT bounding box around just that label, as fractions of THIS image: x0,y0 (top-left) and x1,y1 (bottom-right), each 0..1, plus conf (0..1, your confidence you read it correctly). IF the label has a LEADER LINE or ARROW connecting it to a duct, ALSO give lx,ly (0..1 fractions of THIS image) = the point where that leader TOUCHES the duct; omit lx,ly when the label sits directly on its duct with no leader. Do NOT invent sizes and do NOT repeat one to fill space; if you cannot clearly read a printed size, return empty. Ignore diffuser/grille/equipment tags (CD-500, EF1, TS) and CFM values. Answer ONLY JSON, no prose: {"sizes":[{"size":"20x16","x0":0.30,"y0":0.55,"x1":0.46,"y1":0.63,"conf":0.95,"lx":0.28,"ly":0.40}]} or {"sizes":[]}.';
     try{
       var ctrl=new AbortController(), to=setTimeout(function(){ctrl.abort();},25000);
       var resp=await fetch(wurl,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:500,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:crop.b64}},{type:'text',text:prompt}]}]})});
@@ -6552,7 +6621,13 @@ async function aiTileSweep(){
           var px=crop.x+cx*crop.w, py=crop.y+cy*crop.h;                 // tile origin + in-tile fraction -> sheet px
           var cdist=Math.hypot(cx-0.5,cy-0.5);                          // how centered in its tile (0=center, edge reads are worse)
           var conf=(it&&typeof it.conf==='number')?it.conf:0.5;
-          hits.push({px:px,py:py,size:size,cdist:cdist,conf:conf});     // collect raw; dedup happens after all tiles
+          var lpx=null,lpy=null;
+          if(it && typeof it.lx==='number' && typeof it.ly==='number'){
+            var lx2=Math.max(0,Math.min(1,it.lx)), ly2=Math.max(0,Math.min(1,it.ly));
+            // only trust a leader tip that actually moves away from the label (a real arrow, not jitter)
+            if(Math.hypot(lx2-cx,ly2-cy)*Math.max(crop.w,crop.h) > 8){ lpx=crop.x+lx2*crop.w; lpy=crop.y+ly2*crop.h; }
+          }
+          hits.push({px:px,py:py,size:size,cdist:cdist,conf:conf,lpx:lpx,lpy:lpy});     // collect raw; dedup happens after all tiles
         });
       }}
     }catch(e){}
@@ -6591,7 +6666,11 @@ async function aiTileSweep(){
   kept.forEach(function(hh){ var u=hh._u||snapToUser(hh.px,hh.py);                 // frozen screen -> user (zoom-safe)
     var nn=(window.__nvt&&typeof applyM==='function')?applyM(window.__nvt,u[0],u[1]):[u[0],u[1]];
     var sc=(typeof viewport!=='undefined'&&viewport)?applyM(viewport.transform,u[0],u[1]):[hh.px,hh.py];   // screen at CURRENT view for the dot
-    tags.push({x:sc[0],y:sc[1],ux:u[0],uy:u[1],nx:nn[0],ny:nn[1],text:hh.size,_ai:true,_tile:true}); });
+    var t={x:sc[0],y:sc[1],ux:u[0],uy:u[1],nx:nn[0],ny:nn[1],text:hh.size,_ai:true,_tile:true};
+    if(hh.lpx!=null){ var ul=snapToUser(hh.lpx,hh.lpy);
+      var nl=(window.__nvt&&typeof applyM==='function')?applyM(window.__nvt,ul[0],ul[1]):[ul[0],ul[1]];
+      t._lxAI=nl[0]; t._lyAI=nl[1]; }
+    tags.push(t); });
   try{ drawOverlay(); }catch(e){}
   out.innerHTML='<div class="hint" style="color:#cce6ff"><b>Tile sweep done.</b> '+added+' tag(s) placed across '+total+' tile'+(total!==1?'s':'')+(noiseDropped?(' \u00b7 '+noiseDropped+' off-duct noise dropped'):'')+(fails?(' \u00b7 <span style="color:#ff8a8a">'+fails+' tile(s) failed</span>'):'')+(blanks?(' \u00b7 <span style="color:#ff8a8a">'+blanks+' tile(s) came back BLANK \u2014 the page render did not complete (heavy sheet): set a Work Area and re-run</span>'):'')+(workArea?' (work area)':' (whole sheet \u2014 set a work area to limit calls)')+'. Markers only \u2014 not wired to runs yet.</div>';
 }
