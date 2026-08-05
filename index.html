@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.34</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.35</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3414,7 +3414,7 @@ function refreshSel(){
         x2.drawImage(cv, P[0]-half, P[1]-half, half*2, half*2, 0,0,280,280);
         x2.strokeStyle='#e11'; x2.lineWidth=3; x2.beginPath(); x2.arc(140,140,26,0,7); x2.stroke();
         var b64=o.toDataURL('image/png').split(',')[1];
-        var prompt='HVAC plan crop. Inside the red circle, one duct meets the side of another. Answer with ONLY one JSON object {"verdict":"tap"|"crossing"|"corner"|"unsure"}. tap = the smaller duct TERMINATES at the other duct. crossing = it visibly CONTINUES on the far side (they pass over each other). corner = the two turn into each other at an end. unsure = cannot tell.';
+        var prompt='HVAC plan crop. Inside the red circle, a duct meets the side of another duct. Decide the junction type from the linework. corner = the airstream TURNS: the two ducts are one path changing direction (look for a miter/diagonal joint line, matching widths flowing into each other, or the horizontal duct segmenting AT this junction). tap = a branch TERMINATES into a trunk whose walls run CONTINUOUS and unbroken straight through the junction. crossing = the duct visibly CONTINUES on the far side (two ducts passing over each other). Answer ONLY one JSON object {"verdict":"tap"|"crossing"|"corner"|"unsure"}.';
         var resp=await fetch(wurl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:60,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:prompt}]}]})});
         var data=await resp.json();
         var raw=(data.content||[]).filter(function(z){return z.type==='text';}).map(function(z){return z.text;}).join('').replace(/```json|```/g,'').trim();
@@ -3422,6 +3422,7 @@ function refreshSel(){
         var v=(JSON.parse(raw).verdict||'unsure');
         e.reasons.push('referee (ink): '+v);
         if(v==='crossing'){ window.__stripDel(i,true); e.reasons.push('auto-removed: ink shows the duct continuing past'); }
+        else if(v==='corner'){ window.__stripDel(i,true); e.reasons.push('auto-removed: ink shows the duct TURNING here \u2014 elbow territory, not a tap'); }
         else if(v==='tap'){ e.score=Math.min(1,e.score+0.15); if(e.verdict!=='confirmed'&&e.score>=0.60) e.verdict='confirmed'; }
       }catch(err){ e.reasons.push('referee: unavailable ('+((err&&err.message)||'network')+')'); }
     }
