@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.29</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.31</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -1606,12 +1606,18 @@ function buildSegmentRuns(){
     var off1=A.c, off2=A.nxn*B.mid[0]+A.nyn*B.mid[1];
     var loOff=Math.min(off1,off2), hiOff=Math.max(off1,off2);
     var thn=A.th, axis=(thn<0.35||thn>Math.PI-0.35)?'horizontal':(Math.abs(thn-Math.PI/2)<0.35?'vertical':'diagonal');
-    var inside=[], matchTis=[], wtol=Math.max(2,gIn*0.2);
+    // ASYMMETRIC width tolerance (v3.31). Field data, 20/20 clean split: every matched tag agreed with
+    // the snapped run width EXACTLY; every touching-but-unmatched tag read 2\u2033 SMALLER than the band
+    // (\u00f84 vs 6, \u00f86 vs 8, \u00f88 vs 10). Line weight inflates the measured wall gap by a fixed ~2-2.5\u2033,
+    // which big duct absorbs inside the 20% tolerance and small duct does not -- so small-branch tags sat
+    // touching their duct and never paired. The inflation is one-directional (walls only ADD), so the
+    // tolerance is too: a tag may read up to 3\u2033 UNDER the raw gap, but no more than 2\u2033 over it.
+    var inside=[], matchTis=[], wtolUnder=Math.max(3,gIn*0.2), wtolOver=2;
     for(var ti=0; ti<tags.length; ti++){ var tg=tags[ti]; if(tg.nx==null) continue; var pd=parseTagDims(tg.text); if(!pd) continue;
       var ax=A.ux*tg.nx+A.uy*tg.ny; if(ax<t0r-PADAX||ax>t1r+PADAX) continue;
       var of=A.nxn*tg.nx+A.nyn*tg.ny; if(of<loOff-PADPERP||of>hiOff+PADPERP) continue;
       inside.push({ti:ti,ta:ax,nx:tg.nx,ny:tg.ny,dims:pd});
-      if(Math.abs(pd.w-gIn)<=wtol) matchTis.push(ti);   // WIDTH only: in top-down plan the wall gap is the duct's width (1st number); height goes into the page. (round: w===h)
+      if((gIn-pd.w)<=wtolUnder && (pd.w-gIn)<=wtolOver) matchTis.push(ti);   // WIDTH only: in top-down plan the wall gap is the duct's width (1st number); height goes into the page. (round: w===h)
     }
     inside.sort(function(p,q){ if(axis==='horizontal') return p.nx-q.nx; if(axis==='vertical') return p.ny-q.ny; return p.ta-q.ta; });
     return {A:A,B:B,ai:ai,bi:bi,ov:ov,gap:gap,gIn:gIn,t0r:t0r,t1r:t1r,lenP:lenP,off1:off1,off2:off2,axis:axis,inside:inside,matchTis:matchTis,confirmed:matchTis.length>0};
@@ -4226,7 +4232,15 @@ function refreshSel(){
         for(var a2=i-1;a2>=0;a2--){ if(pcs[a2].kind==='straight'){ wA=pcs[a2].widthIn; break; } }
         for(var b2=i+1;b2<pcs.length;b2++){ if(pcs[b2].kind==='straight'){ wB=pcs[b2].widthIn; break; } }
         var dn=detNear(f.x,f.y,w,detClassFor(_cid));
+        // DENSITY-AWARE (v3.30): missing detection support is only evidence AGAINST a fitting when the
+        // model is actually seeing this class on this sheet. Field data: on a print with 3 elbow dets
+        // total, geometry-placed elbows sat 15-36xW from any det and were ALL real -- the penalty was
+        // punishing them for the model's blindness, pinning correct fittings at 44%. With fewer than 4
+        // usable dets of the class (score >= 0.30), absence is NEUTRAL, and the reason says so.
+        var _rx=detClassFor(_cid);
+        var _density=allDets.filter(function(dd){ return _rx && _rx.test(dd.cls||'') && (dd.score||0)>=0.30; }).length;
         if(dn.have && dn.xw<=1.5){ ev.score+=0.40*Math.min(1,dn.score*1.4); ev.reasons.push('det '+dn.score.toFixed(2)+' at '+dn.xw.toFixed(2)+'\u00d7W'+(dn.low?' (low-prop)':'')); }
+        else if(_density<4){ ev.reasons.push('sheet nearly blind to this class ('+_density+' usable dets) \u2014 no penalty'); }
         else if(dn.have){ ev.score-=0.15; ev.reasons.push('nearest det '+dn.xw.toFixed(1)+'\u00d7W away'); }
         else { ev.score-=0.10; ev.reasons.push('no matching detection on sheet'); }
         if(isElb){
