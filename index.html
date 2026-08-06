@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.48</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.49</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -1692,7 +1692,8 @@ function buildSegmentRuns(){
     var gp=gband(p.gap), gq=gband(q.gap); if(gp!==gq) return gp-gq;             // else nearest parallel partner
     return q.ov-p.ov;
   });
-  var used={}, usedTags={}, runs=[], squares=0, _acceptedWalls={H:[],V:[]};
+  var used={}, usedTags={}, runs=[], squares=0, _acceptedWalls={};
+  function _awKey(P){ return P.axis==='horizontal'?'H':(P.axis==='vertical'?'V':('D'+Math.round(((P.A&&P.A.th)||0)*20))); }
   cands.forEach(function(P){ if(used[P.ai]||used[P.bi]) return;
     if(P.lenP<inToPt(8)) return;                                               // too small to be a run
     // NO WALL INSIDE THE BAND (v3.37). Admitting shorter segments doubled the chain pool, and pairing
@@ -1703,7 +1704,12 @@ function buildSegmentRuns(){
     // Liner lines in internally-lined duct never pair, so lined duct is untouched by this veto.
     var _lo=Math.min(P.off1,P.off2)+2, _hi=Math.max(P.off1,P.off2)-2;
     if(_hi>_lo){
-      var _aw=_acceptedWalls[P.axis==='H'?'H':'V'];
+      // FRAME FIX (v3.49): P.axis is 'horizontal'/'vertical'/'diagonal' -- the 'H' comparison never
+      // matched, so EVERY pair landed in one bucket and offsets were compared across incompatible
+      // frames (a horizontal's y-offset against a vertical's x-offset against a diagonal's rotated
+      // frame). Diagonal duct died systematically; H/V pairs got vetoed at random collisions. Walls
+      // are only comparable within the same frame: H, V, or a diagonal ANGLE BIN.
+      var _aw=_acceptedWalls[_awKey(P)]||[];
       for(var _q=0;_q<_aw.length;_q++){ var W2=_aw[_q];
         if(W2.fix<=_lo||W2.fix>=_hi) continue;
         var _ov2=Math.min(P.t1r,W2.t1)-Math.max(P.t0r,W2.t0);
@@ -1718,7 +1724,7 @@ function buildSegmentRuns(){
     if(!eff){ var _wS=snapDuctW(P.gap/k6), _lf=(P.lenP/k6)/12;                    // NO TAG -> the gap must be a plausible untagged-duct size, else it's not duct
       if(_wS>32 || _wS<5){ squares++; return; } }                                 // >32" (architectural span) or <5" (doubled wall-line / thickness, not a rect duct) = phantom pair
     used[P.ai]=1; used[P.bi]=1; freeMatch.forEach(function(ti){ usedTags[ti]=1; }); // claim the matched tag(s) so nothing else can confirm on them
-    _acceptedWalls[P.axis==='H'?'H':'V'].push({fix:P.off1,t0:P.t0r,t1:P.t1r},{fix:P.off2,t0:P.t0r,t1:P.t1r});
+    (_acceptedWalls[_awKey(P)]=_acceptedWalls[_awKey(P)]||[]).push({fix:P.off1,t0:P.t0r,t1:P.t1r},{fix:P.off2,t0:P.t0r,t1:P.t1r});
     function pt(off,t){ return [off*P.A.nxn+t*P.A.ux, off*P.A.nyn+t*P.A.uy]; }
     var corners=[pt(P.off1,P.t0r),pt(P.off1,P.t1r),pt(P.off2,P.t1r),pt(P.off2,P.t0r)];
     var dimOf={}; P.inside.forEach(function(o){ dimOf[o.ti]=o.dims; });
@@ -1737,11 +1743,18 @@ function buildSegmentRuns(){
     for(var ti2=0; ti2<tags.length; ti2++){ var tg2=tags[ti2]; if(tg2.nx==null) continue; var pd2=parseTagDims(tg2.text); if(!pd2) continue;
       var ax2=W0.ux*tgX(tg2)+W0.uy*tgY(tg2); if(ax2<W0.t0-PADAX||ax2>W0.t1+PADAX) continue;
       var of2=W0.nxn*tgX(tg2)+W0.nyn*tgY(tg2)-W0.c; if(Math.abs(of2)>inToPt(pd2.w)+inToPt(3)) continue;   // tag must sit within ~one duct-width of THIS wall
-      myTags.push({ti:ti2,ta:ax2,dims:pd2,side:of2>=0?1:-1});
+      myTags.push({ti:ti2,ta:ax2,dims:pd2,side:of2>=0?1:-1,off:of2});
     }
     if(!myTags.length) continue;
     var pd0=myTags[0].dims; var wIn=pd0.w; var gapW=inToPt(wIn); if(!(gapW>0)) continue;   // first number = screen-facing span
-    var side=myTags[0].side||1;
+    // THE TAG NAMES THE SIDE (v3.49). This rescue searched BOTH sides for a partner and took whichever
+    // line sat nearest the tagged width -- so when the true second wall was broken (tap collars, grilles)
+    // and clutter sat at roughly the right distance on the WRONG side, the band was built beside its own
+    // ink ("duct off to the side of the stub"). But tags sit ON their duct: the side the tag is on IS the
+    // duct's side. A wrong-side partner now needs to be 4in better to win, and only counts as wrong when
+    // the tag sits clearly off the wall (>=2in) so on-the-wall tags stay neutral.
+    var side=0;
+    for(var mt=0; mt<myTags.length; mt++){ if(Math.abs(myTags[mt].off)>=inToPt(2)){ side=myTags[mt].side; break; } }
     // ONE WALL + a dim tag -> search BOTH sides for a REAL black wall at the tagged WIDTH that also
     // MATCHES THE LENGTH (runs alongside this wall most of its span). Pair it if found. If none -> NO run
     // (never invent the opposite wall: a lone line is not duct).
@@ -1755,7 +1768,9 @@ function buildSegmentRuns(){
       var ov2=Math.min(W0.t1,pb1)-Math.max(W0.t0,pb0);                                           // how much they run alongside
       if(ov2 < Math.max(inToPt(8), 0.55*Math.min(W0.len,wjLen))) continue;                       // must overlap most of the shorter wall
       if(Math.abs(wjLen-W0.len) > 0.5*Math.max(wjLen,W0.len)) continue;                          // lengths must be comparable (matching length)
-      var sc=Math.abs(Math.abs(off)-gapW); if(sc<bestd){ bestd=sc; partner=wj; }
+      var sc=Math.abs(Math.abs(off)-gapW);
+      if(side!==0 && ((off>=0?1:-1)!==side)) sc+=inToPt(4);                                     // wrong-side partner pays a 4in penalty
+      if(sc<bestd){ bestd=sc; partner=wj; }
     }
     if(partner<0) continue;                                                                       // no real opposite wall found -> skip (no synthesis)
     var off1=W0.c, off2, t0r=W0.t0, t1r=W0.t1, synth=false;
@@ -5708,6 +5723,40 @@ function refreshSel(){
     // reasons kept, instead of each pass silently vetoing on its own. OBSERVATION ONLY in this version:
     // nothing is added or removed by the adjudicator; it grades what the build produced so the review
     // strip (and the export) can show WHY each elbow exists and which ones deserve a human look first.
+    // SCALE GUARD (v3.49). Twice a mis-set scale burned a session while pointing blame at innocent
+    // code. Detection note: a naive "bands measure 2x their tags" check FAILED validation -- at the
+    // wrong scale the build re-segments so badly that tags land on unrelated bands (median ratio came
+    // out 1.2, not 2.0, on the real broken build). The robust fingerprint is the AGREEMENT COLLAPSE:
+    // healthy build = 26 of 68 tags agree with the band under them; wrong-scale build = 2 of 73. Fire
+    // on that, and mention the clean-doubling ratio only when it's also present.
+    try{ (function(){
+      var runs9=window.__runs2d||[]; if(!runs9.length) return;
+      var parseable=0, onband=0, agree=0, ratios=[];
+      (tags||[]).forEach(function(t9){ var pd9=(typeof parseTagDims==='function')?parseTagDims(t9.text):null; if(!pd9||!(pd9.w>0)||t9.nx==null) return;
+        parseable++;
+        for(var q9=0;q9<runs9.length;q9++){ var r9=runs9[q9]; var e9=runEnd(r9);
+          var dx9=r9.dir[0],dy9=r9.dir[1],sx9=r9.start[0],sy9=r9.start[1];
+          var vx9=t9.nx-sx9, vy9=t9.ny-sy9;
+          var al9=vx9*dx9+vy9*dy9, L9=Math.hypot(e9.x-sx9,e9.y-sy9);
+          if(al9<-inToPt(6)||al9>L9+inToPt(6)) continue;
+          var pp9=Math.abs(vx9*(-dy9)+vy9*dx9);
+          if(pp9 <= inToPt((r9.widthIn||12)/2+8)){
+            onband++; var rt=(r9.widthIn||0)/pd9.w; ratios.push(rt);
+            if(rt>=0.75&&rt<=1.33) agree++;
+            break; }
+        } });
+      if(parseable<15) return;                                        // not enough tags to judge
+      var rate=agree/parseable;
+      if(rate>=0.12) return;                                          // healthy sheets run ~0.35+
+      ratios.sort(function(a,b){return a-b;}); var med=ratios.length?ratios[Math.floor(ratios.length/2)]:0;
+      var dbl=((med>=1.7&&med<=2.4)?' Bands measure ~DOUBLE their tags \u2014 classic 1/8\u2033-vs-1/4\u2033 slip.':((med>=0.42&&med<=0.6)?' Bands measure ~HALF their tags.':''));
+      console.error('[scale guard] only '+agree+' of '+parseable+' size tags agree with the duct under them ('+onband+' even sit on a band).'+dbl+' The drawing scale is probably set wrong \u2014 check the dropdown and re-run Auto Takeoff.');
+      var bn=document.getElementById('scaleWarn'); if(bn) bn.remove();
+      bn=document.createElement('div'); bn.id='scaleWarn';
+      bn.style.cssText='position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:10000;background:#7e1d24;color:#ffe9ec;border:2px solid #ff5c68;border-radius:10px;padding:10px 16px;font:600 14px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.45);max-width:660px;text-align:center';
+      bn.innerHTML='\u26a0 This build looks broken: only '+agree+' of '+parseable+' size tags match the duct under them.'+dbl+' <b>Check the drawing scale</b>, then re-run Auto Takeoff. <button onclick="this.parentNode.remove()" style="margin-left:10px;background:#3a1418;color:#ffd7dc;border:1px solid #ff5c68;border-radius:6px;cursor:pointer;padding:2px 10px">dismiss</button>';
+      document.body.appendChild(bn);
+    })(); }catch(e9c){}
     try{ window.__adjudicateElbows(); }catch(e){ console.warn('adjudicate',e); }
     try{ window.__applyBankMemory(); }catch(e){ console.warn('bank memory',e); }
     try{ window.__refreshTrackRecord(); }catch(e){}   // recompute for the NEXT build (async; this build used the cached copy)
