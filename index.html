@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.46</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.48</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3429,6 +3429,7 @@ function refreshSel(){
   // record separate from walk-tap's 0-for-6.
   function inferTapsFromEnds(){
     var runs=window.__runs2d||[]; if(runs.length<2) return 0;
+    window.__tapDisp=[];
     function rlen(r){ return runLenIn(r); }
     var made=0, todo=[];
     runs.forEach(function(br){
@@ -3444,16 +3445,18 @@ function refreshSel(){
           var sx=tr.start[0], sy=tr.start[1], dx=tr.dir[0], dy=tr.dir[1];
           var vx=pt[0]-sx, vy=pt[1]-sy;
           var along=ptToIn(vx*dx+vy*dy), Lt=rlen(tr), tw=tr.widthIn||12;
-          var m=Math.max(12,tw);
-          if(along<m || along>Lt-m) return;
           var perp=ptToIn(vx*(-dy)+vy*dx);
           var gap=Math.abs(perp)-tw/2;
-          if(gap<-3 || gap>2.5) return;
+          if(gap<-6 || gap>10) return;                       // not even near this trunk's flank
+          var m=Math.max(12,tw);
+          function _rj(w9){ (window.__tapDisp=window.__tapDisp||[]).push({br:br.id, brW:(br.widthIn||12), brLen:Math.round(rlen(br)), tr:tr.id, trW:tw, gapIn:Math.round(gap*10)/10, alongIn:Math.round(along), x:Math.round(pt[0]), y:Math.round(pt[1]), why:w9}); }
+          if(along<m || along>Lt-m){ _rj('corner zone: '+Math.round(along)+'in along a '+Math.round(Lt)+'in trunk (margin '+Math.round(m)+')'); return; }
+          if(gap<-3 || gap>2.5){ _rj('flank gap '+ (Math.round(gap*10)/10) +'in outside -3..2.5'); return; }
           // BRANCH NARROWER THAN TRUNK (v3.43). Bank verdict on this pass: 1 kept of 13. The fakes were
           // corners read as taps -- and their tell was SIZE: a 12x10 meeting a 12x12 is an airstream
           // turning, not a branch tapping a main. A real tap branch is strictly smaller than its trunk.
           // Costs the rare same-size tap; at 8% precision that trade buys the pass its life back.
-          if((br.widthIn||12) > tw-2) return;
+          if((br.widthIn||12) > tw-2){ _rj('branch '+(br.widthIn||12)+'\u2033 not narrower than trunk '+tw+'\u2033 (corner-fake guard)'); return; }
           // the branch end must POINT at the trunk, not away from it
           var toward=(perp>0? -1:1);
           if((out[0]*(-dy)*-toward+out[1]*dx*-toward)<0.5) return;
@@ -3484,6 +3487,7 @@ function refreshSel(){
           // supply doesn't tap into return because the drafter ran them close together.
           var sysClash=(br.sectionLabel && best.tr.sectionLabel && br.sectionLabel!==best.tr.sectionLabel);
           if(!isCrossing && !sysClash) todo.push({br:br, end:(nm==='end'?'finish':'start'), tr:best.tr, gap:best.gap});
+          else (window.__tapDisp=window.__tapDisp||[]).push({br:br.id, brW:(br.widthIn||12), tr:best.tr.id, trW:(best.tw||12), gapIn:Math.round(best.gap*10)/10, x:Math.round(pt[0]), y:Math.round(pt[1]), why:(isCrossing?'crossing veto: collinear duct resumes past the far flank':'system veto: different section labels')});
         }
       });
     });
@@ -3496,6 +3500,8 @@ function refreshSel(){
       finally{ window.__connSrc=null; }
     });
     if(made) console.log('[takeoff] inferred '+made+' tap(s) from duct touching duct (no detection needed)');
+    if((window.__tapDisp||[]).length){ console.log('[tap] '+window.__tapDisp.length+' near-miss stub(s) NOT tapped \u2014 reasons:');
+      try{ console.table(window.__tapDisp); }catch(_){ console.log(window.__tapDisp); } }
     return made;
   }
   window.__inferTapsFromEnds=inferTapsFromEnds;
@@ -4616,15 +4622,31 @@ function refreshSel(){
         var vouched=comp.some(function(id2){ var r3=_by[id2];
           return (r3.tagIdx&&r3.tagIdx.length) || (r3.pieces||[]).some(function(p3){ return p3.kind==='fitting'; }); });
         if(vouched) return;
+        // AUTO-REMOVE (v3.47). Field verdict after two sheets of rogue cards: they're junk -- 25 cards
+        // is 25 clicks that all end in \u2717. So small isolated components now remove THEMSELVES; only a
+        // big one (40+ LF total, or any single run 20ft+) still asks, because a large continuous network
+        // with no tags is occasionally a real system whose labels didn't read. Console logs every
+        // removal; window.__rogueAutoRemove=false restores click-through if it ever eats something real.
+        var _lf=0, _big=false;
+        comp.forEach(function(id2){ var l4=runLenIn(_by[id2]); _lf+=l4; if(l4>=240) _big=true; });
+        if(window.__rogueAutoRemove!==false && !_big && (_lf/12)<40){
+          window.__runs2d=(window.__runs2d||[]).filter(function(r4){ return comp.indexOf(r4.id)<0; });
+          window.__rogueRemoved=(window.__rogueRemoved||0)+comp.length;
+          window.__rogueRemovedLF=(window.__rogueRemovedLF||0)+Math.round(_lf/12);
+          return;
+        }
         comp.forEach(function(id2){ var r3=_by[id2]; r3._rogue=true;
           var e3=runEnd(r3), mx=(r3.start[0]+e3.x)/2, my=(r3.start[1]+e3.y)/2;
           out.push({runId:r3.id, pieceIdx:null, x:mx, y:my, widthIn:(r3.widthIn||12), kind:'run',
             src:'rogue-sweep', score:0.15, verdict:'suspect',
-            reasons:['isolated band: no size tag, no fittings, connects to nothing tagged',
+            reasons:['LARGE isolated network ('+Math.round(_lf/12)+' LF) \u2014 no tag, no fittings; left for your call',
                      Math.round(runLenIn(r3)/12)+' LF at '+(r3.widthIn||'?')+'\u2033']});
         });
       });
     }catch(e4){ console.warn('rogue sweep',e4); }
+    if(window.__rogueRemoved){ console.log('[rogue] auto-removed '+window.__rogueRemoved+' isolated band(s), '+(window.__rogueRemovedLF||0)+' LF of clutter \u2014 set __rogueAutoRemove=false to review instead');
+      try{ renderItems(); renderPanel(); }catch(_){ }
+      window.__rogueRemoved=0; window.__rogueRemovedLF=0; }
     window.__elbowLedger=out;
     var c={confirmed:0,review:0,suspect:0}; out.forEach(function(e){ c[e.verdict]++; });
     console.log('[adjudicator] fittings graded: '+out.length+' \u00b7 confirmed '+c.confirmed+' \u00b7 review '+c.review+' \u00b7 suspect '+c.suspect);
@@ -7269,6 +7291,7 @@ $('exportBtn').onclick=()=>{
     // the drawing or the takeoff. Export them so the real elbow total is runs-pieces PLUS this list.
     yoloFitStats:(window.__yoloFitStats||null),
     sizechangeDisp:(window.__sizechangeDisp||[]),
+    tapDisp:(window.__tapDisp||[]),
     detDecisions:((window.__yoloDets||[]).map(function(d){
       return {cls:d.cls, score:d.score, lowProp:!!d._lowProp, used:!!d._used,
               x:round(d.nx), y:round(d.ny), notes:(d._notes||[])};
