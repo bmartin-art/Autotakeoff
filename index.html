@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.45</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.46</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3314,9 +3314,18 @@ function refreshSel(){
         var a2=byRun[ids[qi]], b2=byRun[ids[qk]];
         var dot2=a2.out[0]*b2.out[0]+a2.out[1]*b2.out[1];
         if(dot2 > -0.7) continue;
-        var gp=Math.hypot(a2.p[0]-b2.p[0], a2.p[1]-b2.p[1]);
-        if(gp > inToPt(72)) continue;
-        var q=gp*(1.6+dot2);                       // closer + more head-on wins (dot=-1 => weight 0.6)
+        // ALIGNED, not just facing (v3.46). Two side-by-side parallel runs have ends that FACE each
+        // other across the aisle -- selecting on facing alone welded transitions sideways onto the
+        // neighboring duct ("duct on the wrong side"). B must be AHEAD of A's end along its heading,
+        // and the lateral offset must keep the two bands overlapping: the same (wA+wB)/2 rule the
+        // inference pass uses. Misalignment also costs in the score, so in-line pairs beat skewed ones.
+        var vx2=b2.p[0]-a2.p[0], vy2=b2.p[1]-a2.p[1];
+        var along2=vx2*a2.out[0]+vy2*a2.out[1];
+        if(along2 < inToPt(2) || along2 > inToPt(72)) continue;
+        var perp2=Math.abs(vx2*(-a2.out[1])+vy2*a2.out[0]);
+        var wA2=(a2.r.widthIn||12), wB2=(b2.r.widthIn||12);
+        if(perp2 > inToPt((wA2+wB2)/2)) continue;
+        var q=(along2 + 2.5*perp2)*(1.6+dot2);
         if(q<bestQ){ bestQ=q; A=a2; B=b2; }
       }
       if(!A){ why(ids.length===2?'run ends do not face each other (corner, not an in-line step)':'no facing pair among '+ids.length+' nearby ends'); return; }
