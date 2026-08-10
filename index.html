@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.53</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.54</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -1708,9 +1708,18 @@ function buildSegmentRuns(){
     var gp=gband(p.gap), gq=gband(q.gap); if(gp!==gq) return gp-gq;             // similar symmetry: nearest partner
     return q.ov-p.ov;
   });
-  var used={}, usedTags={}, runs=[], squares=0, _acceptedWalls={};
+  // WALLS HAVE TWO FACES (v3.54). Field case: a 12x6 ran directly UNDER a 10x12, sharing the boundary
+  // wall -- but used[] claimed the whole wall for the 10x12, so the 12x6's true, tag-confirmed pair
+  // could never form, and its orphaned second wall paired DOWNWARD into a 16in phantom. A wall line
+  // bounds one duct on each side; stacked/adjacent duct is normal drafting. Claims are now per FACE
+  // (wall index + which side its partner is on), so one line can serve the duct above and the duct
+  // below -- while the same face still can't be claimed twice.
+  var faceUsed={}, usedTags={}, runs=[], squares=0, _acceptedWalls={};
+  function _face(i,sgn){ return i+'|'+(sgn>=0?1:-1); }
   function _awKey(P){ return P.axis==='horizontal'?'H':(P.axis==='vertical'?'V':('D'+Math.round(((P.A&&P.A.th)||0)*20))); }
-  cands.forEach(function(P){ if(used[P.ai]||used[P.bi]) return;
+  cands.forEach(function(P){
+    var _sgn=(P.off2-P.off1)>=0?1:-1;                                          // which side of wall A its partner sits
+    if(faceUsed[_face(P.ai,_sgn)]||faceUsed[_face(P.bi,-_sgn)]) return;
     if(P.lenP<inToPt(8)) return;                                               // too small to be a run
     // NO WALL INSIDE THE BAND (v3.37). Admitting shorter segments doubled the chain pool, and pairing
     // started spanning ACROSS ducts: one duct's wall paired with a parallel line far beyond it, putting
@@ -1734,12 +1743,26 @@ function buildSegmentRuns(){
     }
     var freeMatch=(P.matchTis||[]).filter(function(ti){return !usedTags[ti];}); // width-matching tags not already claimed by a better run
     var eff=freeMatch.length>0;                                                 // CONFIRMED = this run can claim a width-matching tag (one tag -> one run)
+    // A TAG INSIDE THE BAND THAT DISAGREES kills an unconfirmed pair (v3.54): tags sit ON their duct,
+    // so a readable size strictly inside this band contradicting the wall gap (12x6 inside a 16in
+    // band, field case) means the band spans across a duct, not encloses one. Strictly-interior only
+    // (2in margin), so tags on the shared wall of a NEIGHBOR duct stay harmless.
+    if(!eff){
+      var _lo2=Math.min(P.off1,P.off2)+inToPt(2), _hi2=Math.max(P.off1,P.off2)-inToPt(2);
+      var _contra=(P.inside||[]).some(function(o){
+        var of3=P.A.nxn*o.nx+P.A.nyn*o.ny;
+        if(of3<=_lo2||of3>=_hi2) return false;
+        return !((P.gIn-o.dims.w)<=Math.max(3,P.gIn*0.2) && (o.dims.w-P.gIn)<=2);
+      });
+      if(_contra){ squares++; return; }
+    }
     if(tagOnly && !eff){ squares++; return; }
     if(!eff && P.lenP < ASPECT*P.gap){ squares++; return; }                     // squarish pocket between ducts, not a run
     if(eff && P.lenP < 1.02*P.gap){ squares++; return; }                        // even a tagged blob must be longer than wide
     if(!eff){ var _wS=snapDuctW(P.gap/k6), _lf=(P.lenP/k6)/12;                    // NO TAG -> the gap must be a plausible untagged-duct size, else it's not duct
       if(_wS>32 || _wS<5){ squares++; return; } }                                 // >32" (architectural span) or <5" (doubled wall-line / thickness, not a rect duct) = phantom pair
-    used[P.ai]=1; used[P.bi]=1; freeMatch.forEach(function(ti){ usedTags[ti]=1; }); // claim the matched tag(s) so nothing else can confirm on them
+    faceUsed[_face(P.ai,_sgn)]=1; faceUsed[_face(P.bi,-_sgn)]=1;
+    freeMatch.forEach(function(ti){ usedTags[ti]=1; }); // claim the matched tag(s) so nothing else can confirm on them
     (_acceptedWalls[_awKey(P)]=_acceptedWalls[_awKey(P)]||[]).push({fix:P.off1,t0:P.t0r,t1:P.t1r},{fix:P.off2,t0:P.t0r,t1:P.t1r});
     function pt(off,t){ return [off*P.A.nxn+t*P.A.ux, off*P.A.nyn+t*P.A.uy]; }
     var corners=[pt(P.off1,P.t0r),pt(P.off1,P.t1r),pt(P.off2,P.t1r),pt(P.off2,P.t0r)];
@@ -1754,7 +1777,8 @@ function buildSegmentRuns(){
   var SWTOL=Math.max(3, inToPt(5));   // partner-distance tolerance (~5")
   var swCount=0, swSynth=0;
   for(var wi=0; wi<walls.length; wi++){
-    if(used[wi]) continue; var W0=walls[wi]; if(W0.len < inToPt(10)) continue;
+    if(faceUsed[_face(wi,1)]&&faceUsed[_face(wi,-1)]) continue;                 // both faces spoken for
+    var W0=walls[wi]; if(W0.len < inToPt(10)) continue;
     var myTags=[];
     for(var ti2=0; ti2<tags.length; ti2++){ var tg2=tags[ti2]; if(tg2.nx==null) continue; var pd2=parseTagDims(tg2.text); if(!pd2) continue;
       var ax2=W0.ux*tgX(tg2)+W0.uy*tgY(tg2); if(ax2<W0.t0-PADAX||ax2>W0.t1+PADAX) continue;
@@ -1775,7 +1799,8 @@ function buildSegmentRuns(){
     // MATCHES THE LENGTH (runs alongside this wall most of its span). Pair it if found. If none -> NO run
     // (never invent the opposite wall: a lone line is not duct).
     var partner=-1, bestd=1e9;
-    for(var wj=0; wj<walls.length; wj++){ if(wj===wi||used[wj]) continue; var Wj=walls[wj];
+    for(var wj=0; wj<walls.length; wj++){ if(wj===wi) continue;
+      if(faceUsed[_face(wj,1)]&&faceUsed[_face(wj,-1)]) continue; var Wj=walls[wj];
       if(adiff(W0.th,Wj.th)>PAIRANG) continue;
       var off=W0.nxn*Wj.mid[0]+W0.nyn*Wj.mid[1]-W0.c;                                          // either side (left or right)
       if(Math.abs(Math.abs(off)-gapW)>SWTOL) continue;                                          // at the tag-specified width
@@ -1792,8 +1817,9 @@ function buildSegmentRuns(){
     var off1=W0.c, off2, t0r=W0.t0, t1r=W0.t1, synth=false;
     var PW=walls[partner]; off2=W0.nxn*PW.mid[0]+W0.nyn*PW.mid[1];
     var qb0=W0.ux*PW.A[0]+W0.uy*PW.A[1], qb1=W0.ux*PW.B[0]+W0.uy*PW.B[1];
-    t0r=Math.min(t0r,Math.min(qb0,qb1)); t1r=Math.max(t1r,Math.max(qb0,qb1)); used[partner]=1;
-    used[wi]=1; swCount++;
+    t0r=Math.min(t0r,Math.min(qb0,qb1)); t1r=Math.max(t1r,Math.max(qb0,qb1));
+    var _sSgn=(off2-off1)>=0?1:-1;
+    faceUsed[_face(wi,_sSgn)]=1; faceUsed[_face(partner,-_sSgn)]=1; swCount++;
     var thn2=W0.th, ax3=(thn2<0.35||thn2>Math.PI-0.35)?'horizontal':(Math.abs(thn2-Math.PI/2)<0.35?'vertical':'diagonal');
     function pt2(o,t){ return [o*W0.nxn+t*W0.ux, o*W0.nyn+t*W0.uy]; }
     runs.push({axis:ax3, widthIn:Math.round(wIn), lenP:(t1r-t0r),
