@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.54</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.55</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -1743,6 +1743,14 @@ function buildSegmentRuns(){
     }
     var freeMatch=(P.matchTis||[]).filter(function(ti){return !usedTags[ti];}); // width-matching tags not already claimed by a better run
     var eff=freeMatch.length>0;                                                 // CONFIRMED = this run can claim a width-matching tag (one tag -> one run)
+    // TWIN FLOOR (v3.55). Two-faced walls (v3.54) opened a hole the twin SORT can't close: a phantom
+    // riding the free outward face of a real duct's wall has no competitor, so sort order never gets a
+    // vote -- field case: 23in of scattered ink paired with a 182in wall (13% mutual coverage) built a
+    // 14in band the full length of the duct's flank ("lines beside lines"). Sorting handles contests;
+    // ACCEPTANCE needs the same physics as a floor: an unconfirmed pair's walls must mutually cover
+    // >=45% of each other. Real twins run ~1.0; a main whose far wall breaks into halves still clears
+    // (~0.47); scatter-chains don't come close. Tag-confirmed pairs stay exempt -- the tag vouches.
+    if(!eff && ovSym(P)<0.45){ squares++; return; }
     // A TAG INSIDE THE BAND THAT DISAGREES kills an unconfirmed pair (v3.54): tags sit ON their duct,
     // so a readable size strictly inside this band contradicting the wall gap (12x6 inside a 16in
     // band, field case) means the band spans across a duct, not encloses one. Strictly-interior only
