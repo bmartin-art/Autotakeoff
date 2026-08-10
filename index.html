@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.50</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.52</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -1252,7 +1252,13 @@ function classify(){
     for(let i=0;i<meta.length;i++){ const a=meta[i];
       for(let j=i+1;j<meta.length;j++){ const b=meta[j];
         let da=Math.abs(a.ang-b.ang); da=Math.min(da,180-da); if(da>7) continue;
-        const gap=Math.abs((b.mx-a.mx)*a.nx+(b.my-a.my)*a.ny); if(gap<minGap||gap>maxGap) continue;
+        // PHYSICAL gap range for diagonals (v3.51): this pass rode the minGap/maxGap SLIDERS, so a
+        // settings reset silently changed which diagonal walls classified as duct -- the 10x8 offset's
+        // 41in walls traced one session and vanished the next. With the scale known, duct is 4-42in
+        // wide at ANY slider position; sliders only govern when no scale is set yet.
+        const gMinD=(typeof scaleIPF!=='undefined'&&scaleIPF>0)?4*6*scaleIPF:minGap;
+        const gMaxD=(typeof scaleIPF!=='undefined'&&scaleIPF>0)?42*6*scaleIPF:maxGap;
+        const gap=Math.abs((b.mx-a.mx)*a.nx+(b.my-a.my)*a.ny); if(gap<gMinD||gap>gMaxD) continue;
         const bt1=(b.s.ux1-a.mx)*a.ux+(b.s.uy1-a.my)*a.uy, bt2=(b.s.ux2-a.mx)*a.ux+(b.s.uy2-a.my)*a.uy;
         const blo=Math.min(bt1,bt2), bhi=Math.max(bt1,bt2);
         const ov=Math.min(a.hi,bhi)-Math.max(a.lo,blo); const ml=Math.min(a.hi-a.lo,bhi-blo);
@@ -4645,10 +4651,23 @@ function refreshSel(){
         var _lf=0, _big=false;
         comp.forEach(function(id2){ var l4=runLenIn(_by[id2]); _lf+=l4; if(l4>=240) _big=true; });
         if(window.__rogueAutoRemove!==false && !_big && (_lf/12)<40){
-          window.__runs2d=(window.__runs2d||[]).filter(function(r4){ return comp.indexOf(r4.id)<0; });
-          window.__rogueRemoved=(window.__rogueRemoved||0)+comp.length;
-          window.__rogueRemovedLF=(window.__rogueRemovedLF||0)+Math.round(_lf/12);
-          return;
+          // FIELD CHECK (v3.51): 8 of 25 rogue CARDS were kept by the human -- a third of what this rule
+          // flags is real duct, so the silent removals are eating real duct at a similar rate. Every
+          // auto-removal is now logged with position and size so it can be audited, and any component
+          // the decision memory has ever seen KEPT here is exempt.
+          var _mem=false;
+          try{ (window.__rogueKeepMem||[]).forEach(function(km){
+            comp.forEach(function(id2){ var r3=_by[id2]; var e3=runEnd(r3);
+              var mx=(r3.start[0]+e3.x)/2, my=(r3.start[1]+e3.y)/2;
+              if(Math.hypot(km.x-mx,km.y-my)<inToPt(Math.max(12,r3.widthIn||12))) _mem=true; }); }); }catch(_){}
+          if(!_mem){
+            (window.__rogueLog=window.__rogueLog||[]).push(comp.map(function(id2){ var r3=_by[id2]; var e3=runEnd(r3);
+              return {w:r3.widthIn||null, lf:Math.round(runLenIn(r3)/12), x:Math.round((r3.start[0]+e3.x)/2), y:Math.round((r3.start[1]+e3.y)/2)}; }));
+            window.__runs2d=(window.__runs2d||[]).filter(function(r4){ return comp.indexOf(r4.id)<0; });
+            window.__rogueRemoved=(window.__rogueRemoved||0)+comp.length;
+            window.__rogueRemovedLF=(window.__rogueRemovedLF||0)+Math.round(_lf/12);
+            return;
+          }
         }
         comp.forEach(function(id2){ var r3=_by[id2]; r3._rogue=true;
           var e3=runEnd(r3), mx=(r3.start[0]+e3.x)/2, my=(r3.start[1]+e3.y)/2;
@@ -4660,6 +4679,7 @@ function refreshSel(){
       });
     }catch(e4){ console.warn('rogue sweep',e4); }
     if(window.__rogueRemoved){ console.log('[rogue] auto-removed '+window.__rogueRemoved+' isolated band(s), '+(window.__rogueRemovedLF||0)+' LF of clutter \u2014 set __rogueAutoRemove=false to review instead');
+      try{ console.table((window.__rogueLog||[]).flat()); }catch(_){}
       try{ renderItems(); renderPanel(); }catch(_){ }
       window.__rogueRemoved=0; window.__rogueRemovedLF=0; }
     window.__elbowLedger=out;
@@ -4710,6 +4730,21 @@ function refreshSel(){
   // the rejection tables (taps, sizechanges), your cross-print track record, and the build fingerprint.
   window.__downloadReport=function(){
     function esc(x){ return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+    // ink crop at an nvt point -- the report shows WHAT the tool was looking at, not just coordinates
+    function inkAt(x,y,wIn,px){
+      try{
+        var cv=document.getElementById('pdfCanvas'); if(!cv||!cv.width||!window.__nvt||!viewport) return '';
+        var m=window.__nvt,a=m[0],b=m[1],c=m[2],d=m[3],e5=m[4],f5=m[5],det=(a*d-b*c)||1;
+        var ux=(d*(x-e5)-c*(y-f5))/det, uy=(-b*(x-e5)+a*(y-f5))/det;
+        var P=applyM(viewport.transform,ux,uy);
+        var half=Math.max(55, inToPt((wIn||12)*3.5)*((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1)));
+        var o=document.createElement('canvas'); o.width=o.height=(px||110);
+        var x2=o.getContext('2d'); x2.fillStyle='#fff'; x2.fillRect(0,0,o.width,o.height);
+        x2.drawImage(cv,P[0]-half,P[1]-half,half*2,half*2,0,0,o.width,o.height);
+        x2.strokeStyle='#e11'; x2.lineWidth=2; x2.beginPath(); x2.arc(o.width/2,o.height/2,Math.max(10,o.width*0.13),0,7); x2.stroke();
+        return '<img src="'+o.toDataURL('image/jpeg',0.62)+'" style="width:'+(px||110)+'px;height:'+(px||110)+'px;border:1px solid #ccd6df;border-radius:6px;vertical-align:top">';
+      }catch(_){ return ''; }
+    }
     function bar(f,color){ var w=Math.max(2,Math.round(f*100)); return '<span style="display:inline-block;height:10px;width:'+w+'px;background:'+color+';border-radius:3px;vertical-align:middle"></span>'; }
     var dets=window.__yoloDets||[], led=window.__elbowLedger||[], runs=window.__runs2d||[];
     var h='<!doctype html><meta charset="utf-8"><title>Takeoff build report</title><body style="font:13px system-ui;color:#1c2733;max-width:1060px;margin:24px auto;padding:0 14px">';
@@ -4727,6 +4762,22 @@ function refreshSel(){
     var lf=0; runs.forEach(function(r){ lf+=runLenIn(r)/12; });
     h+='<h2 style="font-size:15px;border-bottom:1px solid #d8e0e8;padding-bottom:4px">Build fingerprint</h2>';
     h+='<div>'+runs.length+' runs \u00b7 '+Math.round(lf)+' LF \u00b7 scale '+esc(typeof scaleIPF!=='undefined'?scaleIPF:'?')+' in/ft \u00b7 size tags: '+parseable+' readable, '+onband+' on a band, <b>'+agree+' agree with the duct under them</b>'+(parseable?(' ('+Math.round(100*agree/parseable)+'%)'):'')+'</div>';
+    // BUILD-OVER-BUILD: compare against the last report of this doc+page, so "did that update help"
+    // answers itself in one line of green/red deltas.
+    try{
+      var dkey='bt-lastBuild:'+(window.__docName||document.title||'')+':'+(typeof pageNum!=='undefined'?pageNum:'');
+      var prev=null; try{ prev=JSON.parse(localStorage.getItem(dkey)||'null'); }catch(_){}
+      var cur={runs:runs.length, lf:Math.round(lf), matched:0, agree:agree, when:new Date().toISOString()};
+      runs.forEach(function(r){ if(r.tagIdx&&r.tagIdx.length) cur.matched++; });
+      if(prev){
+        function dchip(lbl,a,b,goodUp){ var dd=a-b; if(!dd) return lbl+' \u00b1 0';
+          var good=(dd>0)===!!goodUp; return lbl+' <b style="color:'+(good?'#2c6e49':'#a3242f')+'">'+(dd>0?'+':'')+dd+'</b>'; }
+        h+='<div style="margin-top:4px;color:#41505f">vs last build ('+esc((prev.when||'').slice(0,16).replace('T',' '))+'): '
+          +dchip('runs',cur.runs,prev.runs,true)+' \u00b7 '+dchip('LF',cur.lf,prev.lf,true)+' \u00b7 '
+          +dchip('tags matched',cur.matched,prev.matched,true)+' \u00b7 '+dchip('tag agreement',cur.agree,prev.agree,true)+'</div>';
+      }
+      localStorage.setItem(dkey, JSON.stringify(cur));
+    }catch(_){}
     // ---- the model's eye ----
     h+='<h2 style="font-size:15px;border-bottom:1px solid #d8e0e8;padding-bottom:4px">The model\u2019s eye \u2014 every detection and what happened to it</h2>';
     var byCls={};
@@ -4752,7 +4803,8 @@ function refreshSel(){
       var arr=grp[G[0]]||[]; if(!arr.length) return;
       h+='<h3 style="font-size:13px;color:'+G[2]+';margin:12px 0 4px">'+G[1]+' \u00b7 '+arr.length+'</h3><table style="border-collapse:collapse;width:100%">';
       arr.forEach(function(e){
-        h+='<tr style="border-bottom:1px solid #eef2f6"><td style="padding:3px 6px;width:170px;vertical-align:top"><b>'+esc((e.kind||'').toUpperCase())+'</b> ['+esc(e.src||'?')+']<br>'+bar(e.score||0,G[2])+' '+Math.round((e.score||0)*100)+'%'+(e.human?('<br><b>you: '+esc(e.human)+'</b>'):'')+'</td>'
+        h+='<tr style="border-bottom:1px solid #eef2f6"><td style="padding:3px 4px;width:116px;vertical-align:top">'+inkAt(e.x,e.y,e.widthIn,110)+'</td>'
+          +'<td style="padding:3px 6px;width:160px;vertical-align:top"><b>'+esc((e.kind||'').toUpperCase())+'</b> ['+esc(e.src||'?')+']<br>'+bar(e.score||0,G[2])+' '+Math.round((e.score||0)*100)+'%'+(e.human?('<br><b>you: '+esc(e.human)+'</b>'):'')+'</td>'
           +'<td style="padding:3px 6px;color:#41505f">'+esc((e.reasons||[]).join(' \u00b7 '))+'</td></tr>';
       });
       h+='</table>';
@@ -4763,11 +4815,30 @@ function refreshSel(){
       var cnt={}; arr.forEach(function(r){ var k=String(r.why||'').split(':')[0]; cnt[k]=(cnt[k]||0)+1; });
       h+='<div style="margin:4px 0 8px">'+Object.keys(cnt).sort(function(a,b){return cnt[b]-cnt[a];}).map(function(k){ return esc(k)+' \u00d7'+cnt[k]; }).join(' \u00b7 ')+'</div>';
       h+='<table style="border-collapse:collapse;width:100%">';
-      arr.slice(0,80).forEach(function(r){ h+='<tr style="border-bottom:1px solid #eef2f6">'+cols.map(function(c){ return '<td style="padding:2px 6px;color:#41505f">'+esc(r[c]!=null?r[c]:'')+'</td>'; }).join('')+'</tr>'; });
+      arr.slice(0,60).forEach(function(r){ h+='<tr style="border-bottom:1px solid #eef2f6"><td style="padding:2px 4px">'+((r.x!=null&&r.y!=null)?inkAt(r.x,r.y,r.trW||r.brW||12,84):'')+'</td>'+cols.map(function(c){ return '<td style="padding:2px 6px;color:#41505f">'+esc(r[c]!=null?r[c]:'')+'</td>'; }).join('')+'</tr>'; });
       h+='</table>'+(arr.length>80?('<div style="color:#5a6b7d">\u2026and '+(arr.length-80)+' more (full list in the Duct JSON export)</div>'):'');
     }
     disp('Taps considered but refused', window.__tapDisp, ['brW','trW','gapIn','alongIn','why']);
     disp('Size changes seen but not inserted', window.__sizechangeDisp, ['score','x','y','why']);
+    // ---- misses: traced duct no run covers ----
+    var miss=window.__diagMissing||[];
+    if(miss.length){
+      h+='<h2 style="font-size:15px;border-bottom:1px solid #d8e0e8;padding-bottom:4px">Traced duct NO RUN covers \u2014 the misses \u00b7 '+miss.length+'</h2>';
+      h+='<div style="color:#5a6b7d;margin:2px 0 6px">Green exists here; the build left it. Worst coverage first \u2014 these are the chunks to chase.</div><table style="border-collapse:collapse;width:100%">';
+      miss.slice(0,40).forEach(function(mrow){
+        h+='<tr style="border-bottom:1px solid #eef2f6"><td style="padding:2px 4px">'+inkAt(mrow.midX,mrow.midY,14,110)+'</td>'
+          +'<td style="padding:2px 6px;color:#41505f;vertical-align:top">band '+esc(mrow.band)+' \u00b7 '+esc(mrow.len)+' long \u00b7 only '+esc(mrow.covered)+' covered \u00b7 at ('+mrow.midX+','+mrow.midY+')</td></tr>';
+      });
+      h+='</table>'+(miss.length>40?('<div style="color:#5a6b7d">\u2026and '+(miss.length-40)+' more</div>'):'');
+    }
+    // ---- what the rogue sweep ate ----
+    var rg=(window.__rogueLog||[]).flat?( (window.__rogueLog||[]).flat() ):[];
+    if(rg.length){
+      h+='<h2 style="font-size:15px;border-bottom:1px solid #d8e0e8;padding-bottom:4px">Auto-removed as rogue \u00b7 '+rg.length+' band(s)</h2>';
+      h+='<div style="color:#5a6b7d;margin:2px 0 6px">A third of rogue CARDS were real duct in field data \u2014 audit these. If one is real, re-run with __rogueAutoRemove=false and keep it; memory then shields it.</div><table style="border-collapse:collapse;width:100%">';
+      rg.slice(0,40).forEach(function(rr2){ h+='<tr style="border-bottom:1px solid #eef2f6"><td style="padding:2px 4px">'+inkAt(rr2.x,rr2.y,rr2.w||12,84)+'</td><td style="padding:2px 6px;color:#41505f;vertical-align:top">'+esc(rr2.w||'?')+'\u2033 \u00b7 '+esc(rr2.lf)+' LF \u00b7 at ('+rr2.x+','+rr2.y+')</td></tr>'; });
+      h+='</table>';
+    }
     // ---- track record ----
     var tr=window.__trackRecord||{}; var keys=Object.keys(tr).filter(function(k){return tr[k].n>=5;});
     if(keys.length){
@@ -4869,7 +4940,8 @@ function refreshSel(){
             if(b.kind!==e.kind) continue;
             if(Math.hypot((b.x||0)-e.x,(b.y||0)-e.y)>tolPt) continue;
             if(b.human==='deleted'){ e.reasons.push('memory: you deleted this here before'); window.__stripDel(i,true); vetoed++; }
-            else { e.reasons.push('memory: you kept this here before'); window.__stripKeep(i,true); confirmed++; }
+            else { e.reasons.push('memory: you kept this here before'); window.__stripKeep(i,true); confirmed++;
+              if(e.kind==='run') (window.__rogueKeepMem=window.__rogueKeepMem||[]).push({x:e.x,y:e.y}); }
             break;
           }
         });
@@ -5533,6 +5605,7 @@ function refreshSel(){
       if(!dup) keep.push(t); }); tags=keep; })();
     try{ buildSegmentRuns(); }catch(e){}                                  // centerlines (single-wall rescue already baked in)
     var sg=window.__sgRuns||[]; if(!sg.length){ setStatus('No duct centerlines — mark/scan duct first.'); return; }
+    var __dgSG=sg.filter(function(r){return r.axis==='diagonal';}).length;
     // 1) centerline fragments
     var frags=[]; sg.forEach(function(r){ var c=r.corners; if(!c||c.length<4) return;
       frags.push({r:r, A:[(c[0][0]+c[3][0])/2,(c[0][1]+c[3][1])/2], B:[(c[1][0]+c[2][0])/2,(c[1][1]+c[2][1])/2], axis:r.axis, widthIn:r.widthIn, tagIdx:r.tagIdx||[], singleWall:!!r.singleWall, synthetic:!!r.synthetic}); });
@@ -5545,6 +5618,8 @@ function refreshSel(){
     frags.forEach(function(f,idx){ var mx=(f.A[0]+f.B[0])/2, my=(f.A[1]+f.B[1])/2, k;
       if(f.axis==='vertical') k='V'+Math.round(mx/__BKT); else if(f.axis==='horizontal') k='H'+Math.round(my/__BKT); else k='D'+idx;
       (groups[k]=groups[k]||[]).push(f); });
+    var __dgFR=frags.filter(function(f){return f.axis==='diagonal';}).length;
+    var __dgCH=Object.keys(groups).filter(function(k){return k.charAt(0)==='D';}).length;
     window.__runs2d=[]; var ci=0, single=0, scaled=0, trans=0, taps=0, elbows=0;
     var GAPMAX=Math.max(inToPt(48),60);                                   // bridge gaps up to ~4' onto a colinear neighbor
     // ELBOW PLACEMENT PHYSICS (not per-print tuning): a chain is COLINEAR fragments, so a 90 can only
@@ -5840,6 +5915,9 @@ function refreshSel(){
       bn.innerHTML='\u26a0 This build looks broken: only '+agree+' of '+parseable+' size tags match the duct under them.'+dbl+' <b>Check the drawing scale</b>, then re-run Auto Takeoff. <button onclick="this.parentNode.remove()" style="margin-left:10px;background:#3a1418;color:#ffd7dc;border:1px solid #ff5c68;border-radius:6px;cursor:pointer;padding:2px 10px">dismiss</button>';
       document.body.appendChild(bn);
     })(); }catch(e9c){}
+    try{ var __dgRN=(window.__runs2d||[]).filter(function(r){return Math.abs(r.dir[0])>0.2&&Math.abs(r.dir[1])>0.2;}).length;
+      console.log('[diag] diagonal pipeline \u2014 sgRuns bands: '+__dgSG+' \u00b7 walk fragments: '+__dgFR+' \u00b7 D-chains: '+__dgCH+' \u00b7 runs built: '+__dgRN+(__dgSG&&!__dgRN?'  <-- dying inside the walk':(!__dgSG?'  <-- dying at classification/pairing (nothing reaches the walk)':'')));
+    }catch(_){}
     try{ window.__adjudicateElbows(); }catch(e){ console.warn('adjudicate',e); }
     try{ window.__applyBankMemory(); }catch(e){ console.warn('bank memory',e); }
     try{ window.__refreshTrackRecord(); }catch(e){}   // recompute for the NEXT build (async; this build used the cached copy)
@@ -5901,8 +5979,9 @@ function refreshSel(){
           if(hit) cov++; }
         var frac=cov/(N+1);
         if(frac<0.85) missing.push({band:si,len:ftIn(Lpt/ppi),covered:Math.round(frac*100)+'%',midX:Math.round((a[0]+b[0])/2),midY:Math.round((a[1]+b[1])/2)}); });
+      window.__diagMissing=missing.slice().sort(function(x,y){return parseInt(x.covered)-parseInt(y.covered);});
       if(missing.length){ console.group('%c\u2301 MISSING \u2014 '+missing.length+' band(s) <85% covered by any run','color:#ff9500;font-weight:700');
-        console.table(missing.sort(function(x,y){return parseInt(x.covered)-parseInt(y.covered);})); console.groupEnd(); }
+        console.table(window.__diagMissing); console.groupEnd(); }
       else console.log('%c\u2301 missing: none (all bands \u226585% covered)','color:#6c6');
       // C) GAPS — colinear runs on the same line with a straight break between them
       var gaps=[];
@@ -7424,6 +7503,7 @@ $('exportBtn').onclick=()=>{
     yoloFitStats:(window.__yoloFitStats||null),
     sizechangeDisp:(window.__sizechangeDisp||[]),
     tapDisp:(window.__tapDisp||[]),
+    rogueRemoved:((window.__rogueLog||[]).flat()),
     detDecisions:((window.__yoloDets||[]).map(function(d){
       return {cls:d.cls, score:d.score, lowProp:!!d._lowProp, used:!!d._used,
               x:round(d.nx), y:round(d.ny), notes:(d._notes||[])};
