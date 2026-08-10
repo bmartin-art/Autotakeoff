@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.49</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.50</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -4703,6 +4703,88 @@ function refreshSel(){
         console.log('[bank] exported '+rq.result.length+' review decision(s)');
       }; }); }catch(e){ console.warn('bank export',e); }
   };
+  // ---------- BUILD REPORT (v3.50): the whole decision chain as one downloadable page ----------
+  // "How is the YOLO seeing the fittings, and what was the logic" -- every build already records it;
+  // this compiles it into a readable HTML report: model's eye (per-class detections, scores, what each
+  // pass did with each box), the fitting ledger grouped by machine verdict with full evidence chains,
+  // the rejection tables (taps, sizechanges), your cross-print track record, and the build fingerprint.
+  window.__downloadReport=function(){
+    function esc(x){ return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+    function bar(f,color){ var w=Math.max(2,Math.round(f*100)); return '<span style="display:inline-block;height:10px;width:'+w+'px;background:'+color+';border-radius:3px;vertical-align:middle"></span>'; }
+    var dets=window.__yoloDets||[], led=window.__elbowLedger||[], runs=window.__runs2d||[];
+    var h='<!doctype html><meta charset="utf-8"><title>Takeoff build report</title><body style="font:13px system-ui;color:#1c2733;max-width:1060px;margin:24px auto;padding:0 14px">';
+    h+='<h1 style="font-size:20px">Takeoff build report</h1>';
+    h+='<div style="color:#5a6b7d">'+esc(window.__docName||document.title||'')+' \u00b7 page '+esc(typeof pageNum!=='undefined'?pageNum:'?')+' \u00b7 '+new Date().toLocaleString()+' \u00b7 app '+esc((document.getElementById('verBadge')||{}).textContent||'')+'</div>';
+    // ---- fingerprint ----
+    var parseable=0,agree=0,onband=0;
+    (tags||[]).forEach(function(t9){ var pd9=(typeof parseTagDims==='function')?parseTagDims(t9.text):null; if(!pd9||!(pd9.w>0)||t9.nx==null) return; parseable++;
+      for(var q9=0;q9<runs.length;q9++){ var r9=runs[q9]; var e9=runEnd(r9);
+        var dx9=r9.dir[0],dy9=r9.dir[1],vx9=t9.nx-r9.start[0],vy9=t9.ny-r9.start[1];
+        var al9=vx9*dx9+vy9*dy9, L9=Math.hypot(e9.x-r9.start[0],e9.y-r9.start[1]);
+        if(al9<-inToPt(6)||al9>L9+inToPt(6)) continue;
+        if(Math.abs(vx9*(-dy9)+vy9*dx9) <= inToPt((r9.widthIn||12)/2+8)){ onband++; var rt=(r9.widthIn||0)/pd9.w; if(rt>=0.75&&rt<=1.33) agree++; break; }
+      } });
+    var lf=0; runs.forEach(function(r){ lf+=runLenIn(r)/12; });
+    h+='<h2 style="font-size:15px;border-bottom:1px solid #d8e0e8;padding-bottom:4px">Build fingerprint</h2>';
+    h+='<div>'+runs.length+' runs \u00b7 '+Math.round(lf)+' LF \u00b7 scale '+esc(typeof scaleIPF!=='undefined'?scaleIPF:'?')+' in/ft \u00b7 size tags: '+parseable+' readable, '+onband+' on a band, <b>'+agree+' agree with the duct under them</b>'+(parseable?(' ('+Math.round(100*agree/parseable)+'%)'):'')+'</div>';
+    // ---- the model's eye ----
+    h+='<h2 style="font-size:15px;border-bottom:1px solid #d8e0e8;padding-bottom:4px">The model\u2019s eye \u2014 every detection and what happened to it</h2>';
+    var byCls={};
+    dets.forEach(function(d){ if(d.nx==null) return; var c=(d.cls||'?'); (byCls[c]=byCls[c]||[]).push(d); });
+    Object.keys(byCls).sort().forEach(function(c){
+      var arr=byCls[c]; var used=arr.filter(function(d){return d._used;}).length;
+      var hi=arr.filter(function(d){return (d.score||0)>=0.5;}).length;
+      h+='<h3 style="font-size:13px;margin:12px 0 4px">'+esc(c)+' \u00b7 '+arr.length+' box(es) \u00b7 '+hi+' scoring \u22650.50 \u00b7 '+used+' consumed by a pass</h3>';
+      h+='<table style="border-collapse:collapse;width:100%">';
+      arr.sort(function(a,b){return (b.score||0)-(a.score||0);}).forEach(function(d){
+        var fate=(d._notes&&d._notes.length)?d._notes.join(' \u2192 '):(d._used?'consumed (no note)':'NEVER CONSIDERED by any pass');
+        var col=d._used?'#2c6e49':((d._notes&&d._notes.length)?'#8a6d1a':'#7e2c35');
+        h+='<tr style="border-bottom:1px solid #eef2f6"><td style="padding:2px 6px;width:150px">'+bar(Math.min(1,d.score||0),col)+' '+((d.score||0).toFixed(2))+(d._lowProp?' <i>low</i>':'')+'</td><td style="padding:2px 6px;color:#41505f">'+esc(fate)+'</td></tr>';
+      });
+      h+='</table>';
+    });
+    if(!Object.keys(byCls).length) h+='<div style="color:#7e2c35">No detections on this sheet \u2014 the model was blind here; everything below came from geometry.</div>';
+    // ---- fittings ledger ----
+    h+='<h2 style="font-size:15px;border-bottom:1px solid #d8e0e8;padding-bottom:4px">Fittings \u2014 the logic per placement</h2>';
+    var grp={no:[],you:[],yes:[]};
+    led.forEach(function(e){ (grp[e.machine||'you']=grp[e.machine||'you']||[]).push(e); });
+    [['no','\u2716 Algorithm said NO','#7e2c35'],['you','\u2754 Left for your judgment','#8a6d1a'],['yes','\u2714 Algorithm vouched YES','#2c6e49']].forEach(function(G){
+      var arr=grp[G[0]]||[]; if(!arr.length) return;
+      h+='<h3 style="font-size:13px;color:'+G[2]+';margin:12px 0 4px">'+G[1]+' \u00b7 '+arr.length+'</h3><table style="border-collapse:collapse;width:100%">';
+      arr.forEach(function(e){
+        h+='<tr style="border-bottom:1px solid #eef2f6"><td style="padding:3px 6px;width:170px;vertical-align:top"><b>'+esc((e.kind||'').toUpperCase())+'</b> ['+esc(e.src||'?')+']<br>'+bar(e.score||0,G[2])+' '+Math.round((e.score||0)*100)+'%'+(e.human?('<br><b>you: '+esc(e.human)+'</b>'):'')+'</td>'
+          +'<td style="padding:3px 6px;color:#41505f">'+esc((e.reasons||[]).join(' \u00b7 '))+'</td></tr>';
+      });
+      h+='</table>';
+    });
+    // ---- rejection tables ----
+    function disp(title,arr,cols){ if(!arr||!arr.length) return;
+      h+='<h2 style="font-size:15px;border-bottom:1px solid #d8e0e8;padding-bottom:4px">'+title+' \u00b7 '+arr.length+'</h2>';
+      var cnt={}; arr.forEach(function(r){ var k=String(r.why||'').split(':')[0]; cnt[k]=(cnt[k]||0)+1; });
+      h+='<div style="margin:4px 0 8px">'+Object.keys(cnt).sort(function(a,b){return cnt[b]-cnt[a];}).map(function(k){ return esc(k)+' \u00d7'+cnt[k]; }).join(' \u00b7 ')+'</div>';
+      h+='<table style="border-collapse:collapse;width:100%">';
+      arr.slice(0,80).forEach(function(r){ h+='<tr style="border-bottom:1px solid #eef2f6">'+cols.map(function(c){ return '<td style="padding:2px 6px;color:#41505f">'+esc(r[c]!=null?r[c]:'')+'</td>'; }).join('')+'</tr>'; });
+      h+='</table>'+(arr.length>80?('<div style="color:#5a6b7d">\u2026and '+(arr.length-80)+' more (full list in the Duct JSON export)</div>'):'');
+    }
+    disp('Taps considered but refused', window.__tapDisp, ['brW','trW','gapIn','alongIn','why']);
+    disp('Size changes seen but not inserted', window.__sizechangeDisp, ['score','x','y','why']);
+    // ---- track record ----
+    var tr=window.__trackRecord||{}; var keys=Object.keys(tr).filter(function(k){return tr[k].n>=5;});
+    if(keys.length){
+      h+='<h2 style="font-size:15px;border-bottom:1px solid #d8e0e8;padding-bottom:4px">Your cross-print track record (n\u22655)</h2><table style="border-collapse:collapse">';
+      keys.sort(function(a,b){ return (tr[a].kept/tr[a].n)-(tr[b].kept/tr[b].n); }).forEach(function(k){
+        var t=tr[k], r=t.kept/t.n;
+        h+='<tr><td style="padding:2px 8px">'+esc(k)+'</td><td style="padding:2px 8px">'+bar(r, r<0.4?'#7e2c35':(r<0.7?'#8a6d1a':'#2c6e49'))+' '+t.kept+'/'+t.n+' kept</td></tr>';
+      });
+      h+='</table>';
+    }
+    h+='<div style="margin:18px 0;color:#5a6b7d">Generated by the takeoff tool \u00b7 pair this with the Duct JSON export when sending for analysis.</div></body>';
+    var blob=new Blob([h],{type:'text/html'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='build-report-'+new Date().toISOString().slice(0,10)+'.html';
+    document.body.appendChild(a); a.click(); a.remove();
+    console.log('[report] downloaded');
+  };
   // ---------- review strip: worst first, circle on hover, keep/delete ----------
   // capture the ink at a fitting -- called at the moment of a human \u2713/\u2717 so the decision carries its
   // IMAGE: (a) YOLO training material (crop + kind + verdict + duct width = a labelable example), and
@@ -4810,6 +4892,7 @@ function refreshSel(){
     var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b>Fitting review \u00b7 '+L.length+'</b>'+
       '<span style="color:#8fa4bb">'+confirmedN+' confirmed</span>'+
       '<span style="color:#7fc7a4;cursor:pointer;text-decoration:underline" title="Download every banked \u2713/\u2717 across all sessions" onclick="__bankExport()">bank: <span id="bankN">\u2026</span></span>'+
+      '<span style="color:#9db8ff;cursor:pointer;text-decoration:underline" title="Download a readable report: every detection, every decision, every reason" onclick="__downloadReport()">report</span>'+
       '<button onclick="document.getElementById(\'elstrip\').remove();var e=document.getElementById(\'aihl\');if(e)e.remove();" style="background:#222;color:#ccc;border:1px solid #555;border-radius:5px;cursor:pointer">\u00d7</button></div>';
     L.forEach(function(e){
       var i=(window.__elbowLedger||[]).indexOf(e);
