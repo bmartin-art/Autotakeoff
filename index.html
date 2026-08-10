@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.52</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.53</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -1692,10 +1692,20 @@ function buildSegmentRuns(){
     cands.push(mkCand(A,B,gapP,bt0,bt1,a,b,ov));
   }}
   function gband(g){ return Math.round((g/k6)/2); }   // 2-inch gap bands
+  // DUCT WALLS ARE TWINS (v3.53). Field case: an 8x6 branch with BOTH walls cleanly traced (53in each,
+  // 8in apart) lost its lower wall to a 6in-gap phantom pair with a fragment below it -- because
+  // unconfirmed candidates sorted NEAREST GAP FIRST, so tighter clutter beat the true partner every
+  // time ("duct on the side of the green lines"). The physical discriminator: real duct walls run
+  // together at matched length; clutter partners are fragments. Mutual-overlap symmetry now outranks
+  // gap: the 53/53 twin pair (1.00) beats any fragment pair, and a 300in main's wall can't be stolen
+  // by a 60in line at a closer gap (0.20). Gap stays as the tiebreak within similar symmetry.
+  function ovSym(P){ return P.ov / Math.max(P.A.len||1, P.B.len||1, 1); }
   cands.sort(function(p,q){
     var tp=p.confirmed?0:1, tq=q.confirmed?0:1; if(tp!==tq) return tp-tq;       // tag-matched ducts claim walls first
     if(tp===0) return q.ov-p.ov;                                                // among confirmed: best overlap wins
-    var gp=gband(p.gap), gq=gband(q.gap); if(gp!==gq) return gp-gq;             // else nearest parallel partner
+    var sp=ovSym(p), sq=ovSym(q);
+    if(Math.abs(sp-sq)>0.15) return sq-sp;                                      // twins beat fragments
+    var gp=gband(p.gap), gq=gband(q.gap); if(gp!==gq) return gp-gq;             // similar symmetry: nearest partner
     return q.ov-p.ov;
   });
   var used={}, usedTags={}, runs=[], squares=0, _acceptedWalls={};
