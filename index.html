@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.61</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.62</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3675,7 +3675,12 @@ function refreshSel(){
       runs.forEach(function(br){
         if(br===tr) return;
         if(Math.abs(br.dir[0]*tr.dir[0]+br.dir[1]*tr.dir[1])>0.25) return;     // perpendicular
-        var bw=br.widthIn||12; if(bw>tw-2) return;                             // branch narrower (v3.43 rule)
+        var bw=br.widthIn||12;
+        // (v3.62) NO width gate here. The narrower-branch rule was calibrated on rectangular END-TOUCH
+        // corner-fakes; round bands under-measure (a 28o main traces ~16), so equal-reading o16 drops
+        // died -- 15 of 21 real crossings on the census. A full pass-through, mid-span, reducer-vouched
+        // crossing already carries three independent evidences; the width belt is redundant here and
+        // stays where it earned its keep (the end-touch pass).
         if(runLenIn(br)<24) return;
         // does br CROSS tr's band? project br's ends onto tr's frame
         var sx=tr.start[0],sy=tr.start[1],dx=tr.dir[0],dy=tr.dir[1];
