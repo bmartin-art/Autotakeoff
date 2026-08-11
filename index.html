@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.58</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.60</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3658,13 +3658,20 @@ function refreshSel(){
     var made=0;
     runs.forEach(function(tr){
       var pcs=tr.pieces||[]; if(!pcs.length) return;
-      if(!pcs.some(function(p2){ return p2._sizeStep; })) return;              // trunk must reduce somewhere
       var tw=tr.widthIn||12, Lt=runLenIn(tr);
       if(Lt<60) return;                                                        // mains only
-      // positions of the trunk's size steps (inches along)
-      var fr; try{ fr=runFrames(tr); }catch(_){ return; }
-      var steps=[]; var acc=0;
-      for(var i2=0;i2<pcs.length;i2++){ if(pcs[i2]._sizeStep) steps.push(acc); if(pcs[i2].kind==='straight') acc+=(pcs[i2].lenIn||0); }
+      // (v3.59) reducer evidence as POINTS from EVERY run, not just this trunk's own pieces: the main
+      // is segmented, and the reducer that vouches a crossing often lives in the NEIGHBORING collinear
+      // segment (8 refusals on the 20\u00f8 section whose reducers all sat in the next run over).
+      var steps=[];
+      runs.forEach(function(rs){
+        var acc9=0;
+        (rs.pieces||[]).forEach(function(pz){
+          if(pz._sizeStep) steps.push([rs.start[0]+rs.dir[0]*inToPt(acc9), rs.start[1]+rs.dir[1]*inToPt(acc9)]);
+          if(pz.kind==='straight') acc9+=(pz.lenIn||0);
+        });
+      });
+      if(!steps.length) return;
       runs.forEach(function(br){
         if(br===tr) return;
         if(Math.abs(br.dir[0]*tr.dir[0]+br.dir[1]*tr.dir[1])>0.25) return;     // perpendicular
@@ -3679,7 +3686,8 @@ function refreshSel(){
         var a1=ptToIn((p1[0]-sx)*dx+(p1[1]-sy)*dy), a2=ptToIn((p2[0]-sx)*dx+(p2[1]-sy)*dy);
         var t=( -o1 )/((o2-o1)||1); var crossAlong=a1+(a2-a1)*t;               // along-position where centerlines meet
         if(crossAlong<6||crossAlong>Lt-6) return;
-        var nearStep=steps.some(function(sp){ return Math.abs(sp-crossAlong)<=Math.max(tw,24); });
+        var cx9=sx+dx*inToPt(crossAlong), cy9=sy+dy*inToPt(crossAlong);
+        var nearStep=steps.some(function(sp){ return Math.hypot(sp[0]-cx9,sp[1]-cy9)<=inToPt(Math.max(tw,30)); });
         if(!nearStep){ (window.__tapDisp=window.__tapDisp||[]).push({br:br.id,brW:bw,tr:tr.id,trW:tw,x:Math.round(sx+dx*inToPt(crossAlong)),y:Math.round(sy+dy*inToPt(crossAlong)),why:'crossing without a trunk reducer nearby \u2014 reads as elevation crossing, not a tap'}); return; }
         // already tapped here?
         var acc2=0, hasTap=false;
@@ -3693,7 +3701,7 @@ function refreshSel(){
           if(crossAlong>=acc3-0.01 && crossAlong<=acc3+l4+0.01){
             var side=((o1+o2)/2)>=0?1:-1;
             try{ window.__connSrc='infer-cross-tap';
-              if(window.__doInsert && window.__doInsert(tr.id, i4, Math.max(1,crossAlong-acc3), {type:'tap', branchW:bw, branchSide:side, branchRound:!!br.round, shopTap:false})){ made++; }
+              if(window.__doInsert && window.__doInsert(tr.id, i4, Math.max(1,crossAlong-acc3), {type:'tap', branchW:bw, branchSide:side, branchRound:window.__runIsRound(br), mainRound:window.__runIsRound(tr), shopTap:false})){ made++; }
             }catch(e){ console.warn('crossTap',e); }
             finally{ window.__connSrc=null; }
             break;
@@ -3937,6 +3945,21 @@ function refreshSel(){
           var a0=acc, a1=acc+(pc.lenIn||0); acc=a1;
           if(a1<=hostPr.alongIn) wA=pc.widthIn; else if(wB==null && a0>=hostPr.alongIn) wB=pc.widthIn; }
         stepped=(wA!=null&&wB!=null&&Math.abs(wA-wB)>=2);
+        // (v3.59) THE MODEL CALLS TAKEOFFS 'ELBOW' -- spiral taps were never in its training, and an
+        // elbow is the closest shape it knows, so every drop on a round main wears an elbow box. A
+        // mid-run 'elbow' with a PERPENDICULAR run crossing or terminating right there is the model
+        // seeing a TAP: relabel so the tap machinery (walk events, bridges, adjudicator det-support)
+        // finally gets the evidence it has been starving for.
+        var branchRun=null;
+        for(var rb2=0;rb2<runs.length;rb2++){ var rb=runs[rb2];
+          if(rb===host) continue;
+          if(Math.abs(rb.dir[0]*host.dir[0]+rb.dir[1]*host.dir[1])>0.25) continue;
+          var pb=projOnRun(rb,d.nx,d.ny);
+          if(Math.abs(pb.perpIn)<= (rb.widthIn||12)/2+8 && pb.alongIn>=-12 && pb.alongIn<=runLenIn(rb)+12){ branchRun=rb; break; }
+        }
+        if(branchRun){ var _rp=(window.__runIsRound&&window.__runIsRound(branchRun))?'round-':'rect-';
+          window.__detNote(d,'sanitize','relabeled elbow->'+_rp+'tap: mid-run with a perpendicular branch here (spiral takeoff)');
+          d.cls=_rp+'tap'; relabeled++; return; }
         if(stepped){ window.__detNote(d,'sanitize','relabeled elbow->sizechange: mid-run where size steps'); d.cls=pref(d.cls)+'sizechange'; relabeled++; }
         else { window.__detNote(d,'sanitize','DROPPED: mid-run, duct runs straight through'); d._used=true; dropped++; }
         return;
@@ -4663,6 +4686,13 @@ function refreshSel(){
   if(typeof drawOverlay==='function'){ var _od2=drawOverlay; drawOverlay=function(){ var r=_od2.apply(this,arguments); try{renderItems();}catch(e){} return r; }; }
 
   function findRun(id){ return (window.__runs2d||[]).find(function(r){return r.id===id;}); }
+  // ROUNDNESS COMES FROM THE DUCT, NOT THE DETECTION (v3.60). The model's rect-vs-round call on taps
+  // is its least-trained judgment; the branch run coming off the junction already knows its shape.
+  window.__runIsRound=function(r){ if(!r) return false;
+    if(r.round!=null) return !!r.round;
+    var pcs=r.pieces||[], rd=0, n=0;
+    for(var i=0;i<pcs.length;i++){ if(pcs[i].kind==='straight'){ n++; if(pcs[i].round) rd++; } }
+    return n>0 && rd*2>=n; };
   // detection decision trail (v3.26): every pass that touches a detection records what it did and why
   window.__detNote=function(d,pass,note){ try{ (d._notes=d._notes||[]).push(pass+': '+note); }catch(_){} };
   // ---------- Layer-4 adjudicator: score every elbow's evidence, keep the reasons ----------
