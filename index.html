@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.55</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.56</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3495,6 +3495,32 @@ function refreshSel(){
   function inferTapsFromEnds(){
     var runs=window.__runs2d||[]; if(runs.length<2) return 0;
     window.__tapDisp=[];
+    // BRANCH MUST BE REAL DUCTWORK (v3.56). A tap on an orphan clutter band VOUCHES that band to the
+    // rogue sweep -- the phantom fitting protects the phantom duct. So before any tap inserts, the
+    // branch has to already be ductwork on its own evidence: tagged itself, connected (end-to-end)
+    // into a component containing tagged work, or >=30in long (post-v3.55, scatter bands rarely
+    // survive that long). Components are computed BEFORE insertion so a tap can't vouch its own branch.
+    var _comp={}, _vouch={};
+    (function(){
+      var adj={}; runs.forEach(function(r){ adj[r.id]=[]; });
+      function nr(a,pt){ var e2=runEnd(a);
+        return Math.hypot(a.start[0]-pt[0],a.start[1]-pt[1])<=inToPt(14) || Math.hypot(e2.x-pt[0],e2.y-pt[1])<=inToPt(14); }
+      for(var i2=0;i2<runs.length;i2++) for(var k2=i2+1;k2<runs.length;k2++){
+        var A2=runs[i2],B2=runs[k2],eB=runEnd(B2);
+        if(nr(A2,[B2.start[0],B2.start[1]])||nr(A2,[eB.x,eB.y])){ adj[A2.id].push(B2.id); adj[B2.id].push(A2.id); } }
+      var seen={};
+      runs.forEach(function(r0){ if(seen[r0.id]) return;
+        var st=[r0.id], comp=[], cid=r0.id;
+        while(st.length){ var x3=st.pop(); if(seen[x3]) continue; seen[x3]=1; comp.push(x3); st=st.concat(adj[x3]); }
+        var v=comp.some(function(id2){ var r3=runs.find(function(q){return q.id===id2;});
+          return r3 && r3.tagIdx && r3.tagIdx.length; });
+        comp.forEach(function(id2){ _comp[id2]=cid; _vouch[id2]=v; });
+      });
+    })();
+    // YOLO AGREEMENT WHERE YOLO SEES (v3.56, same pattern as infer-step v3.43): with >=3 usable tap/tee
+    // detections on the sheet, an inferred tap needs one within 1.5 widths of the junction. On
+    // tap-blind sheets (the usual case) geometry stands alone, as before.
+    var _tapDets=(window.__yoloDets||[]).filter(function(d2){ return d2.nx!=null && /tap|tee/.test(d2.cls||'') && (d2.score||0)>=0.30; });
     function rlen(r){ return runLenIn(r); }
     var made=0, todo=[];
     runs.forEach(function(br){
@@ -3528,6 +3554,20 @@ function refreshSel(){
           if(!best || Math.abs(gap)<Math.abs(best.gap)) best={tr:tr, gap:gap, tw:tw};
         });
         if(best){
+          // v3.56 gates: branch substance + det agreement where the model sees
+          var _tagged=!!(br.tagIdx&&br.tagIdx.length);
+          if(!_tagged && !_vouch[br.id] && rlen(br)<30){
+            (window.__tapDisp=window.__tapDisp||[]).push({br:br.id, brW:(br.widthIn||12), brLen:Math.round(rlen(br)), tr:best.tr.id, trW:(best.tw||12), gapIn:Math.round(best.gap*10)/10, x:Math.round(pt[0]), y:Math.round(pt[1]), why:'branch is orphan ductwork: no tag, connects to nothing tagged, under 30in'});
+            return;
+          }
+          if(_tapDets.length>=3){
+            var _wM=Math.max(best.tw||12, br.widthIn||12);
+            var _hasDet=_tapDets.some(function(d2){ return Math.hypot(d2.nx-pt[0], d2.ny-pt[1]) <= inToPt(_wM*1.5); });
+            if(!_hasDet){
+              (window.__tapDisp=window.__tapDisp||[]).push({br:br.id, brW:(br.widthIn||12), brLen:Math.round(rlen(br)), tr:best.tr.id, trW:(best.tw||12), gapIn:Math.round(best.gap*10)/10, x:Math.round(pt[0]), y:Math.round(pt[1]), why:'model sees taps on this sheet ('+_tapDets.length+' dets) but none near this junction'});
+              return;
+            }
+          }
           // CROSSING VETO (v3.33). Plan view is a projection: ducts at different elevations, or two
           // separate systems, touch on paper constantly -- and the trace often FRAGMENTS at exactly those
           // spots, planting a fake run-end on the other duct's flank. The tell that separates them: a
