@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.60</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.61</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3513,7 +3513,7 @@ function refreshSel(){
         var st=[r0.id], comp=[], cid=r0.id;
         while(st.length){ var x3=st.pop(); if(seen[x3]) continue; seen[x3]=1; comp.push(x3); st=st.concat(adj[x3]); }
         var v=comp.some(function(id2){ var r3=runs.find(function(q){return q.id===id2;});
-          return r3 && r3.tagIdx && r3.tagIdx.length; });
+          return r3 && ((r3.tagIdx&&r3.tagIdx.length) || (r3.pieces||[]).some(function(p3){ return p3.kind==='fitting'; })); });
         comp.forEach(function(id2){ _comp[id2]=cid; _vouch[id2]=v; });
       });
     })();
@@ -3687,7 +3687,9 @@ function refreshSel(){
         var t=( -o1 )/((o2-o1)||1); var crossAlong=a1+(a2-a1)*t;               // along-position where centerlines meet
         if(crossAlong<6||crossAlong>Lt-6) return;
         var cx9=sx+dx*inToPt(crossAlong), cy9=sy+dy*inToPt(crossAlong);
-        var nearStep=steps.some(function(sp){ return Math.hypot(sp[0]-cx9,sp[1]-cy9)<=inToPt(Math.max(tw,30)); });
+        // (v3.61) the takeoff's reducer lands at the NEXT JOINT downstream -- field callouts on the
+        // 28o main put it 4'4\"-6'4\" from the drop. Reach = one spiral section (72in), not one width.
+        var nearStep=steps.some(function(sp){ return Math.hypot(sp[0]-cx9,sp[1]-cy9)<=inToPt(Math.max(tw,72)); });
         if(!nearStep){ (window.__tapDisp=window.__tapDisp||[]).push({br:br.id,brW:bw,tr:tr.id,trW:tw,x:Math.round(sx+dx*inToPt(crossAlong)),y:Math.round(sy+dy*inToPt(crossAlong)),why:'crossing without a trunk reducer nearby \u2014 reads as elevation crossing, not a tap'}); return; }
         // already tapped here?
         var acc2=0, hasTap=false;
