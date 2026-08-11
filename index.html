@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.56</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.57</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3521,6 +3521,30 @@ function refreshSel(){
     // detections on the sheet, an inferred tap needs one within 1.5 widths of the junction. On
     // tap-blind sheets (the usual case) geometry stands alone, as before.
     var _tapDets=(window.__yoloDets||[]).filter(function(d2){ return d2.nx!=null && /tap|tee/.test(d2.cls||'') && (d2.score||0)>=0.30; });
+    // JOINT-AWARE CORNER ZONE (v3.57). Field case, spiral trunk sheet: 16 of 20 tap refusals were
+    // 'corner zone' -- because trunks NECK DOWN AT EACH TAKEOFF (28->24 right where the branch drops),
+    // the walk segments the main at every reducer, and every real tap lands within the corner margin
+    // of a SEGMENT end. The margin exists to keep taps off corners -- but a trunk end that CONTINUES
+    // collinear into another run (a reducer joint) cannot be a corner; the duct runs straight through.
+    // Precompute per run-end whether it continues; continuing ends impose no corner margin.
+    var _cont={};
+    runs.forEach(function(tr){
+      var e0=runEnd(tr), tw0=tr.widthIn||12;
+      _cont[tr.id]={start:false,end:false};
+      [['start',[tr.start[0],tr.start[1]]],['end',[e0.x,e0.y]]].forEach(function(E){
+        var pt0=E[1];
+        _cont[tr.id][E[0]]=runs.some(function(rc){
+          if(rc===tr) return false;
+          if(Math.abs(rc.dir[0]*tr.dir[0]+rc.dir[1]*tr.dir[1])<0.9) return false;   // collinear family
+          var ec=runEnd(rc);
+          return [[rc.start[0],rc.start[1]],[ec.x,ec.y]].some(function(q){
+            if(Math.hypot(q[0]-pt0[0],q[1]-pt0[1])>inToPt(30)) return false;         // within a joint of the end
+            var lat=Math.abs((q[0]-pt0[0])*(-tr.dir[1])+(q[1]-pt0[1])*tr.dir[0]);
+            return ptToIn(lat) <= ((tw0+(rc.widthIn||12))/2);                        // in line, not beside
+          });
+        });
+      });
+    });
     function rlen(r){ return runLenIn(r); }
     var made=0, todo=[];
     runs.forEach(function(br){
@@ -3541,7 +3565,10 @@ function refreshSel(){
           if(gap<-6 || gap>10) return;                       // not even near this trunk's flank
           var m=Math.max(12,tw);
           function _rj(w9){ (window.__tapDisp=window.__tapDisp||[]).push({br:br.id, brW:(br.widthIn||12), brLen:Math.round(rlen(br)), tr:tr.id, trW:tw, gapIn:Math.round(gap*10)/10, alongIn:Math.round(along), x:Math.round(pt[0]), y:Math.round(pt[1]), why:w9}); }
-          if(along<m || along>Lt-m){ _rj('corner zone: '+Math.round(along)+'in along a '+Math.round(Lt)+'in trunk (margin '+Math.round(m)+')'); return; }
+          var _nearStart=(along<m), _nearEnd=(along>Lt-m);
+          if((_nearStart && !(_cont[tr.id]||{}).start) || (_nearEnd && !(_cont[tr.id]||{}).end)){
+            _rj('corner zone: '+Math.round(along)+'in along a '+Math.round(Lt)+'in trunk (margin '+Math.round(m)+', end does not continue)'); return; }
+          if((_nearStart||_nearEnd) && along<3){ _rj('at the very joint line'); return; }
           if(gap<-3 || gap>2.5){ _rj('flank gap '+ (Math.round(gap*10)/10) +'in outside -3..2.5'); return; }
           // BRANCH NARROWER THAN TRUNK (v3.43). Bank verdict on this pass: 1 kept of 13. The fakes were
           // corners read as taps -- and their tell was SIZE: a 12x10 meeting a 12x12 is an airstream
@@ -3610,6 +3637,67 @@ function refreshSel(){
     return made;
   }
   window.__inferTapsFromEnds=inferTapsFromEnds;
+  // ---- INFER TAPS FROM CROSSINGS + TRUNK REDUCERS (v3.57) ----------------------------------------
+  // Spiral-trunk sheets draw drops STRAIGHT THROUGH the main: the branch traces as one run crossing
+  // the trunk band, so there is no branch END on the flank -- the end-based tap pass can't even see
+  // it (page 24: every mid-main drop invisible, zero tapDisp rows). The discriminator between a
+  // tap-crossing and an elevation-crossing is already on the sheet: THE TRUNK REDUCES AT A TAKEOFF
+  // (28ø->24ø right at the drop; air leaves, size steps) -- an unrelated duct passing over doesn't
+  // shrink the main. So: branch run crossing the trunk band, perpendicular, with a size-step piece in
+  // the trunk within max(trunkW,24in) of the crossing -> tap, stamped into the trunk at the crossing.
+  function inferTapsFromCrossings(){
+    var runs=window.__runs2d||[]; if(runs.length<2) return 0;
+    var made=0;
+    runs.forEach(function(tr){
+      var pcs=tr.pieces||[]; if(!pcs.length) return;
+      if(!pcs.some(function(p2){ return p2._sizeStep; })) return;              // trunk must reduce somewhere
+      var tw=tr.widthIn||12, Lt=runLenIn(tr);
+      if(Lt<60) return;                                                        // mains only
+      // positions of the trunk's size steps (inches along)
+      var fr; try{ fr=runFrames(tr); }catch(_){ return; }
+      var steps=[]; var acc=0;
+      for(var i2=0;i2<pcs.length;i2++){ if(pcs[i2]._sizeStep) steps.push(acc); if(pcs[i2].kind==='straight') acc+=(pcs[i2].lenIn||0); }
+      runs.forEach(function(br){
+        if(br===tr) return;
+        if(Math.abs(br.dir[0]*tr.dir[0]+br.dir[1]*tr.dir[1])>0.25) return;     // perpendicular
+        var bw=br.widthIn||12; if(bw>tw-2) return;                             // branch narrower (v3.43 rule)
+        if(runLenIn(br)<24) return;
+        // does br CROSS tr's band? project br's ends onto tr's frame
+        var sx=tr.start[0],sy=tr.start[1],dx=tr.dir[0],dy=tr.dir[1];
+        var eB=runEnd(br);
+        var p1=[br.start[0],br.start[1]], p2=[eB.x,eB.y];
+        var o1=ptToIn((p1[0]-sx)*(-dy)+(p1[1]-sy)*dx), o2=ptToIn((p2[0]-sx)*(-dy)+(p2[1]-sy)*dx);
+        if(!(Math.min(o1,o2)<-tw/2-1 && Math.max(o1,o2)>tw/2+1)) return;       // truly crosses, both sides
+        var a1=ptToIn((p1[0]-sx)*dx+(p1[1]-sy)*dy), a2=ptToIn((p2[0]-sx)*dx+(p2[1]-sy)*dy);
+        var t=( -o1 )/((o2-o1)||1); var crossAlong=a1+(a2-a1)*t;               // along-position where centerlines meet
+        if(crossAlong<6||crossAlong>Lt-6) return;
+        var nearStep=steps.some(function(sp){ return Math.abs(sp-crossAlong)<=Math.max(tw,24); });
+        if(!nearStep){ (window.__tapDisp=window.__tapDisp||[]).push({br:br.id,brW:bw,tr:tr.id,trW:tw,x:Math.round(sx+dx*inToPt(crossAlong)),y:Math.round(sy+dy*inToPt(crossAlong)),why:'crossing without a trunk reducer nearby \u2014 reads as elevation crossing, not a tap'}); return; }
+        // already tapped here?
+        var acc2=0, hasTap=false;
+        for(var i3=0;i3<pcs.length;i3++){ if(pcs[i3]._tap && Math.abs(acc2-crossAlong)<=Math.max(12,tw)) hasTap=true; if(pcs[i3].kind==='straight') acc2+=(pcs[i3].lenIn||0); }
+        if(hasTap) return;
+        // find the straight piece containing crossAlong and stamp a tap into it
+        var acc3=0;
+        for(var i4=0;i4<pcs.length;i4++){ var pz=pcs[i4];
+          if(pz.kind!=='straight'){ continue; }
+          var l4=pz.lenIn||0;
+          if(crossAlong>=acc3-0.01 && crossAlong<=acc3+l4+0.01){
+            var side=((o1+o2)/2)>=0?1:-1;
+            try{ window.__connSrc='infer-cross-tap';
+              if(window.__doInsert && window.__doInsert(tr.id, i4, Math.max(1,crossAlong-acc3), {type:'tap', branchW:bw, branchSide:side, branchRound:!!br.round, shopTap:false})){ made++; }
+            }catch(e){ console.warn('crossTap',e); }
+            finally{ window.__connSrc=null; }
+            break;
+          }
+          acc3+=l4;
+        }
+      });
+    });
+    if(made) console.log('[takeoff] inferred '+made+' tap(s) at branch crossings backed by trunk reducers');
+    return made;
+  }
+  window.__inferTapsFromCrossings=inferTapsFromCrossings;
   // ---- JUNCTION REFEREE (v3.34): a reasoning look at the INK, for the case geometry can't see ----
   // The crossing veto needs the far-side duct to have TRACED; when it didn't, geometry is blind but the
   // ink is not -- a crossing duct visibly continues past the trunk on the print itself. So after the
@@ -5932,6 +6020,7 @@ function refreshSel(){
     try{ _rBr=(window.__bridgeSizechanges?window.__bridgeSizechanges():0)||0; }catch(e){ console.warn('bridge',e); }
     try{ _rBr+=(window.__inferSizeStepsFromEnds?window.__inferSizeStepsFromEnds():0)||0; }catch(e){ console.warn('inferSteps',e); }
     try{ _rBr+=(window.__inferTapsFromEnds?window.__inferTapsFromEnds():0)||0; }catch(e){ console.warn('inferTaps',e); }
+    try{ _rBr+=(window.__inferTapsFromCrossings?window.__inferTapsFromCrossings():0)||0; }catch(e){ console.warn('crossTaps',e); }
     var _rTap=0; try{ _rTap=(window.__bridgeTaps?window.__bridgeTaps():0)||0; }catch(e){ console.warn('tapbridge',e); }
     if(_rJoin||_rSyn||_rArc||_rBr||_rTap) console.log('[takeoff recovery] corners:'+_rJoin+' legs:'+_rSyn+' arc-elbows:'+_rArc+' reducer-bridges:'+_rBr+' tap-bridges:'+_rTap);
     var _rInf=0; try{ _rInf=(window.__inferCornersFromEnds?window.__inferCornersFromEnds():0)||0; }catch(e){ console.warn('infer',e); }
