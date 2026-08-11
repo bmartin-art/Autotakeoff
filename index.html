@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.57</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.58</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3562,14 +3562,22 @@ function refreshSel(){
           var along=ptToIn(vx*dx+vy*dy), Lt=rlen(tr), tw=tr.widthIn||12;
           var perp=ptToIn(vx*(-dy)+vy*dx);
           var gap=Math.abs(perp)-tw/2;
-          if(gap<-6 || gap>10) return;                       // not even near this trunk's flank
+          if(gap<-8 || gap>12) return;                       // not even near this trunk's flank
           var m=Math.max(12,tw);
           function _rj(w9){ (window.__tapDisp=window.__tapDisp||[]).push({br:br.id, brW:(br.widthIn||12), brLen:Math.round(rlen(br)), tr:tr.id, trW:tw, gapIn:Math.round(gap*10)/10, alongIn:Math.round(along), x:Math.round(pt[0]), y:Math.round(pt[1]), why:w9}); }
           var _nearStart=(along<m), _nearEnd=(along>Lt-m);
           if((_nearStart && !(_cont[tr.id]||{}).start) || (_nearEnd && !(_cont[tr.id]||{}).end)){
             _rj('corner zone: '+Math.round(along)+'in along a '+Math.round(Lt)+'in trunk (margin '+Math.round(m)+', end does not continue)'); return; }
-          if((_nearStart||_nearEnd) && along<3){ _rj('at the very joint line'); return; }
-          if(gap<-3 || gap>2.5){ _rj('flank gap '+ (Math.round(gap*10)/10) +'in outside -3..2.5'); return; }
+          // (v3.58) the 'at the very joint line' check that briefly lived here refused 8 real drops on
+          // the first spiral-trunk sheet -- trunk segments BEGIN at reducers, which is exactly where
+          // taps sit. Removed; the continuing-end rule above already covers true corners.
+          // ROUND TRUNKS BOW PAST THEIR BAND (v3.58). A drop into a round main stops at the OUTER
+          // circle, up to half a diameter beyond the traced tangent band -- field gaps on the 24-28\u00f8
+          // spiral sheet clustered 2.7-9.3in against a rectangular-calibrated \u00b12.5 cap. Round trunks
+          // get a proportional window (0.6\u00d7diameter); rectangular keeps the tight rectangular cap.
+          var _rndTr=(tr.pieces||[]).some(function(pz){ return pz.round; });
+          var _gHi=_rndTr?Math.max(2.5,tw*0.6):2.5, _gLo=_rndTr?-Math.max(3,tw*0.6):-3;
+          if(gap<_gLo || gap>_gHi){ _rj('flank gap '+ (Math.round(gap*10)/10) +'in outside '+Math.round(_gLo*10)/10+'..'+Math.round(_gHi*10)/10+(_rndTr?' (round trunk window)':'')); return; }
           // BRANCH NARROWER THAN TRUNK (v3.43). Bank verdict on this pass: 1 kept of 13. The fakes were
           // corners read as taps -- and their tell was SIZE: a 12x10 meeting a 12x12 is an airstream
           // turning, not a branch tapping a main. A real tap branch is strictly smaller than its trunk.
