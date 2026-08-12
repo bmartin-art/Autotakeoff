@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.65</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.66</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3859,8 +3859,14 @@ function refreshSel(){
         var v=(pj.verdict||'unsure');
         e.reasons.push('AI (ink'+(hist?'+history':'')+'): '+v+(pj.reason?(' \u2014 '+pj.reason):''));
         if(v==='crossing'){
-          if(isCrossTap||detSup){ e.machine='you'; e.reasons.push('ink reads as a plain crossing — but '+(detSup?'the model sees a tap at this junction':'the trunk reduces at this junction (why the tap was placed)')+'; left on the strip for your call'); }
-          else { window.__stripDel(i,true); e.reasons.push('auto-removed: ink shows the duct continuing past'); } }
+          // v3.66: a 'crossing' read NEVER auto-deletes a tap anymore. Three runs of field data
+          // (6/7/8): on this sheet family every drop passes THROUGH the main to the diffuser
+          // below, so 'the duct continues past' is true of REAL taps — and detection support
+          // flickers run-to-run (x820: det 0.31 in run 7, absent in run 8), so shielding only
+          // det-supported taps still let the referee delete placed work whenever the scan had an
+          // off day. The referee's dissent goes on the strip; the estimator's ✗ banks and replays.
+          e.machine='you';
+          e.reasons.push('ink reads the branch continuing past — '+(detSup?'but the model sees a tap at this junction':(isCrossTap?'but the trunk reduces at this junction (why the tap was placed)':'normal for drops passing through a main on this sheet'))+'; left on the strip for your call'); }
         else if(v==='corner'){ window.__stripDel(i,true); e.reasons.push('auto-removed: ink shows the duct TURNING here \u2014 elbow territory, not a tap'); }
         else if(v==='tap'||v==='yes'){ e.score=Math.min(1,e.score+0.15);
           e.machine=(e.machine==='no')?'you':'yes';                     // ink disagrees with a NO -> human decides; confirms a YOU -> yes
