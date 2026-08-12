@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.64</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.65</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3623,14 +3623,16 @@ function refreshSel(){
             (window.__tapDisp=window.__tapDisp||[]).push({br:br.id, brW:(br.widthIn||12), brLen:Math.round(rlen(br)), tr:best.tr.id, trW:(best.tw||12), gapIn:Math.round(best.gap*10)/10, x:Math.round(pt[0]), y:Math.round(pt[1]), why:'branch is orphan ductwork: no tag, connects to nothing tagged, under 30in'});
             return;
           }
-          if(_tapDets.length>=3){
-            var _wM=Math.max(best.tw||12, br.widthIn||12);
-            var _hasDet=_tapDets.some(function(d2){ return Math.hypot(d2.nx-pt[0], d2.ny-pt[1]) <= inToPt(_wM*1.5); });
-            if(!_hasDet){
-              (window.__tapDisp=window.__tapDisp||[]).push({br:br.id, brW:(br.widthIn||12), brLen:Math.round(rlen(br)), tr:best.tr.id, trW:(best.tw||12), gapIn:Math.round(best.gap*10)/10, x:Math.round(pt[0]), y:Math.round(pt[1]), why:'model sees taps on this sheet ('+_tapDets.length+' dets) but none near this junction'});
-              return;
-            }
-          }
+          // v3.65: the v3.56 YOLO-AGREEMENT VETO that lived here is GONE. It armed at >=3 usable
+          // tap dets on the sheet and then demanded a det at every geometry junction — but the
+          // model's sight is not sheet-uniform: run 7 put all 3 usable dets on the MAIN TRUNK and
+          // stayed blind to the risers, so the veto killed 7 junctions including four taps the
+          // estimator had previously kept or the ink referee had blessed (525,594 / 525,938 /
+          // 537,594 / 537,1273). One good scan run turned OFF insertion everywhere else. The gate
+          // was calibrated when the pointing check was inverted (v3.63) and the pass had 8%%
+          // precision; the corner-zone, flank-window, width-guard, crossing-veto and orphan gates
+          // are the real protection now, and the adjudicator already scores missing det support
+          // onto the review strip (density-aware, v3.30) — doubt belongs there, not in a veto.
           // CROSSING VETO (v3.33). Plan view is a projection: ducts at different elevations, or two
           // separate systems, touch on paper constantly -- and the trace often FRAGMENTS at exactly those
           // spots, planting a fake run-end on the other duct's flank. The tell that separates them: a
