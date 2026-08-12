@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.63</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.64</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3819,8 +3819,22 @@ function refreshSel(){
         // pass's entire output (page 24, x1153: inserted, then killed as 'crossing'). Ask the
         // question that actually discriminates: does the trunk neck down at this junction?
         var isCrossTap=isTapQ && /cross/.test(e.src||'');
+        // DETECTION-SUPPORTED TAPS GET THE CROSSING-AWARE QUESTION TOO (v3.64). On spiral-trunk
+        // sheets a drop passes THROUGH the main to the diffuser below, so it traces as two runs and
+        // the END-TOUCH pass places the tap (src infer-tap, not infer-cross-tap) — and in ink the
+        // branch genuinely continues past. Run 6 field data: the referee's terminate-vs-continue
+        // question deleted the taps at x827 and x1139 as 'crossing' with round-tap detections 0.17
+        // and 0.18 sitting right on them (noted in the same ledger entries). When the model sees a
+        // tap at the junction, ask the question that discriminates — does the trunk neck down —
+        // and let a 'crossing' answer demote to review, not delete.
+        // reach = max(30in, 2W): the tap's ledger x drifts ~12in per upstream reducer (frames count
+        // fitting lenIn) and the det box centers half a trunk off the centerline — run 6's x1139 tap
+        // sat 22in from its 0.18 det and a 1.5W reach missed it.
+        var detSup=isTapQ && (window.__yoloDets||[]).some(function(dd){
+          return dd.nx!=null && /tap|tee/.test(dd.cls||'') && (dd.score||0)>=0.15 &&
+                 Math.hypot(dd.nx-e.x, dd.ny-e.y)<=inToPt(Math.max(30,(e.widthIn||12)*2)); });
         var Q;
-        if(isCrossTap) Q='Inside the red circle, a branch duct runs across a trunk duct. tap = the TRUNK visibly changes size at or just past this junction (it necks down where air leaves at a takeoff), or a tap/conical fitting visibly joins them. crossing = the two ducts merely overlap with NO trunk size change and NO joining fitting (different elevations). Answer ONLY {"verdict":"tap"|"crossing"|"unsure","reason":"<8 words"}.';
+        if(isCrossTap||detSup) Q='Inside the red circle, a branch duct meets or runs across a trunk duct. tap = the TRUNK visibly changes size at or just past this junction (it necks down where air leaves at a takeoff), or a tap/conical fitting visibly joins them. crossing = the two ducts merely overlap with NO trunk size change and NO joining fitting (different elevations). Answer ONLY {"verdict":"tap"|"crossing"|"unsure","reason":"<8 words"}.';
         else if(isTapQ) Q='Inside the red circle, a duct meets the side of another duct. corner = the airstream TURNS (miter/diagonal joint line, matching widths flowing into each other, the through-duct segmenting AT this junction). tap = a branch TERMINATES into a trunk whose walls run CONTINUOUS straight through. crossing = the duct visibly CONTINUES on the far side. Answer ONLY {"verdict":"tap"|"crossing"|"corner"|"unsure","reason":"<8 words"}.';
         else if(e.kind==='tr'||e.kind==='reducer'||e.kind==='s2r') Q='Inside the red circle, does the duct WIDTH visibly change (a taper/transition between two sizes)? Answer ONLY {"verdict":"yes"|"no"|"unsure","reason":"<8 words"}.';
         else if(e.kind==='cap') Q='Inside the red circle, does the duct END with a cap (closed end, no continuation)? Answer ONLY {"verdict":"yes"|"no"|"unsure","reason":"<8 words"}.';
@@ -3843,7 +3857,7 @@ function refreshSel(){
         var v=(pj.verdict||'unsure');
         e.reasons.push('AI (ink'+(hist?'+history':'')+'): '+v+(pj.reason?(' \u2014 '+pj.reason):''));
         if(v==='crossing'){
-          if(isCrossTap){ e.machine='you'; e.reasons.push('ink reads as a plain crossing — but the trunk reduces at this junction (why the tap was placed); left on the strip for your call'); }
+          if(isCrossTap||detSup){ e.machine='you'; e.reasons.push('ink reads as a plain crossing — but '+(detSup?'the model sees a tap at this junction':'the trunk reduces at this junction (why the tap was placed)')+'; left on the strip for your call'); }
           else { window.__stripDel(i,true); e.reasons.push('auto-removed: ink shows the duct continuing past'); } }
         else if(v==='corner'){ window.__stripDel(i,true); e.reasons.push('auto-removed: ink shows the duct TURNING here \u2014 elbow territory, not a tap'); }
         else if(v==='tap'||v==='yes'){ e.score=Math.min(1,e.score+0.15);
@@ -5237,9 +5251,13 @@ function refreshSel(){
               // extra banked a ✗ at that junction, and memory then killed the single legit tap on
               // every rebuild ("detected but won't insert"). With a solid tap detection sitting on
               // it now, surface instead of auto-deleting; your next ✗ or ✓ re-banks the final word.
-              var _detV=(e.kind==='stap') && (window.__yoloDets||[]).some(function(dd){
+              // v3.64: crossing-pass taps count as vouched even without a detection — they only
+              // insert when the trunk reduces at the takeoff, and the banked ✗ within reach is
+              // usually left over from the duplicate era (run 6: the x1503 main tap, referee-blessed
+              // the build before, was memory-deleted with the nearest tap det at 0.065).
+              var _detV=(e.kind==='stap') && ( /cross/.test(e.src||'') || (window.__yoloDets||[]).some(function(dd){
                 return dd.nx!=null && /tap|tee/.test(dd.cls||'') && !dd._lowProp && (dd.score||0)>=0.25 &&
-                       Math.hypot(dd.nx-e.x, dd.ny-e.y)<=inToPt(Math.max(18,(e.widthIn||12)*1.5)); });
+                       Math.hypot(dd.nx-e.x, dd.ny-e.y)<=inToPt(Math.max(30,(e.widthIn||12)*2)); }) );
               if(_detV){ e.reasons.push('memory: you deleted a tap here before — but the model sees a tap at this junction now; left on the strip for your call'); }
               else { e.reasons.push('memory: you deleted this here before'); window.__stripDel(i,true); vetoed++; } }
             else { e.reasons.push('memory: you kept this here before'); window.__stripKeep(i,true); confirmed++;
