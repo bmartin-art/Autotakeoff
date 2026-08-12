@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.62</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.63</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2879,7 +2879,10 @@ function refreshSel(){
       for(var ze=pieces.length-1;ze>=0;ze--){ if(pieces[ze]!==ec && pieces[ze].kind==='straight' && (pieces[ze].lenIn||0)<=0.4) pieces.splice(ze,1); }
       renderItems(); renderPanel(); if(typeof setStatus==='function')setStatus('Stamped a '+(rr?'round':'rect')+' end cap ('+sz+').'); return true; }
     if(t==='tap'){ var bW=spec.branchW||Math.max(6,Math.round(w/2)), bSide=spec.branchSide||1, bRound=!!spec.branchRound, bD=(spec.branchD!=null?spec.branchD:(bRound?bW:null)), bSize=bRound?('\u00f8'+bW):(bW+'\u00d7'+(bD!=null?bD:'?'));
-      var tap={kind:'fitting',_src:'insert-tap',cid:'stap',camduct:(spec.shopTap?'Shop Tap':'Tap'),round:false,lenIn:0,widthIn:w,depthIn:dep,size:sz,_tap:true,shopTap:!!spec.shopTap,branchSide:bSide,branchW:bW,branchLenIn:10,throatIn:10,mainRound:(spec.mainRound!=null?!!spec.mainRound:rr),branchRound:bRound};
+      // v3.63: honor the calling pass's source — this was hardcoded 'insert-tap', which erased the
+      // provenance every infer pass set via __connSrc (defeating the per-pass track records v3.32
+      // promised) and left the ink referee unable to tell a crossing-vouched tap from an end-touch one.
+      var tap={kind:'fitting',_src:(window.__connSrc||'insert-tap'),cid:'stap',camduct:(spec.shopTap?'Shop Tap':'Tap'),round:false,lenIn:0,widthIn:w,depthIn:dep,size:sz,_tap:true,shopTap:!!spec.shopTap,branchSide:bSide,branchW:bW,branchLenIn:10,throatIn:10,mainRound:(spec.mainRound!=null?!!spec.mainRound:rr),branchRound:bRound};
       pieces.splice(pieceIdx,1,before,tap,after);
       if(spec.branch){ var fr=runFrames(run), f=fr[pieceIdx+1]; if(f){
         var brId='br'+Date.now().toString(36);
@@ -3045,6 +3048,7 @@ function refreshSel(){
     var nArc = 0; try{ nArc = arcCornerJoins(); }catch(e){ console.warn('arcCornerJoins', e); }
     var nBr = 0; try{ nBr = bridgeSizechanges(); }catch(e){ console.warn('bridgeSizechanges', e); }
     var nTb = 0; try{ nTb = bridgeTaps(); }catch(e){ console.warn('bridgeTaps', e); }
+    try{ window.__markTapDetsPlaced&&window.__markTapDetsPlaced(); }catch(e){}
     var nInf = 0; try{ nInf = inferCornersFromEnds(); }catch(e){ console.warn('inferCorners', e); }
     var nMg = 0; try{ nMg = mergeElbowJoins(); }catch(e){ console.warn('mergeElbowJoins', e); }
     var nFit = integrateYoloFittings();
@@ -3492,6 +3496,22 @@ function refreshSel(){
   //   substance:      branch >= 12in long
   // Every inserted tap carries _src 'infer-tap', lands in the review strip, and builds its own track
   // record separate from walk-tap's 0-for-6.
+  // ONE TAP PER JUNCTION (v3.63). Three passes can each land a tap on the same physical takeoff
+  // (end-touch, crossing, det-bridge) — and the crossing pass used to fire in BOTH directions.
+  // Page-24 field data: the x1476 junction billed TWO taps (one in the main, one in the drop) and
+  // both were kept; at x1153 the referee killed one duplicate and bank memory the other, so the
+  // junction read as "detected but won't insert". Every pass now asks this before stamping.
+  function tapAlreadyNear(x,y,tolIn){
+    var tol=inToPt(Math.max(6,tolIn||18));
+    return (window.__runs2d||[]).some(function(r){
+      var fr; try{ fr=runFrames(r); }catch(_){ return false; }
+      return (r.pieces||[]).some(function(p,i){
+        if(!(p.kind==='fitting'&&p._tap)) return false;
+        var f=fr[i]; if(!f) return false;
+        return Math.hypot(f.x-x,f.y-y)<=tol; });
+    });
+  }
+  window.__tapNearPt=tapAlreadyNear;
   function inferTapsFromEnds(){
     var runs=window.__runs2d||[]; if(runs.length<2) return 0;
     window.__tapDisp=[];
@@ -3583,9 +3603,17 @@ function refreshSel(){
           // turning, not a branch tapping a main. A real tap branch is strictly smaller than its trunk.
           // Costs the rare same-size tap; at 8% precision that trade buys the pass its life back.
           if((br.widthIn||12) > tw-2){ _rj('branch '+(br.widthIn||12)+'\u2033 not narrower than trunk '+tw+'\u2033 (corner-fake guard)'); return; }
-          // the branch end must POINT at the trunk, not away from it
-          var toward=(perp>0? -1:1);
-          if((out[0]*(-dy)*-toward+out[1]*dx*-toward)<0.5) return;
+          // the branch end must POINT at the trunk, not away from it (v3.63 — TWO fixes here).
+          // (1) The old test negated itself (`…*-toward`): it REFUSED every branch aimed at the
+          // trunk and passed the backwards ones. Page-24 field data: all four real drops onto the
+          // 20ø main died silently at this line, each with a round-tap detection 3–8in away.
+          // (2) 'toward' now comes from the branch BODY side, not the end point — an end that pokes
+          // past the trunk centerline flips perp's sign (the gap −3.7 case) and made the side call
+          // pure noise. A point 12in back along the branch is always on the honest side.
+          var outN=out[0]*(-dy)+out[1]*dx;                  // branch outward dir · trunk normal
+          var bodyPerp=perp-outN*12;                        // perp of a point 12in back into the branch body
+          var toward=(bodyPerp>0? -1:1);                    // which normal direction walks body -> trunk
+          if((outN*toward)<0.5){ _rj('branch end points away from the trunk'); return; }
           if(!best || Math.abs(gap)<Math.abs(best.gap)) best={tr:tr, gap:gap, tw:tw};
         });
         if(best){
@@ -3632,7 +3660,13 @@ function refreshSel(){
       });
     });
     todo.forEach(function(t){
-      // skip if the trunk already carries a tap piece or mark near this branch
+      // skip if a tap already sits at this junction (v3.63 — an earlier todo entry or another pass
+      // got here first; a crossing drop plants a branch end on EACH flank of the main, which is one
+      // physical takeoff, not two)
+      var pe; if(t.end==='finish'){ var e9=runEnd(t.br); pe=[e9.x,e9.y]; } else pe=[t.br.start[0],t.br.start[1]];
+      if(tapAlreadyNear(pe[0],pe[1],Math.max(12,(t.tr.widthIn||12)))){
+        (window.__tapDisp=window.__tapDisp||[]).push({br:t.br.id, tr:t.tr.id, x:Math.round(pe[0]), y:Math.round(pe[1]), why:'duplicate: a tap already sits at this junction'});
+        return; }
       try{
         window.__connClickA=null; window.__connClickB=null; window.__connSrc='infer-tap';
         if(window.__connectTap && window.__connectTap(t.br.id, t.end, t.tr.id, 'start')) made++;
@@ -3667,7 +3701,7 @@ function refreshSel(){
       runs.forEach(function(rs){
         var acc9=0;
         (rs.pieces||[]).forEach(function(pz){
-          if(pz._sizeStep) steps.push([rs.start[0]+rs.dir[0]*inToPt(acc9), rs.start[1]+rs.dir[1]*inToPt(acc9)]);
+          if(pz._sizeStep) steps.push({x:rs.start[0]+rs.dir[0]*inToPt(acc9), y:rs.start[1]+rs.dir[1]*inToPt(acc9), rid:rs.id});
           if(pz.kind==='straight') acc9+=(pz.lenIn||0);
         });
       });
@@ -3682,6 +3716,12 @@ function refreshSel(){
         // crossing already carries three independent evidences; the width belt is redundant here and
         // stays where it earned its keep (the end-touch pass).
         if(runLenIn(br)<24) return;
+        // THE TAP BELONGS TO THE WIDER RUN (v3.63). This pass evaluated every crossing in BOTH
+        // directions and stamped both — page-24: each junction billed a tap in the main AND one in
+        // the drop. The tap fitting lives on the trunk being tapped, and the trunk is the wider
+        // run; when this pairing has the roles backwards, skip — the reverse pairing inserts the
+        // single real one. Equal widths pass both ways and the junction de-dupe keeps the first.
+        if((br.widthIn||12) > tw+0.5) return;
         // does br CROSS tr's band? project br's ends onto tr's frame
         var sx=tr.start[0],sy=tr.start[1],dx=tr.dir[0],dy=tr.dir[1];
         var eB=runEnd(br);
@@ -3692,9 +3732,13 @@ function refreshSel(){
         var t=( -o1 )/((o2-o1)||1); var crossAlong=a1+(a2-a1)*t;               // along-position where centerlines meet
         if(crossAlong<6||crossAlong>Lt-6) return;
         var cx9=sx+dx*inToPt(crossAlong), cy9=sy+dy*inToPt(crossAlong);
+        // one tap per junction (v3.63) — another pass (or the equal-width reverse pairing) got here first
+        if(tapAlreadyNear(cx9,cy9,Math.max(12,tw))){
+          (window.__tapDisp=window.__tapDisp||[]).push({br:br.id,brW:bw,tr:tr.id,trW:tw,x:Math.round(cx9),y:Math.round(cy9),why:'duplicate: a tap already sits at this junction'});
+          return; }
         // (v3.61) the takeoff's reducer lands at the NEXT JOINT downstream -- field callouts on the
         // 28o main put it 4'4\"-6'4\" from the drop. Reach = one spiral section (72in), not one width.
-        var nearStep=steps.some(function(sp){ return Math.hypot(sp[0]-cx9,sp[1]-cy9)<=inToPt(Math.max(tw,72)); });
+        var nearStep=steps.some(function(sp){ return Math.hypot(sp.x-cx9,sp.y-cy9)<=inToPt(Math.max(tw,72)); });
         if(!nearStep){ (window.__tapDisp=window.__tapDisp||[]).push({br:br.id,brW:bw,tr:tr.id,trW:tw,x:Math.round(sx+dx*inToPt(crossAlong)),y:Math.round(sy+dy*inToPt(crossAlong)),why:'crossing without a trunk reducer nearby \u2014 reads as elevation crossing, not a tap'}); return; }
         // already tapped here?
         var acc2=0, hasTap=false;
@@ -3769,8 +3813,15 @@ function refreshSel(){
         var hist=(tr3&&tr3.n>=5)?('Historically the estimator kept '+tr3.kept+' of '+tr3.n+' fittings from this same software pass \u2014 weigh that as a prior, not a verdict.'):'';
         var ctx='Software evidence for this spot: '+((e.reasons||[]).join('; ')||'none')+'. '+hist;
         var isTapQ=(e.kind==='stap'||e.kind==='tap'||e.kind==='tee');
+        // v3.63: a tap placed by the CROSSING pass exists BECAUSE the branch visibly continues past
+        // the trunk (drop-through-main, vouched by the trunk reducing at the takeoff). Asking that
+        // tap "does the duct continue?" always answers yes — the referee was auto-deleting the
+        // pass's entire output (page 24, x1153: inserted, then killed as 'crossing'). Ask the
+        // question that actually discriminates: does the trunk neck down at this junction?
+        var isCrossTap=isTapQ && /cross/.test(e.src||'');
         var Q;
-        if(isTapQ) Q='Inside the red circle, a duct meets the side of another duct. corner = the airstream TURNS (miter/diagonal joint line, matching widths flowing into each other, the through-duct segmenting AT this junction). tap = a branch TERMINATES into a trunk whose walls run CONTINUOUS straight through. crossing = the duct visibly CONTINUES on the far side. Answer ONLY {"verdict":"tap"|"crossing"|"corner"|"unsure","reason":"<8 words"}.';
+        if(isCrossTap) Q='Inside the red circle, a branch duct runs across a trunk duct. tap = the TRUNK visibly changes size at or just past this junction (it necks down where air leaves at a takeoff), or a tap/conical fitting visibly joins them. crossing = the two ducts merely overlap with NO trunk size change and NO joining fitting (different elevations). Answer ONLY {"verdict":"tap"|"crossing"|"unsure","reason":"<8 words"}.';
+        else if(isTapQ) Q='Inside the red circle, a duct meets the side of another duct. corner = the airstream TURNS (miter/diagonal joint line, matching widths flowing into each other, the through-duct segmenting AT this junction). tap = a branch TERMINATES into a trunk whose walls run CONTINUOUS straight through. crossing = the duct visibly CONTINUES on the far side. Answer ONLY {"verdict":"tap"|"crossing"|"corner"|"unsure","reason":"<8 words"}.';
         else if(e.kind==='tr'||e.kind==='reducer'||e.kind==='s2r') Q='Inside the red circle, does the duct WIDTH visibly change (a taper/transition between two sizes)? Answer ONLY {"verdict":"yes"|"no"|"unsure","reason":"<8 words"}.';
         else if(e.kind==='cap') Q='Inside the red circle, does the duct END with a cap (closed end, no continuation)? Answer ONLY {"verdict":"yes"|"no"|"unsure","reason":"<8 words"}.';
         else Q='Inside the red circle, is there a 90-degree duct ELBOW (the duct turns a corner)? Answer ONLY {"verdict":"yes"|"no"|"unsure","reason":"<8 words"}.';
@@ -3791,7 +3842,9 @@ function refreshSel(){
         var pj=JSON.parse(raw);
         var v=(pj.verdict||'unsure');
         e.reasons.push('AI (ink'+(hist?'+history':'')+'): '+v+(pj.reason?(' \u2014 '+pj.reason):''));
-        if(v==='crossing'){ window.__stripDel(i,true); e.reasons.push('auto-removed: ink shows the duct continuing past'); }
+        if(v==='crossing'){
+          if(isCrossTap){ e.machine='you'; e.reasons.push('ink reads as a plain crossing — but the trunk reduces at this junction (why the tap was placed); left on the strip for your call'); }
+          else { window.__stripDel(i,true); e.reasons.push('auto-removed: ink shows the duct continuing past'); } }
         else if(v==='corner'){ window.__stripDel(i,true); e.reasons.push('auto-removed: ink shows the duct TURNING here \u2014 elbow territory, not a tap'); }
         else if(v==='tap'||v==='yes'){ e.score=Math.min(1,e.score+0.15);
           e.machine=(e.machine==='no')?'you':'yes';                     // ink disagrees with a NO -> human decides; confirms a YOU -> yes
@@ -3812,7 +3865,12 @@ function refreshSel(){
     dets.forEach(function(d){
       if(d._used || d.nx==null) return;
       if(base(d.cls)!=='tap') return;
-      if((d.score||0) < (window.__yoloGreenScoped?0.18:0.30)) return;
+      // 0.30 -> 0.25 (v3.63): the geometry below is the real gate (branch end + trunk body +
+      // perpendicular); page-24's sanitize-relabeled round-taps came in at 0.297/0.264 and died
+      // here by a hair while sitting dead on real junctions.
+      if((d.score||0) < (window.__yoloGreenScoped?0.18:0.25)) return;
+      // one tap per junction (v3.63): an infer pass already tapped where this detection points
+      if(window.__tapNearPt && window.__tapNearPt(d.nx,d.ny,24)){ d._used=true; window.__detNote&&window.__detNote(d,'tap-bridge','a tap already sits at this junction (placed by an infer pass) — detection satisfied'); return; }
       var reach=inToPt(36);
       // trunk: a run whose BODY is under the detection
       var trunk=null, tBest=1e18;
@@ -3826,12 +3884,29 @@ function refreshSel(){
           var dd=Math.hypot(E.p[0]-d.nx, E.p[1]-d.ny); if(dd<=reach && dd<bBest){ bBest=dd; br=r; bEnd=E.end; } }); });
       if(!br) return;
       var dot=Math.abs(br.dir[0]*trunk.dir[0]+br.dir[1]*trunk.dir[1]); if(dot>0.7) return;   // branch must come in from the side
-      try{ if(window.__connectTap && window.__connectTap(br.id, bEnd, trunk.id, null)){ d._used=true; made++; } }catch(e){ console.warn('bridgeTaps', e); }
+      try{ window.__connSrc='bridge-tap';
+        if(window.__connectTap && window.__connectTap(br.id, bEnd, trunk.id, null)){ d._used=true; made++; window.__detNote&&window.__detNote(d,'tap-bridge','bridged '+br.id+' into '+trunk.id); }
+      }catch(e){ console.warn('bridgeTaps', e); }
+      finally{ window.__connSrc=null; }
     });
     if(made) console.log('[takeoff] bridged '+made+' tap(s): branch end into trunk side');
     return made;
   }
   window.__bridgeTaps=bridgeTaps;
+  // v3.63: after every tap pass has run, stamp 'satisfied' onto tap detections that now have a tap
+  // under them — the infer passes place taps from geometry without consuming the detection, so the
+  // report kept saying 'detected but not inserted' about junctions that WERE tapped.
+  function markTapDetsPlaced(){
+    var dets=window.__yoloDets||[], n=0;
+    dets.forEach(function(d){
+      if(d._used || d.nx==null) return;
+      if(!/tap|tee/.test(d.cls||'')) return;
+      if(tapAlreadyNear(d.nx,d.ny,30)){ d._used=true; n++; window.__detNote&&window.__detNote(d,'tap-place','a tap sits at this junction — detection satisfied'); }
+    });
+    if(n) console.log('[takeoff] '+n+' tap detection(s) matched to placed taps');
+    return n;
+  }
+  window.__markTapDetsPlaced=markTapDetsPlaced;
   // ---- PRINTED TAG BEATS A MEASURED GAP: a run with no size of its own falls back to the wall gap
   // the pairing measured — and when the pairing grabbed the wrong walls that gap can be way oversize
   // (e.g. 30" on a duct the print tags 16x14). If an UNCLAIMED size tag sits on such a run, adopt it:
@@ -5156,7 +5231,17 @@ function refreshSel(){
           for(var k=0;k<mine.length;k++){ var b=mine[k];
             if(b.kind!==e.kind) continue;
             if(Math.hypot((b.x||0)-e.x,(b.y||0)-e.y)>tolPt) continue;
-            if(b.human==='deleted'){ e.reasons.push('memory: you deleted this here before'); window.__stripDel(i,true); vetoed++; }
+            if(b.human==='deleted'){
+              // v3.63: don't silently replay a deletion onto a TAP the model currently vouches for.
+              // The crossing pass used to stamp DUPLICATE taps (one per direction) — deleting the
+              // extra banked a ✗ at that junction, and memory then killed the single legit tap on
+              // every rebuild ("detected but won't insert"). With a solid tap detection sitting on
+              // it now, surface instead of auto-deleting; your next ✗ or ✓ re-banks the final word.
+              var _detV=(e.kind==='stap') && (window.__yoloDets||[]).some(function(dd){
+                return dd.nx!=null && /tap|tee/.test(dd.cls||'') && !dd._lowProp && (dd.score||0)>=0.25 &&
+                       Math.hypot(dd.nx-e.x, dd.ny-e.y)<=inToPt(Math.max(18,(e.widthIn||12)*1.5)); });
+              if(_detV){ e.reasons.push('memory: you deleted a tap here before — but the model sees a tap at this junction now; left on the strip for your call'); }
+              else { e.reasons.push('memory: you deleted this here before'); window.__stripDel(i,true); vetoed++; } }
             else { e.reasons.push('memory: you kept this here before'); window.__stripKeep(i,true); confirmed++;
               if(e.kind==='run') (window.__rogueKeepMem=window.__rogueKeepMem||[]).push({x:e.x,y:e.y}); }
             break;
@@ -6067,6 +6152,7 @@ function refreshSel(){
     try{ _rBr+=(window.__inferTapsFromEnds?window.__inferTapsFromEnds():0)||0; }catch(e){ console.warn('inferTaps',e); }
     try{ _rBr+=(window.__inferTapsFromCrossings?window.__inferTapsFromCrossings():0)||0; }catch(e){ console.warn('crossTaps',e); }
     var _rTap=0; try{ _rTap=(window.__bridgeTaps?window.__bridgeTaps():0)||0; }catch(e){ console.warn('tapbridge',e); }
+    try{ window.__markTapDetsPlaced&&window.__markTapDetsPlaced(); }catch(e){}
     if(_rJoin||_rSyn||_rArc||_rBr||_rTap) console.log('[takeoff recovery] corners:'+_rJoin+' legs:'+_rSyn+' arc-elbows:'+_rArc+' reducer-bridges:'+_rBr+' tap-bridges:'+_rTap);
     var _rInf=0; try{ _rInf=(window.__inferCornersFromEnds?window.__inferCornersFromEnds():0)||0; }catch(e){ console.warn('infer',e); }
     var _rMg=0; try{ _rMg=(window.__mergeElbowJoins?window.__mergeElbowJoins():0)||0; }catch(e){ console.warn('merge',e); }
