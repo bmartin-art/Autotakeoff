@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.70</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.71</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2666,6 +2666,13 @@ function refreshSel(){
     var branches=[], sides=[];
     function clonePc(p){ return JSON.parse(JSON.stringify(p)); }
     function armBranch(pieceList, dir){ if(!pieceList.length) return;
+      // SLIVER GUARD (v3.71, auto modes only): an arm with under 12in of straight is a split
+      // artifact, not duct — page 2 grew a 4in arm that then collected a tap. Manual cross-taps
+      // keep the old behavior (the user pointed at it on purpose).
+      if(opts.singleTap||opts.attachOnly){
+        var _tot9=pieceList.reduce(function(s9,p9){ return s9+((p9.kind==='straight'&&p9.lenIn)||0); },0);
+        if(_tot9<12) return;
+      }
       var side=(dir[0]*tn[0]+dir[1]*tn[1])>=0?1:-1;
       var f0=pieceList[0], bR=!!f0.round, aBW=f0.widthIn||cross.widthIn, aBD=(f0.depthIn!=null?f0.depthIn:(bR?aBW:null));
       var halfIn=(w||cross.widthIn||12)/2, fs=null, qi;                        // start the branch at the trunk FACE, not the centerline
@@ -2686,6 +2693,7 @@ function refreshSel(){
       armBranch(arm2, [cross.dir[0],cross.dir[1]]);
       armBranch(arm1, [-cross.dir[0],-cross.dir[1]]);
     }
+    if(!sides.length && (opts.singleTap||opts.attachOnly)) return false;           // auto modes: no real arms -> no split (never synthesize)
     if(!sides.length){                                                             // fallback: P not on the cross run — single straight per side
       var Ce=runEnd(cross), ends=[[cross.start[0],cross.start[1]],[Ce.x,Ce.y]];
       var bW0=cross.widthIn||Math.max(6,Math.round(w/2)), bR0=!!(cross.pieces[0]&&cross.pieces[0].round), bD0=(bR0?bW0:((cross.pieces[0]&&cross.pieces[0].depthIn)||null)), bSz0=bR0?('\u00f8'+bW0):(bW0+'\u00d7'+(bD0!=null?bD0:bW0));
@@ -3088,6 +3096,11 @@ function refreshSel(){
     var nTb = 0; try{ nTb = bridgeTaps(); }catch(e){ console.warn('bridgeTaps', e); }
     try{ window.__markTapDetsPlaced&&window.__markTapDetsPlaced(); }catch(e){}
     try{ window.__bridgeCaps&&window.__bridgeCaps(); }catch(e){ console.warn('capbridge',e); }
+    // SECOND DE-DUPE (v3.71): the first sweep runs BEFORE the recovery passes, so overlaps that the
+    // welds/splits/extensions create or expose afterward survived to the panel — page 2 came back
+    // with six near-parallel overlapping pairs (incl. inner-liner traces sitting inside their outer
+    // wall) reading as doubled runs. Sweep again once every pass has finished moving geometry.
+    try{ var _dd2=(window.__dedupeOverlappingRuns?window.__dedupeOverlappingRuns():0)||0; if(_dd2) console.log('[takeoff] post-recovery de-dupe removed '+_dd2+' duplicate run(s)'); }catch(e){ console.warn('post-dedupe',e); }
     var nInf = 0; try{ nInf = inferCornersFromEnds(); }catch(e){ console.warn('inferCorners', e); }
     var nMg = 0; try{ nMg = mergeElbowJoins(); }catch(e){ console.warn('mergeElbowJoins', e); }
     var nFit = integrateYoloFittings();
@@ -3779,14 +3792,19 @@ function refreshSel(){
         var t=( -o1 )/((o2-o1)||1); var crossAlong=a1+(a2-a1)*t;               // along-position where centerlines meet
         if(crossAlong<6||crossAlong>Lt-6) return;
         var cx9=sx+dx*inToPt(crossAlong), cy9=sy+dy*inToPt(crossAlong);
+        // SPLITS ARE FOR ROUND MAINS ONLY (v3.71). The v3.67/68 split-and-weld was designed and
+        // field-verified on spiral-trunk sheets. First rect sheet through it (page 2) came back
+        // "missing duct and doubling runs": rect crossings are mostly elevation crossings, and
+        // splitting them carved real runs into arms and slivers (a 4in arm at 1366,1700 carrying a
+        // tap). Rect trunks keep the pre-v3.67 stamp-only behavior — tap piece in the trunk, the
+        // crossing run left whole.
+        var _rndTr9=!!(window.__runIsRound && window.__runIsRound(tr));
         // one tap per junction (v3.63) — another pass (or the equal-width reverse pairing) got here
-        // first. v3.68: the junction is billed, but the CROSSING RUN still needs to attach — run 10
-        // field data: the x537 riser and x1477 drop stayed their own color because the end-touch
-        // tap (from a nearby stub) deduped this pass before it could split & weld. Split the
-        // crossing run into welded arms anyway; bill nothing.
+        // first. v3.68: the junction is billed, but on ROUND sheets the crossing run still needs to
+        // attach (split & weld, bill nothing).
         if(tapAlreadyNear(cx9,cy9,Math.max(12,tw))){
           var _wok=false;
-          try{ _wok=!!(window.__connectCrossTap && window.__connectCrossTap(tr.id, null, br.id, null, {singleTap:true, attachOnly:true})); }catch(e){}
+          if(_rndTr9){ try{ _wok=!!(window.__connectCrossTap && window.__connectCrossTap(tr.id, null, br.id, null, {singleTap:true, attachOnly:true})); }catch(e){} }
           (window.__tapDisp=window.__tapDisp||[]).push({br:br.id,brW:bw,tr:tr.id,trW:tw,x:Math.round(cx9),y:Math.round(cy9),why:'duplicate: a tap already sits at this junction'+(_wok?' (crossing run split & welded to it, no second tap billed)':'')});
           return; }
         // (v3.61) the takeoff's reducer lands at the NEXT JOINT downstream -- field callouts on the
@@ -3797,17 +3815,31 @@ function refreshSel(){
         var acc2=0, hasTap=false;
         for(var i3=0;i3<pcs.length;i3++){ if(pcs[i3]._tap && Math.abs(acc2-crossAlong)<=Math.max(12,tw)) hasTap=true; if(pcs[i3].kind==='straight') acc2+=(pcs[i3].lenIn||0); }
         if(hasTap) return;
-        // ATTACH, don't just stamp (v3.67). This used to bare-__doInsert a tap piece into the
-        // trunk: the tap billed, but the crossing drop was never split, welded, or recolored —
-        // on screen the junction read as 'marked but not inserted' next to the end-touch taps,
-        // which DO weld (run 9: the one pink attached drop vs everything else). Route through
-        // the same machinery as Connect > Cross-Tap: the crossing run becomes two arms starting
-        // at the trunk FACE, everything shares one color, and singleTap bills ONE tap for the
-        // junction (one physical takeoff), on the longer arm's side.
-        try{ window.__connSrc='infer-cross-tap';
-          if(window.__connectCrossTap && window.__connectCrossTap(tr.id, null, br.id, null, {singleTap:true})){ made++; }
-        }catch(e){ console.warn('crossTap',e); }
-        finally{ window.__connSrc=null; }
+        // ATTACH, don't just stamp (v3.67) — ROUND trunks only (v3.71). On spiral sheets the
+        // crossing run becomes two arms at the trunk FACE, one shared color, ONE tap billed
+        // (longer arm's side). On rect sheets: stamp the tap piece into the trunk and leave the
+        // crossing run whole (splits carved up page 2's rect work — see note above).
+        if(_rndTr9){
+          try{ window.__connSrc='infer-cross-tap';
+            if(window.__connectCrossTap && window.__connectCrossTap(tr.id, null, br.id, null, {singleTap:true})){ made++; }
+          }catch(e){ console.warn('crossTap',e); }
+          finally{ window.__connSrc=null; }
+        } else {
+          var acc3=0;
+          for(var i4=0;i4<pcs.length;i4++){ var pz=pcs[i4];
+            if(pz.kind!=='straight'){ continue; }
+            var l4=pz.lenIn||0;
+            if(crossAlong>=acc3-0.01 && crossAlong<=acc3+l4+0.01){
+              var side9=((o1+o2)/2)>=0?1:-1;
+              try{ window.__connSrc='infer-cross-tap';
+                if(window.__doInsert && window.__doInsert(tr.id, i4, Math.max(1,crossAlong-acc3), {type:'tap', branchW:bw, branchSide:side9, branchRound:window.__runIsRound(br), mainRound:false, shopTap:false})){ made++; }
+              }catch(e){ console.warn('crossTap',e); }
+              finally{ window.__connSrc=null; }
+              break;
+            }
+            acc3+=l4;
+          }
+        }
       });
     });
     if(made) console.log('[takeoff] inferred '+made+' tap(s) at branch crossings backed by trunk reducers');
@@ -6298,6 +6330,11 @@ function refreshSel(){
     var _rTap=0; try{ _rTap=(window.__bridgeTaps?window.__bridgeTaps():0)||0; }catch(e){ console.warn('tapbridge',e); }
     try{ window.__markTapDetsPlaced&&window.__markTapDetsPlaced(); }catch(e){}
     try{ window.__bridgeCaps&&window.__bridgeCaps(); }catch(e){ console.warn('capbridge',e); }
+    // SECOND DE-DUPE (v3.71): the first sweep runs BEFORE the recovery passes, so overlaps that the
+    // welds/splits/extensions create or expose afterward survived to the panel — page 2 came back
+    // with six near-parallel overlapping pairs (incl. inner-liner traces sitting inside their outer
+    // wall) reading as doubled runs. Sweep again once every pass has finished moving geometry.
+    try{ var _dd2=(window.__dedupeOverlappingRuns?window.__dedupeOverlappingRuns():0)||0; if(_dd2) console.log('[takeoff] post-recovery de-dupe removed '+_dd2+' duplicate run(s)'); }catch(e){ console.warn('post-dedupe',e); }
     if(_rJoin||_rSyn||_rArc||_rBr||_rTap) console.log('[takeoff recovery] corners:'+_rJoin+' legs:'+_rSyn+' arc-elbows:'+_rArc+' reducer-bridges:'+_rBr+' tap-bridges:'+_rTap);
     var _rInf=0; try{ _rInf=(window.__inferCornersFromEnds?window.__inferCornersFromEnds():0)||0; }catch(e){ console.warn('infer',e); }
     var _rMg=0; try{ _rMg=(window.__mergeElbowJoins?window.__mergeElbowJoins():0)||0; }catch(e){ console.warn('merge',e); }
