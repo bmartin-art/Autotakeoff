@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.67</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.68</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2641,6 +2641,21 @@ function refreshSel(){
       var ct=(P[0]-cf.x)*cf.ux+(P[1]-cf.y)*cf.uy; if(ct<-1e-6||ct>cL+1e-6) continue;
       var cpx=cf.x+cf.ux*ct, cpy=cf.y+cf.uy*ct, cd=Math.hypot(P[0]-cpx,P[1]-cpy);
       if(cd<cbest){ cbest=cd; cpi=ci; cAlong=ptToIn(ct); splitPt=[cpx,cpy]; } }
+    // v3.68: SNAP, don't synthesize. If P landed inside a FITTING's span of the cross run (frames
+    // advance through reducer lenIn — and reducers live exactly at takeoffs), no straight contains
+    // it, and the synthetic fallback below would rebuild the arms as bare straights — silently
+    // DELETING the cross run's own taps/reducers (the x537 riser carries two kept taps). Snap to
+    // the nearest straight piece within 24in instead; the synthetic fallback stays only for a
+    // cross run that has no usable straight near the junction at all.
+    if(cpi<0){
+      var sbest=inToPt(24);
+      for(var ci2=0;ci2<cross.pieces.length;ci2++){ var cp2=cross.pieces[ci2]; if(cp2.kind!=='straight') continue;
+        var cf2=cfr[ci2], cL2=inToPt(cp2.lenIn||0);
+        var ct2=(P[0]-cf2.x)*cf2.ux+(P[1]-cf2.y)*cf2.uy;
+        var tc=Math.max(0,Math.min(cL2,ct2));
+        var qx=cf2.x+cf2.ux*tc, qy=cf2.y+cf2.uy*tc, qd=Math.hypot(P[0]-qx,P[1]-qy);
+        if(qd<sbest){ sbest=qd; cpi=ci2; cAlong=ptToIn(tc); splitPt=[qx,qy]; } }
+    }
     var branches=[], sides=[];
     function clonePc(p){ return JSON.parse(JSON.stringify(p)); }
     function armBranch(pieceList, dir){ if(!pieceList.length) return;
@@ -2685,8 +2700,12 @@ function refreshSel(){
       var _li=_lens.indexOf(Math.max.apply(null,_lens));
       tapSides=[sides[Math.max(0,_li)]];
     }
-    var ins=[mkS(a)]; tapSides.forEach(function(sd){ ins.push(mkTap(sd)); }); ins.push(mkS(L-a));
-    trunk.pieces.splice.apply(trunk.pieces,[pi,1].concat(ins)); trunk.color=color;
+    if(opts.attachOnly){ tapSides=[]; }                     // v3.68: junction already billed — split & weld only
+    if(tapSides.length){
+      var ins=[mkS(a)]; tapSides.forEach(function(sd){ ins.push(mkTap(sd)); }); ins.push(mkS(L-a));
+      trunk.pieces.splice.apply(trunk.pieces,[pi,1].concat(ins));
+    }
+    trunk.color=color;
     window.__runs2d=(window.__runs2d||[]).filter(function(r){return r.id!==cross.id;}).concat(branches);
     selRun=trunk.id; try{window.__selRunId=trunk.id;}catch(_){}
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Cross-tap: '+tapSides.length+' tap(s) into the trunk, crossing run split into '+branches.length+' branch(es).'); return true;
@@ -3752,9 +3771,15 @@ function refreshSel(){
         var t=( -o1 )/((o2-o1)||1); var crossAlong=a1+(a2-a1)*t;               // along-position where centerlines meet
         if(crossAlong<6||crossAlong>Lt-6) return;
         var cx9=sx+dx*inToPt(crossAlong), cy9=sy+dy*inToPt(crossAlong);
-        // one tap per junction (v3.63) — another pass (or the equal-width reverse pairing) got here first
+        // one tap per junction (v3.63) — another pass (or the equal-width reverse pairing) got here
+        // first. v3.68: the junction is billed, but the CROSSING RUN still needs to attach — run 10
+        // field data: the x537 riser and x1477 drop stayed their own color because the end-touch
+        // tap (from a nearby stub) deduped this pass before it could split & weld. Split the
+        // crossing run into welded arms anyway; bill nothing.
         if(tapAlreadyNear(cx9,cy9,Math.max(12,tw))){
-          (window.__tapDisp=window.__tapDisp||[]).push({br:br.id,brW:bw,tr:tr.id,trW:tw,x:Math.round(cx9),y:Math.round(cy9),why:'duplicate: a tap already sits at this junction'});
+          var _wok=false;
+          try{ _wok=!!(window.__connectCrossTap && window.__connectCrossTap(tr.id, null, br.id, null, {singleTap:true, attachOnly:true})); }catch(e){}
+          (window.__tapDisp=window.__tapDisp||[]).push({br:br.id,brW:bw,tr:tr.id,trW:tw,x:Math.round(cx9),y:Math.round(cy9),why:'duplicate: a tap already sits at this junction'+(_wok?' (crossing run split & welded to it, no second tap billed)':'')});
           return; }
         // (v3.61) the takeoff's reducer lands at the NEXT JOINT downstream -- field callouts on the
         // 28o main put it 4'4\"-6'4\" from the drop. Reach = one spiral section (72in), not one width.
