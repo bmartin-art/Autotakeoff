@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.69</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.70</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2609,7 +2609,14 @@ function refreshSel(){
         for(k=0;k<branch.pieces.length;k++){ if(branch.pieces[k].kind==='straight'){ branch.pieces[k].lenIn=Math.max(1,branch.pieces[k].lenIn+dIn); break; } } }
       else { for(k=branch.pieces.length-1;k>=0;k--){ if(branch.pieces[k].kind==='straight'){ branch.pieces[k].lenIn=Math.max(1,branch.pieces[k].lenIn+dIn); break; } } } }
     // insert a tap into the trunk at that point (no new branch run - the branch already exists)
-    if(!attachOnly && window.__doInsert) window.__doInsert(trunk.id, bestI, alongIn, {type:'tap', branch:false, branchW:branch.widthIn, branchRound:bRound, mainRound:tRound, shopTap:!!shopTap});
+    // WHICH FLANK (v3.70): this spec never carried branchSide, so __doInsert defaulted every
+    // end-touch tap to side +1 — on a left-to-right main that's the BOTTOM flank, no matter where
+    // the branch actually was (run 12: every junction stub drawn low; x1787's branch comes from
+    // ABOVE). Compute the side from the branch end's position against the trunk piece's frame.
+    var _fr9=runFrames(trunk), _f9=_fr9[bestI]||{x:trunk.start[0],y:trunk.start[1],ux:trunk.dir[0],uy:trunk.dir[1],nx:-trunk.dir[1],ny:trunk.dir[0]};
+    var _tx9=_f9.x+_f9.ux*inToPt(alongIn), _ty9=_f9.y+_f9.uy*inToPt(alongIn);
+    var _bSide9=(((bp[0]-_tx9)*_f9.nx+(bp[1]-_ty9)*_f9.ny)>=0)?1:-1;
+    if(!attachOnly && window.__doInsert) window.__doInsert(trunk.id, bestI, alongIn, {type:'tap', branch:false, branchW:branch.widthIn, branchSide:_bSide9, branchRound:bRound, mainRound:tRound, shopTap:!!shopTap});
     var shared=trunk.color||branch.color||'#5b8def'; trunk.color=shared; branch.color=shared;
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus(attachOnly?'Welded the branch to the junction (tap already billed there).':((shopTap?'Shop-tapped':'Tapped')+' the branch into the trunk \u2014 both now one color.')); return true;
   };
@@ -4001,12 +4008,31 @@ function refreshSel(){
       });
       if(!best){ window.__detNote&&window.__detNote(d,'cap-bridge','SKIPPED: no run end near the detection'); return; }
       var r=best.r;
+      // one cap per physical end: double-traced risers fire two cap dets ~10in apart
+      var _capped=runs.some(function(rc){
+        if(!(rc.pieces&&rc.pieces.length)) return false;
+        var pcs9=rc.pieces;
+        return [pcs9[0],pcs9[pcs9.length-1]].some(function(pp9,ii9){
+          if(!(pp9&&pp9.kind==='fitting'&&pp9._cap)) return false;
+          var ee9=(ii9===0)?[rc.start[0],rc.start[1]]:(function(){var e8=runEnd(rc);return [e8.x,e8.y];})();
+          return Math.hypot(ee9[0]-best.pt[0],ee9[1]-best.pt[1])<=inToPt(18);
+        });
+      });
+      if(_capped){ d._used=true; window.__detNote&&window.__detNote(d,'cap-bridge','a cap already sits at this end — detection satisfied'); return; }
+      // v3.70: 'continues' needs IN-LINE, not just nearby-and-parallel. Run 12: both cap dets were
+      // vetoed because a PARALLEL riser trace ~11in to the side had its end within reach — a
+      // neighbor, not a continuation. A true continuation sits dead on the axis (lat ≤ 4in).
       var contin=runs.some(function(rc){ if(rc===r) return false;
         if(Math.abs(rc.dir[0]*r.dir[0]+rc.dir[1]*r.dir[1])<0.9) return false;     // collinear family only
         var ec=runEnd(rc);
-        return [[rc.start[0],rc.start[1]],[ec.x,ec.y]].some(function(q){ return Math.hypot(q[0]-best.pt[0],q[1]-best.pt[1])<=inToPt(18); });
+        return [[rc.start[0],rc.start[1]],[ec.x,ec.y]].some(function(q){
+          var vx9=q[0]-best.pt[0], vy9=q[1]-best.pt[1];
+          if(Math.hypot(vx9,vy9)>inToPt(18)) return false;
+          var lat9=Math.abs(ptToIn(vx9*(-r.dir[1])+vy9*r.dir[0]));
+          return lat9<=4;                                                          // on the axis = real continuation
+        });
       });
-      if(contin){ window.__detNote&&window.__detNote(d,'cap-bridge','SKIPPED: a collinear run continues at this end — not a dead end'); return; }
+      if(contin){ window.__detNote&&window.__detNote(d,'cap-bridge','SKIPPED: a collinear run continues in line at this end — not a dead end'); return; }
       var pcs=r.pieces, endP=(best.end==='finish')?pcs[pcs.length-1]:pcs[0];
       if(endP && endP.kind==='fitting'){ window.__detNote&&window.__detNote(d,'cap-bridge','SKIPPED: a fitting already sits at this end'); return; }
       var sp=(endP&&endP.kind==='straight')?endP:null;
