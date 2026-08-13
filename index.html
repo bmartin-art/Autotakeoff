@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.66</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.67</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2568,7 +2568,9 @@ function refreshSel(){
     if(A.label&&!B.label) B.label=A.label; else if(B.label&&!A.label) A.label=B.label;
     renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Connected with a 90\u00b0 elbow'+stepMsg+' \u2014 both now one color.'); return true;
   };
-  window.__connectTap=function(idA, endA, idB, endB, shopTap){    // tap the branch run into the side of the trunk run
+  window.__connectTap=function(idA, endA, idB, endB, shopTap, attachOnly){    // tap the branch run into the side of the trunk run
+    // attachOnly (v3.67): weld + color the branch to the trunk WITHOUT billing a second tap —
+    // used when a junction already carries its tap but the far-side stub should still attach.
     var A=findRun(idA), B=findRun(idB); if(!A||!B||A===B) return false;
     var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
     function endPt(run,end){ var pl=window.__runPoly(run),n=pl.length; return end==='start'?pl[0]:pl[n-1]; }
@@ -2607,11 +2609,15 @@ function refreshSel(){
         for(k=0;k<branch.pieces.length;k++){ if(branch.pieces[k].kind==='straight'){ branch.pieces[k].lenIn=Math.max(1,branch.pieces[k].lenIn+dIn); break; } } }
       else { for(k=branch.pieces.length-1;k>=0;k--){ if(branch.pieces[k].kind==='straight'){ branch.pieces[k].lenIn=Math.max(1,branch.pieces[k].lenIn+dIn); break; } } } }
     // insert a tap into the trunk at that point (no new branch run - the branch already exists)
-    if(window.__doInsert) window.__doInsert(trunk.id, bestI, alongIn, {type:'tap', branch:false, branchW:branch.widthIn, branchRound:bRound, mainRound:tRound, shopTap:!!shopTap});
+    if(!attachOnly && window.__doInsert) window.__doInsert(trunk.id, bestI, alongIn, {type:'tap', branch:false, branchW:branch.widthIn, branchRound:bRound, mainRound:tRound, shopTap:!!shopTap});
     var shared=trunk.color||branch.color||'#5b8def'; trunk.color=shared; branch.color=shared;
-    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus((shopTap?'Shop-tapped':'Tapped')+' the branch into the trunk \u2014 both now one color.'); return true;
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus(attachOnly?'Welded the branch to the junction (tap already billed there).':((shopTap?'Shop-tapped':'Tapped')+' the branch into the trunk \u2014 both now one color.')); return true;
   };
-  window.__connectCrossTap=function(trunkId, endA, crossId, endB){    // trunk passes through; crossing run becomes two branches, one tap each side
+  window.__connectCrossTap=function(trunkId, endA, crossId, endB, opts){    // trunk passes through; crossing run becomes two branches, one tap each side
+    // opts.singleTap (v3.67): bill ONE tap for the junction (the drop-through-main case: one
+    // physical takeoff, arms on both flanks) instead of one per arm. The tap takes the side of
+    // the LONGER arm — the serving side.
+    opts=opts||{};
     var trunk=findRun(trunkId), cross=findRun(crossId); if(!trunk||!cross||trunk===cross) return false;
     var ppi=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
     var T0=trunk.start, Td=trunk.dir, C0=cross.start, Cd=cross.dir;
@@ -2673,11 +2679,17 @@ function refreshSel(){
     var L=trunk.pieces[pi].lenIn||0, a=Math.max(0,Math.min(L,aIn));
     function mkS(len){ return {kind:'straight',lenIn:Math.round(Math.max(0,len)*10)/10,widthIn:w,depthIn:dep,size:sz,cid:rr?'spiral':'st',camduct:rr?'Spiral':'Straight Duct',round:rr}; }
     function mkTap(side){ return {kind:'fitting',_src:(window.__connSrc||'connect-tap'),cid:'stap',camduct:'Tap',round:false,lenIn:0,widthIn:w,depthIn:dep,size:sz,_tap:true,branchSide:side,branchW:tapBW,branchLenIn:10,throatIn:10,mainRound:rr,branchRound:tapBR}; }
-    var ins=[mkS(a)]; sides.forEach(function(sd){ ins.push(mkTap(sd)); }); ins.push(mkS(L-a));
+    var tapSides=sides;
+    if(opts.singleTap && sides.length>1){
+      var _lens=branches.map(function(bb){ return (bb.pieces||[]).reduce(function(s9,p9){ return s9+((p9.kind==='straight'&&p9.lenIn)||0); },0); });
+      var _li=_lens.indexOf(Math.max.apply(null,_lens));
+      tapSides=[sides[Math.max(0,_li)]];
+    }
+    var ins=[mkS(a)]; tapSides.forEach(function(sd){ ins.push(mkTap(sd)); }); ins.push(mkS(L-a));
     trunk.pieces.splice.apply(trunk.pieces,[pi,1].concat(ins)); trunk.color=color;
     window.__runs2d=(window.__runs2d||[]).filter(function(r){return r.id!==cross.id;}).concat(branches);
     selRun=trunk.id; try{window.__selRunId=trunk.id;}catch(_){}
-    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Cross-tap: '+sides.length+' tap(s) into the trunk, crossing run split into '+branches.length+' branch(es).'); return true;
+    renderItems(); renderPanel(); if(typeof setStatus==='function') setStatus('Cross-tap: '+tapSides.length+' tap(s) into the trunk, crossing run split into '+branches.length+' branch(es).'); return true;
   };
   window.__runSideAt=function(runId,pieceIdx,alongIn,sx,sy){   // +1/-1: which side of the run centerline a screen point is on (page-space)
     var run=findRun(runId); if(!run) return 1; var fr=runFrames(run), f=fr[pieceIdx]; if(!f) return 1;
@@ -3667,7 +3679,13 @@ function refreshSel(){
       // physical takeoff, not two)
       var pe; if(t.end==='finish'){ var e9=runEnd(t.br); pe=[e9.x,e9.y]; } else pe=[t.br.start[0],t.br.start[1]];
       if(tapAlreadyNear(pe[0],pe[1],Math.max(12,(t.tr.widthIn||12)))){
-        (window.__tapDisp=window.__tapDisp||[]).push({br:t.br.id, tr:t.tr.id, x:Math.round(pe[0]), y:Math.round(pe[1]), why:'duplicate: a tap already sits at this junction'});
+        // v3.67: the junction already has its tap — but WELD this stub to it anyway (extend to
+        // the trunk + shared color, no second tap billed). Before this, the far-side stub of a
+        // drop-through junction stayed its own color and the junction looked half-attached.
+        try{ window.__connClickA=null; window.__connClickB=null;
+          if(window.__connectTap) window.__connectTap(t.br.id, t.end, t.tr.id, 'start', false, true);
+        }catch(e){}
+        (window.__tapDisp=window.__tapDisp||[]).push({br:t.br.id, tr:t.tr.id, x:Math.round(pe[0]), y:Math.round(pe[1]), why:'duplicate: a tap already sits at this junction (stub welded to it, no second tap billed)'});
         return; }
       try{
         window.__connClickA=null; window.__connClickB=null; window.__connSrc='infer-tap';
@@ -3746,21 +3764,17 @@ function refreshSel(){
         var acc2=0, hasTap=false;
         for(var i3=0;i3<pcs.length;i3++){ if(pcs[i3]._tap && Math.abs(acc2-crossAlong)<=Math.max(12,tw)) hasTap=true; if(pcs[i3].kind==='straight') acc2+=(pcs[i3].lenIn||0); }
         if(hasTap) return;
-        // find the straight piece containing crossAlong and stamp a tap into it
-        var acc3=0;
-        for(var i4=0;i4<pcs.length;i4++){ var pz=pcs[i4];
-          if(pz.kind!=='straight'){ continue; }
-          var l4=pz.lenIn||0;
-          if(crossAlong>=acc3-0.01 && crossAlong<=acc3+l4+0.01){
-            var side=((o1+o2)/2)>=0?1:-1;
-            try{ window.__connSrc='infer-cross-tap';
-              if(window.__doInsert && window.__doInsert(tr.id, i4, Math.max(1,crossAlong-acc3), {type:'tap', branchW:bw, branchSide:side, branchRound:window.__runIsRound(br), mainRound:window.__runIsRound(tr), shopTap:false})){ made++; }
-            }catch(e){ console.warn('crossTap',e); }
-            finally{ window.__connSrc=null; }
-            break;
-          }
-          acc3+=l4;
-        }
+        // ATTACH, don't just stamp (v3.67). This used to bare-__doInsert a tap piece into the
+        // trunk: the tap billed, but the crossing drop was never split, welded, or recolored —
+        // on screen the junction read as 'marked but not inserted' next to the end-touch taps,
+        // which DO weld (run 9: the one pink attached drop vs everything else). Route through
+        // the same machinery as Connect > Cross-Tap: the crossing run becomes two arms starting
+        // at the trunk FACE, everything shares one color, and singleTap bills ONE tap for the
+        // junction (one physical takeoff), on the longer arm's side.
+        try{ window.__connSrc='infer-cross-tap';
+          if(window.__connectCrossTap && window.__connectCrossTap(tr.id, null, br.id, null, {singleTap:true})){ made++; }
+        }catch(e){ console.warn('crossTap',e); }
+        finally{ window.__connSrc=null; }
       });
     });
     if(made) console.log('[takeoff] inferred '+made+' tap(s) at branch crossings backed by trunk reducers');
