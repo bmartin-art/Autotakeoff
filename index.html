@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.68</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.69</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3080,6 +3080,7 @@ function refreshSel(){
     var nBr = 0; try{ nBr = bridgeSizechanges(); }catch(e){ console.warn('bridgeSizechanges', e); }
     var nTb = 0; try{ nTb = bridgeTaps(); }catch(e){ console.warn('bridgeTaps', e); }
     try{ window.__markTapDetsPlaced&&window.__markTapDetsPlaced(); }catch(e){}
+    try{ window.__bridgeCaps&&window.__bridgeCaps(); }catch(e){ console.warn('capbridge',e); }
     var nInf = 0; try{ nInf = inferCornersFromEnds(); }catch(e){ console.warn('inferCorners', e); }
     var nMg = 0; try{ nMg = mergeElbowJoins(); }catch(e){ console.warn('mergeElbowJoins', e); }
     var nFit = integrateYoloFittings();
@@ -3968,6 +3969,58 @@ function refreshSel(){
     return n;
   }
   window.__markTapDetsPlaced=markTapDetsPlaced;
+  // ---- CAP BRIDGE (v3.69): put in the caps the model marks. Elbows, sizechanges and taps each
+  // have a detection-driven pass; cap detections were never consumed by ANYTHING (only the manual
+  // end-cap stamp existed) — run-11 field data: both cap dets unused, zero notes. A cap det near a
+  // FREE run end (roughly on-axis with it, no collinear run continuing there, no fitting already
+  // at that end) caps that end. Cap dets score low on these sheets (0.10-0.20), so the score floor
+  // is low and the free-end geometry is the real gate; every cap lands on the review strip and the
+  // referee's does-the-duct-end question + the estimator's ✓/✗ take it from there. ----
+  function bridgeCaps(){
+    var dets=window.__yoloDets||[], runs=window.__runs2d||[]; if(!dets.length||!runs.length) return 0;
+    var made=0;
+    dets.forEach(function(d){
+      if(d._used || d.nx==null) return;
+      if((d.cls||'').replace(/^(rect|round)-/,'')!=='cap') return;
+      if((d.score||0) < 0.10) return;
+      var reach=inToPt(30), best=null;
+      runs.forEach(function(r){
+        if(!r.pieces || !r.pieces.length) return;
+        var L=runLenIn(r); if(L<12) return;
+        var e=runEnd(r);
+        [['start',[r.start[0],r.start[1]],[-r.dir[0],-r.dir[1]]],
+         ['finish',[e.x,e.y],[e.ux,e.uy]]].forEach(function(E){
+          var dd=Math.hypot(E[1][0]-d.nx, E[1][1]-d.ny);
+          if(dd>reach) return;
+          var ax=ptToIn((d.nx-E[1][0])*E[2][0]+(d.ny-E[1][1])*E[2][1]);          // + = beyond the end
+          var lat=ptToIn(Math.abs((d.nx-E[1][0])*(-E[2][1])+(d.ny-E[1][1])*E[2][0]));
+          if(lat > (r.widthIn||12)/2+8) return;                                   // beside the duct, not at its end
+          if(ax < -18) return;                                                    // well inside the run = mid-duct mark, not a cap
+          if(!best || dd<best.d) best={r:r, end:E[0], d:dd, pt:E[1]};
+        });
+      });
+      if(!best){ window.__detNote&&window.__detNote(d,'cap-bridge','SKIPPED: no run end near the detection'); return; }
+      var r=best.r;
+      var contin=runs.some(function(rc){ if(rc===r) return false;
+        if(Math.abs(rc.dir[0]*r.dir[0]+rc.dir[1]*r.dir[1])<0.9) return false;     // collinear family only
+        var ec=runEnd(rc);
+        return [[rc.start[0],rc.start[1]],[ec.x,ec.y]].some(function(q){ return Math.hypot(q[0]-best.pt[0],q[1]-best.pt[1])<=inToPt(18); });
+      });
+      if(contin){ window.__detNote&&window.__detNote(d,'cap-bridge','SKIPPED: a collinear run continues at this end — not a dead end'); return; }
+      var pcs=r.pieces, endP=(best.end==='finish')?pcs[pcs.length-1]:pcs[0];
+      if(endP && endP.kind==='fitting'){ window.__detNote&&window.__detNote(d,'cap-bridge','SKIPPED: a fitting already sits at this end'); return; }
+      var sp=(endP&&endP.kind==='straight')?endP:null;
+      if(!sp){ for(var q=0;q<pcs.length;q++){ if(pcs[q].kind==='straight'){ sp=pcs[q]; break; } } }
+      if(!sp){ window.__detNote&&window.__detNote(d,'cap-bridge','SKIPPED: run has no straight piece to size the cap from'); return; }
+      var cap={kind:'fitting',_src:'bridge-cap',cid:'cap',camduct:(sp.round?'End Cap - SE':'End Cap - Connector'),round:!!sp.round,lenIn:0,widthIn:sp.widthIn,depthIn:sp.depthIn,size:sp.size,_cap:true};
+      if(best.end==='finish') pcs.push(cap); else pcs.unshift(cap);
+      d._used=true; made++;
+      window.__detNote&&window.__detNote(d,'cap-bridge','capped '+r.id+' at its '+best.end+' end ('+(cap.size||'')+')');
+    });
+    if(made){ console.log('[takeoff] capped '+made+' free duct end(s) from cap detections'); try{ renderItems(); renderPanel(); }catch(_){} }
+    return made;
+  }
+  window.__bridgeCaps=bridgeCaps;
   // ---- PRINTED TAG BEATS A MEASURED GAP: a run with no size of its own falls back to the wall gap
   // the pairing measured — and when the pairing grabbed the wrong walls that gap can be way oversize
   // (e.g. 30" on a duct the print tags 16x14). If an UNCLAIMED size tag sits on such a run, adopt it:
@@ -6218,6 +6271,7 @@ function refreshSel(){
     try{ _rBr+=(window.__inferTapsFromCrossings?window.__inferTapsFromCrossings():0)||0; }catch(e){ console.warn('crossTaps',e); }
     var _rTap=0; try{ _rTap=(window.__bridgeTaps?window.__bridgeTaps():0)||0; }catch(e){ console.warn('tapbridge',e); }
     try{ window.__markTapDetsPlaced&&window.__markTapDetsPlaced(); }catch(e){}
+    try{ window.__bridgeCaps&&window.__bridgeCaps(); }catch(e){ console.warn('capbridge',e); }
     if(_rJoin||_rSyn||_rArc||_rBr||_rTap) console.log('[takeoff recovery] corners:'+_rJoin+' legs:'+_rSyn+' arc-elbows:'+_rArc+' reducer-bridges:'+_rBr+' tap-bridges:'+_rTap);
     var _rInf=0; try{ _rInf=(window.__inferCornersFromEnds?window.__inferCornersFromEnds():0)||0; }catch(e){ console.warn('infer',e); }
     var _rMg=0; try{ _rMg=(window.__mergeElbowJoins?window.__mergeElbowJoins():0)||0; }catch(e){ console.warn('merge',e); }
