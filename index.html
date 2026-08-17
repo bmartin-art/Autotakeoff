@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.71</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.72</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -449,6 +449,24 @@ window.VEC_COLOR=false;
 function analyzeVectorDarkness(){
   window.VEC_COLOR=false;
   if(!segments.length) return;
+  // COLORED-FILL DUCT SHEETS (v3.72). Some prints draw the ductwork as SOLID COLOR FILLS
+  // (Chase/Ware Malcomb style: yellow SA, cyan SA-MP, green EA, magenta RA) rather than stroked
+  // wall pairs. Field measurement on such a sheet: 65,700pt of saturated fill edges in exactly 4
+  // colors vs ZERO on stroke-drawn sheets — while every non-duct fill (white/black/gray hatch,
+  // poche) has no saturation. When the sheet carries substantial saturated fill ink, arm fill-duct
+  // mode: classification will treat saturated fill outlines as duct walls (they pair and build
+  // exactly like drawn walls; the fill IS the duct body).
+  window.__fillDuctMode=false;
+  try{
+    var _fLen=0,_fN=0;
+    for(var _fi=0;_fi<segments.length;_fi++){ var _fs2=segments[_fi]; if(!_fs2._fill) continue;
+      var _r7=_fs2.rgb||[0,0,0], _mx7=Math.max(_r7[0]||0,_r7[1]||0,_r7[2]||0), _mn7=Math.min(_r7[0]||0,_r7[1]||0,_r7[2]||0);
+      if((_mx7-_mn7)>0.25 && _mx7>0.45){ _fLen+=(_fs2.len||0); _fN++; } }
+    if(_fLen>=1200 && _fN>=60){ window.__fillDuctMode=true;
+      console.log('[takeoff] colored-fill ductwork detected: '+_fN+' saturated fill edge(s), '+Math.round(_fLen)+'pt — fill outlines will classify as duct');
+      try{ setStatus('Colored-fill ductwork detected — the duct is drawn as solid color. Fill outlines will green as duct automatically.'); }catch(_e7){}
+    }
+  }catch(_e8){}
   // histogram vector darkness in 0.05 buckets
   var H={}; for(var i=0;i<segments.length;i++){ if(segments[i]._fill) continue; var v=segments[i].vdark; if(v==null)v=1; var b=Math.round(v*20)/20; H[b]=(H[b]||0)+1; }
   var levels=Object.keys(H).map(parseFloat).sort(function(a,b){return a-b;});
@@ -1352,7 +1370,16 @@ function classify(){
     }   // color and/or shade pickers: tapped colors/shades become duct
     if(s.lock){ s.cls=s.lock; continue; }
     if(__ductRuns){ var __dDiag=(s._u&&s._u.o==='D'&&s.paired); s.cls = ((s.ductRun||__dDiag) ? (__aiFirst?'maybe':'duct') : 'not'); continue; }   // precision geometry mode (+ paired diagonal runs the H/V detector can't see)
-    if(s._fill){ s.cls='not'; continue; }                             // FILL outlines (hatch bars, solid fills) are ink shapes, not duct linework — they measure pure black and defeat every threshold
+    if(s._fill){
+      // v3.72: on a colored-fill duct sheet, a SATURATED fill outline IS the duct — the filled band's
+      // long edges pair like drawn walls and feed the normal build. Gray/black/white fills (hatch
+      // bars, poche, solid ink) stay excluded everywhere, and everything stays excluded on ordinary
+      // stroke-drawn sheets (mode arms only on substantial saturated fill coverage).
+      if(window.__fillDuctMode){
+        var _fr8=s.rgb||[0,0,0], _fmx8=Math.max(_fr8[0]||0,_fr8[1]||0,_fr8[2]||0), _fmn8=Math.min(_fr8[0]||0,_fr8[1]||0,_fr8[2]||0);
+        if((_fmx8-_fmn8)>0.25 && _fmx8>0.45){ s.cls=(__aiFirst?'maybe':'duct'); continue; }   // straight edges pair as walls; curved edges (elbow sweeps) feed the arc detector
+      }
+      s.cls='not'; continue; }                             // FILL outlines (hatch bars, solid fills) are ink shapes, not duct linework — they measure pure black and defeat every threshold
     if(matchSample && ductRef){ s.cls=(((darkOf(s) >= __blkT) || s.blkRescue) && (s.len==null || s.len >= __blkMin) && !(s.wallPair && !s.paired && !s.nearTag))?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY color takeoff: dark AND long enough — a wall-thickness pair with no duct-width partner and no size tag is a WALL
     // 'Black lines only' is no longer a binary mode — it now RESTRICTS the smart default selection
     // to black ink (post-pass below), instead of replacing it with keep-everything-black.
