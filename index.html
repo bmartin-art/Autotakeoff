@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.73</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.75</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -361,6 +361,8 @@
          </div>
          <input type="file" id="yoloFile" accept=".onnx" style="display:none">
          <button class="btn go" id="yoloTestBtn" style="width:100%;margin-top:6px;background:#0c1f3a;border-color:#2b6aa0;color:#bfe0ff" disabled>▸ Test detect (visible area)</button>
+        <button class="btn go" id="censusBtn" style="width:100%;margin-top:6px;background:#1a0c3a;border-color:#6a2ba0;color:#dfbfff">▸ AI junction census (judge every junction)</button>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="censusChk" checked> Run census automatically after each build <span style="opacity:.6">(needs the AI worker; ~60 crops max)</span></label>
          <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;color:#9fb2c8;cursor:pointer"><input type="checkbox" id="yoloGreenOnly"> Scan only near traced duct <span style="opacity:.6">(fewer false hits, faster)</span></label>
          <button class="btn go" id="yoloScanBtn" style="width:100%;margin-top:6px;background:#0a2a1f;border-color:#2b9e7a;color:#bfffe6;font-weight:700" disabled>Scan whole sheet (tiled)</button>
          <div style="margin-top:8px;background:#0c1a28;border:1px solid #22384a;border-radius:8px;padding:8px">
@@ -3677,13 +3679,23 @@ function refreshSel(){
           // spiral sheet clustered 2.7-9.3in against a rectangular-calibrated \u00b12.5 cap. Round trunks
           // get a proportional window (0.6\u00d7diameter); rectangular keeps the tight rectangular cap.
           var _rndTr=(tr.pieces||[]).some(function(pz){ return pz.round; });
-          var _gHi=_rndTr?Math.max(2.5,tw*0.6):2.5, _gLo=_rndTr?-Math.max(3,tw*0.6):-3;
-          if(gap<_gLo || gap>_gHi){ _rj('flank gap '+ (Math.round(gap*10)/10) +'in outside '+Math.round(_gLo*10)/10+'..'+Math.round(_gHi*10)/10+(_rndTr?' (round trunk window)':'')); return; }
+          // COLORED-FILL SHEETS DRAW THE FITTING BETWEEN THE FILLS (v3.74). On the GASD fill print,
+          // the tap/transition is its own drawn fitting sitting between the branch fill and the
+          // trunk fill \u2014 real junctions measured 3.6\u20138in of daylight against the \u00b12.5 rect cap
+          // (13 refusals, page 31). In fill-duct mode the window opens to one trunk width.
+          var _gHi=_rndTr?Math.max(2.5,tw*0.6):(window.__fillDuctMode?Math.min(12,Math.max(4,tw)):2.5);
+          var _gLo=_rndTr?-Math.max(3,tw*0.6):-3;
+          if(gap<_gLo || gap>_gHi){ _rj('flank gap '+ (Math.round(gap*10)/10) +'in outside '+Math.round(_gLo*10)/10+'..'+Math.round(_gHi*10)/10+(_rndTr?' (round trunk window)':(window.__fillDuctMode?' (fill-sheet window)':''))); return; }
           // BRANCH NARROWER THAN TRUNK (v3.43). Bank verdict on this pass: 1 kept of 13. The fakes were
           // corners read as taps -- and their tell was SIZE: a 12x10 meeting a 12x12 is an airstream
           // turning, not a branch tapping a main. A real tap branch is strictly smaller than its trunk.
           // Costs the rare same-size tap; at 8% precision that trade buys the pass its life back.
-          if((br.widthIn||12) > tw-2){ _rj('branch '+(br.widthIn||12)+'\u2033 not narrower than trunk '+tw+'\u2033 (corner-fake guard)'); return; }
+          // v3.74: EXCEPT on colored-fill sheets \u2014 exhaust branches run same-size as their trunks
+          // (8x8 into 8x8 was the entire GASD page-31 layout; 10 real taps died here). Fill bodies
+          // are verified duct, corner fakes are rarer, and the corner-zone/crossing/pointing gates
+          // still hold. Only a STRICTLY WIDER branch refuses (role belongs to the reverse pairing).
+          var _wCap9=window.__fillDuctMode ? (tw+0.5) : (tw-2);
+          if((br.widthIn||12) > _wCap9){ _rj('branch '+(br.widthIn||12)+'\u2033 '+(window.__fillDuctMode?'wider than':'not narrower than')+' trunk '+tw+'\u2033 (corner-fake guard)'); return; }
           // the branch end must POINT at the trunk, not away from it (v3.63 — TWO fixes here).
           // (1) The old test negated itself (`…*-toward`): it REFUSED every branch aimed at the
           // trunk and passed the backwards ones. Page-24 field data: all four real drops onto the
@@ -3984,6 +3996,149 @@ function refreshSel(){
     }
     try{ window.__showElbowStrip(); }catch(_){}
     console.log('[referee] done');
+  };
+  // ---- JUNCTION CENSUS (v3.75): geometry enumerates, the VLM judges, verdicts become evidence. ----
+  // YOLO's recall is the weak link (6 dets on the GASD fill sheet; taps/caps near-blind everywhere),
+  // but geometry can enumerate EVERY junction candidate — completely — it just can't always judge
+  // them. So: list every unclaimed spot where two runs meet, cross, corner, or a run dead-ends;
+  // crop the raw print at each; ask the AI worker ONE multi-choice question per crop; turn each
+  // verdict into a SYNTHETIC DETECTION in __yoloDets (cls/score/nx/ny, flagged _census) so every
+  // existing det-consuming pass — elbow joins, tap bridge, cap bridge, adjudicator scoring, memory
+  // shields — uses it with zero new wiring; then re-run the fitting passes. The census only
+  // PROPOSES: everything it seeds still faces the geometry gates, dedupe, and the review strip.
+  window.__censusCap=window.__censusCap||60;                 // cost cap per sheet
+  window.__runJunctionCensus=async function(){
+    var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,'');
+    if(!wurl){ console.log('[census] no AI worker URL — skipped'); return 0; }
+    var runs=window.__runs2d||[]; if(runs.length<2){ return 0; }
+    var cv=document.getElementById('pdfCanvas'); if(!cv||!cv.width) return 0;
+    window.__censusVerdicts=window.__censusVerdicts||{};      // per-sheet memo: 'x|y' -> verdict (re-census skips)
+    // any fitting already near? (census is for the MISSING junctions)
+    function fittingNear(x,y,tolIn){
+      var tol=inToPt(Math.max(8,tolIn||14));
+      return runs.some(function(r){ var fr; try{ fr=runFrames(r); }catch(_){ return false; }
+        return (r.pieces||[]).some(function(p,i){ if(p.kind!=='fitting') return false; var f=fr[i]; if(!f) return false;
+          return Math.hypot(f.x-x,f.y-y)<=tol; }); });
+    }
+    // ---- enumerate candidates ----
+    var cands=[], seen={};
+    function ck(x,y){ return Math.round(x/inToPt(15))+'|'+Math.round(y/inToPt(15)); }
+    function push(x,y,w,kind){ var k=ck(x,y); if(seen[k]) return; seen[k]=1;
+      if(fittingNear(x,y,Math.max(12,w))) return;
+      cands.push({x:x,y:y,w:w,kind:kind}); }
+    function endsOf(r){ var e=runEnd(r); return [{nm:'start',p:[r.start[0],r.start[1]],out:[-r.dir[0],-r.dir[1]]},{nm:'end',p:[e.x,e.y],out:[e.ux,e.uy]}]; }
+    for(var i=0;i<runs.length;i++){ var A=runs[i]; if(runLenIn(A)<12) continue;
+      for(var j=0;j<runs.length;j++){ if(i===j) continue; var B=runs[j]; if(runLenIn(B)<12) continue;
+        var dot=Math.abs(A.dir[0]*B.dir[0]+A.dir[1]*B.dir[1]);
+        if(dot<0.35){
+          var sx=B.start[0],sy=B.start[1],dx=B.dir[0],dy=B.dir[1],Lb=runLenIn(B),bw=B.widthIn||12;
+          endsOf(A).forEach(function(E){
+            var vx=E.p[0]-sx, vy=E.p[1]-sy;
+            var along=ptToIn(vx*dx+vy*dy), perp=ptToIn(vx*(-dy)+vy*dx);
+            var gap=Math.abs(perp)-bw/2;
+            if(along>=6 && along<=Lb-6 && gap>=-10 && gap<=Math.max(12,bw)){    // end near flank: tap-or-crossing question
+              push(E.p[0],E.p[1],Math.max(bw,A.widthIn||12),'end-flank'); }
+          });
+          if(i<j){
+            var eA=runEnd(A), p1=[A.start[0],A.start[1]], p2=[eA.x,eA.y];
+            var o1=ptToIn((p1[0]-sx)*(-dy)+(p1[1]-sy)*dx), o2=ptToIn((p2[0]-sx)*(-dy)+(p2[1]-sy)*dx);
+            if(Math.min(o1,o2)<-bw/2-1 && Math.max(o1,o2)>bw/2+1){              // true crossing of B's band
+              var a1=ptToIn((p1[0]-sx)*dx+(p1[1]-sy)*dy), a2=ptToIn((p2[0]-sx)*dx+(p2[1]-sy)*dy);
+              var tt=(-o1)/((o2-o1)||1), ca=a1+(a2-a1)*tt;
+              if(ca>=6 && ca<=Lb-6) push(sx+dx*inToPt(ca), sy+dy*inToPt(ca), Math.max(bw,A.widthIn||12), 'crossing'); }
+            // corner: two ends near each other, perpendicular
+            endsOf(A).forEach(function(EA){ endsOf(B).forEach(function(EB){
+              var dd=Math.hypot(EA.p[0]-EB.p[0], EA.p[1]-EB.p[1]);
+              if(ptToIn(dd)<=24) push((EA.p[0]+EB.p[0])/2,(EA.p[1]+EB.p[1])/2, Math.max(A.widthIn||12,B.widthIn||12), 'corner');
+            }); });
+          }
+        }
+      }
+      // free end: no other run end or body near -> cap candidate
+      endsOf(A).forEach(function(E){
+        var lone=!runs.some(function(R){ if(R===A) return false;
+          var pr; try{ pr=projOnRun(R,E.p[0],E.p[1]); }catch(_){ return true; }
+          return (Math.abs(pr.perpIn)<= (R.widthIn||12)/2+10 && pr.alongIn>=-10 && pr.alongIn<=runLenIn(R)+10); });
+        if(lone) push(E.p[0],E.p[1],A.widthIn||12,'free-end');
+      });
+    }
+    // priority: junctions first, then corners, then free ends; cap the total
+    var pri={'end-flank':0,'crossing':1,'corner':2,'free-end':3};
+    cands.sort(function(a,b){ return pri[a.kind]-pri[b.kind]; });
+    var dropped=Math.max(0,cands.length-window.__censusCap);
+    cands=cands.slice(0,window.__censusCap);
+    // skip ones already judged this sheet
+    cands=cands.filter(function(c){ return !window.__censusVerdicts[ck(c.x,c.y)]; });
+    if(!cands.length){ console.log('[census] nothing unjudged to ask about'); return 0; }
+    console.log('[census] asking about '+cands.length+' junction candidate(s)'+(dropped?(' ('+dropped+' beyond the cost cap — raise window.__censusCap to include)'):''));
+    try{ setStatus('AI junction census: judging '+cands.length+' junction(s)…'); }catch(_){}
+    // ---- crop + ask (chunks of 5) ----
+    var m=window.__nvt,a9=m[0],b9=m[1],c9=m[2],d9=m[3],e9=m[4],f9=m[5],det9=(a9*d9-b9*c9)||1;
+    var sc=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1));
+    async function ask(c){
+      try{
+        var ux=(d9*(c.x-e9)-c9*(c.y-f9))/det9, uy=(-b9*(c.x-e9)+a9*(c.y-f9))/det9;
+        var P=applyM(viewport.transform,ux,uy);
+        var half=Math.max(70, inToPt(c.w*4)*sc);
+        var o=document.createElement('canvas'); o.width=o.height=280;
+        var x2=o.getContext('2d'); x2.fillStyle='#fff'; x2.fillRect(0,0,280,280);
+        x2.drawImage(cv, P[0]-half, P[1]-half, half*2, half*2, 0,0,280,280);
+        x2.strokeStyle='#e11'; x2.lineWidth=3; x2.beginPath(); x2.arc(140,140,26,0,7); x2.stroke();
+        var b64=o.toDataURL('image/png').split(',')[1];
+        var Q='HVAC plan crop; a duct junction candidate sits inside the red circle (duct is ~'+Math.round(c.w)+'″ here). Classify what the PRINT shows AT the circle: tap = a branch duct connects into the side of another (fitting/collar drawn, or the branch terminates at the trunk); elbow = the duct turns a corner; transition = the duct visibly changes size (taper); cap = a duct END is closed off; crossing = ducts merely overlap at different elevations, no connection; nothing = no duct junction here. Also: is the duct at the circle ROUND (circular/spiral) or RECTANGULAR? Answer ONLY {"verdict":"tap"|"elbow"|"transition"|"cap"|"crossing"|"nothing","round":true|false,"confidence":0.0-1.0,"reason":"<10 words"}';
+        var resp=await fetch(wurl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:90,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:Q}]}]})});
+        var data=await resp.json();
+        var raw=(data.content||[]).filter(function(z){return z.type==='text';}).map(function(z){return z.text;}).join('').replace(/```json|```/g,'').trim();
+        var jm=raw.indexOf('{'); if(jm>0) raw=raw.slice(jm);
+        var pj=JSON.parse(raw);
+        return {c:c, v:(pj.verdict||'nothing'), round:!!pj.round, conf:Math.max(0,Math.min(1,+pj.confidence||0)), reason:(pj.reason||'')};
+      }catch(err){ return {c:c, v:'error', conf:0, reason:(err&&err.message)||'network'}; }
+    }
+    var results=[];
+    for(var q=0;q<cands.length;q+=5){ var chunk=cands.slice(q,q+5);
+      results=results.concat(await Promise.all(chunk.map(ask)));
+      try{ setStatus('AI junction census: '+results.length+'/'+cands.length+'…'); }catch(_){}
+    }
+    // ---- verdicts -> synthetic detections ----
+    window.__censusLog=window.__censusLog||[];
+    var dets=window.__yoloDets=window.__yoloDets||[], seeded=0;
+    results.forEach(function(rz){
+      window.__censusVerdicts[ck(rz.c.x,rz.c.y)]=rz.v;
+      window.__censusLog.push({x:Math.round(rz.c.x),y:Math.round(rz.c.y),kind:rz.c.kind,verdict:rz.v,round:!!rz.round,conf:rz.conf,reason:rz.reason});
+      if(rz.v==='error'||rz.v==='nothing'||rz.v==='crossing') return;
+      if(rz.conf<0.4) return;                                              // weak reads don't seed evidence
+      var cls= rz.v==='tap' ? (rz.round?'round-tap':'rect-tap')
+             : rz.v==='elbow' ? 'elbow'
+             : rz.v==='transition' ? 'sizechange'
+             : rz.v==='cap' ? 'cap' : null;
+      if(!cls) return;
+      var sz=inToPt(Math.max(12,rz.c.w*1.5));
+      dets.push({cls:cls, score:Math.round((0.30+0.55*rz.conf)*100)/100, nx:rz.c.x, ny:rz.c.y, nw:sz, nh:sz,
+                 nx0:rz.c.x-sz/2, ny0:rz.c.y-sz/2, nx1:rz.c.x+sz/2, ny1:rz.c.y+sz/2,
+                 _census:true, _notes:['census: '+rz.v+' ('+Math.round(rz.conf*100)+'%) — '+rz.reason]});
+      seeded++;
+    });
+    var nJudged=results.filter(function(r){return r.v!=='error';}).length;
+    console.log('[census] '+nJudged+' judged · '+seeded+' seeded as evidence');
+    if(!seeded){ try{ setStatus('AI junction census: '+nJudged+' junction(s) judged — nothing new to add.'); }catch(_){} return 0; }
+    // ---- re-run the det-consuming passes (all idempotent: junction dedupe + det _used flags) ----
+    var nE=0,nB=0,nT=0,nC=0;
+    try{ nE=(window.__joinRunsAtElbows?window.__joinRunsAtElbows():0)||0; }catch(e){ console.warn('census joins',e); }
+    try{ nB=(window.__bridgeSizechanges?window.__bridgeSizechanges():0)||0; }catch(e){ console.warn('census bridge',e); }
+    try{ nT=(window.__inferTapsFromEnds?window.__inferTapsFromEnds():0)||0; }catch(e){}
+    try{ nT+=(window.__inferTapsFromCrossings?window.__inferTapsFromCrossings():0)||0; }catch(e){}
+    try{ nT+=(window.__bridgeTaps?window.__bridgeTaps():0)||0; }catch(e){}
+    try{ window.__markTapDetsPlaced&&window.__markTapDetsPlaced(); }catch(e){}
+    try{ nC=(window.__bridgeCaps?window.__bridgeCaps():0)||0; }catch(e){}
+    try{ window.__dedupeOverlappingRuns&&window.__dedupeOverlappingRuns(); }catch(e){}
+    try{ window.__adjudicateElbows&&window.__adjudicateElbows(); }catch(e){}
+    try{ window.__applyBankMemory&&window.__applyBankMemory(); }catch(e){}
+    try{ window.__showElbowStrip&&window.__showElbowStrip(); }catch(e){}
+    try{ renderItems(); renderPanel(); }catch(_){}
+    var msg='AI junction census: '+nJudged+' judged · '+seeded+' evidence seeded → +'+nT+' tap(s), +'+nE+' elbow join(s), +'+nB+' reducer bridge(s), +'+nC+' cap(s). All on the review strip.';
+    console.log('[census] '+msg);
+    try{ setStatus(msg); }catch(_){}
+    return nT+nE+nB+nC;
   };
   // ---- TAP GAP BRIDGE: a tap detection sitting between a branch run's END and another run's BODY
   // means the branch never attached (the walker only taps events on its own spine). Auto-connect it
@@ -6437,6 +6592,7 @@ function refreshSel(){
     try{ window.__applyBankMemory(); }catch(e){ console.warn('bank memory',e); }
     try{ window.__refreshTrackRecord(); }catch(e){}   // recompute for the NEXT build (async; this build used the cached copy)
     try{ setTimeout(function(){ window.__refereeTaps(); }, 400); }catch(e){}   // ink referee, async -- build never waits
+    try{ setTimeout(function(){ if((document.getElementById('censusChk')||{checked:true}).checked) window.__runJunctionCensus(); }, 900); }catch(e){}   // junction census, async (v3.75) -- geometry enumerates, the VLM judges, passes re-run on the verdicts
     // ELBOW-RECALL DISPOSITION — the honest ledger for stage 1: how many extra (below-slider) elbow
     // proposals existed, and what the geometry gate did with each. 'seated' means a join or piece consumed
     // it; 'rejected' means it found no perpendicular pair of run ends and died quietly, which is the design.
@@ -6775,6 +6931,7 @@ function refreshSel(){
   }
 
   // ---- Stage 1: detect the visible area of the print ----
+  $('censusBtn') && ($('censusBtn').onclick=function(){ if(window.__runJunctionCensus) window.__runJunctionCensus(); });
   $('yoloTestBtn') && ($('yoloTestBtn').onclick=async function(){
     if(!session){ setStatus('Load a model first.'); return; }
     var cv=$('pdfCanvas'); if(!cv||!cv.width){ setStatus('Load a print first.'); return; }
@@ -8018,6 +8175,9 @@ $('exportBtn').onclick=()=>{
     yoloFitStats:(window.__yoloFitStats||null),
     sizechangeDisp:(window.__sizechangeDisp||[]),
     tapDisp:(window.__tapDisp||[]),
+    inferDiag:(window.__inferDiag||null),   // v3.74: corner-inference reach/angle table — the elbow refusals were invisible in exports (GASD p31: elbows missing, no way to see why)
+    censusLog:(window.__censusLog||[]),   // v3.75: every junction the census judged, with verdicts
+    fillDuctMode:!!window.__fillDuctMode,
     rogueRemoved:((window.__rogueLog||[]).flat()),
     detDecisions:((window.__yoloDets||[]).map(function(d){
       return {cls:d.cls, score:d.score, lowProp:!!d._lowProp, used:!!d._used,
