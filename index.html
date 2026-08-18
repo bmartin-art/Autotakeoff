@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.75</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.76</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -4073,45 +4073,96 @@ function refreshSel(){
     console.log('[census] asking about '+cands.length+' junction candidate(s)'+(dropped?(' ('+dropped+' beyond the cost cap — raise window.__censusCap to include)'):''));
     try{ setStatus('AI junction census: judging '+cands.length+' junction(s)…'); }catch(_){}
     // ---- crop + ask (chunks of 5) ----
+    // HI-RES CROPS (v3.76). Run 1 read crops off pdfCanvas at the CURRENT SCREEN ZOOM — zoomed out,
+    // an 8in duct is ~7px and the blown-up patch is mush; the VLM confabulated the same "branch
+    // collar" tap sentence at 24 of 31 junctions with near-identical confidences. Render one
+    // offscreen full-page canvas straight from the PDF (longest side ≤4096px) once per census and
+    // crop from THAT — sharpness no longer depends on how far the user is zoomed out.
     var m=window.__nvt,a9=m[0],b9=m[1],c9=m[2],d9=m[3],e9=m[4],f9=m[5],det9=(a9*d9-b9*c9)||1;
+    var hi=window.__censusHiCv;
+    if(!hi || hi.page!==pageNum){
+      try{
+        var pg9=await pdfDoc.getPage(pageNum);
+        var vp1=pg9.getViewport({scale:1, rotation:(viewport&&viewport.rotation)||0});
+        var HS=Math.min(4096/Math.max(vp1.width,vp1.height), 3);
+        var hvp=pg9.getViewport({scale:HS, rotation:(viewport&&viewport.rotation)||0});
+        var hc=document.createElement('canvas'); hc.width=Math.ceil(hvp.width); hc.height=Math.ceil(hvp.height);
+        var hctx=hc.getContext('2d'); hctx.fillStyle='#fff'; hctx.fillRect(0,0,hc.width,hc.height);
+        await pg9.render({canvasContext:hctx, viewport:hvp, optionalContentConfigPromise:(typeof ocConfig!=='undefined'&&ocConfig)?Promise.resolve(ocConfig):undefined}).promise;
+        hi=window.__censusHiCv={page:pageNum, cv:hc, vp:hvp, HS:HS};
+        console.log('[census] hi-res crop source rendered: '+hc.width+'x'+hc.height+' (scale '+HS.toFixed(2)+')');
+      }catch(eHi){ console.warn('[census] hi-res render failed, falling back to screen canvas', eHi); hi=null; }
+    }
     var sc=((typeof baseScale!=='undefined'?baseScale:1)*(typeof scale!=='undefined'?scale:1));
+    // geometry note per candidate kind — tell the model what the GEOMETRY already knows, then ask
+    // only what the ink shows, as a SHAPE (L/T/X), not a fitting name. Fitting vocabulary led the
+    // witness; shapes don't.
+    var KCTX={ 'end-flank':'Geometry note: a traced duct END sits near the SIDE of another duct here.',
+               'crossing' :'Geometry note: two traced ducts pass across each other here.',
+               'corner'   :'Geometry note: two traced duct ENDS meet near a right angle here.',
+               'free-end' :'Geometry note: a traced duct simply ENDS here; nothing else was traced nearby.' };
     async function ask(c){
       try{
         var ux=(d9*(c.x-e9)-c9*(c.y-f9))/det9, uy=(-b9*(c.x-e9)+a9*(c.y-f9))/det9;
-        var P=applyM(viewport.transform,ux,uy);
-        var half=Math.max(70, inToPt(c.w*4)*sc);
-        var o=document.createElement('canvas'); o.width=o.height=280;
-        var x2=o.getContext('2d'); x2.fillStyle='#fff'; x2.fillRect(0,0,280,280);
-        x2.drawImage(cv, P[0]-half, P[1]-half, half*2, half*2, 0,0,280,280);
-        x2.strokeStyle='#e11'; x2.lineWidth=3; x2.beginPath(); x2.arc(140,140,26,0,7); x2.stroke();
+        var o=document.createElement('canvas'); o.width=o.height=320;
+        var x2=o.getContext('2d'); x2.fillStyle='#fff'; x2.fillRect(0,0,320,320);
+        if(hi){
+          var Ph=applyM(hi.vp.transform,ux,uy);
+          var halfH=Math.max(60, inToPt(c.w*4.5)*hi.HS);
+          x2.drawImage(hi.cv, Ph[0]-halfH, Ph[1]-halfH, halfH*2, halfH*2, 0,0,320,320);
+        } else {
+          var P=applyM(viewport.transform,ux,uy);
+          var half=Math.max(70, inToPt(c.w*4.5)*sc);
+          x2.drawImage(cv, P[0]-half, P[1]-half, half*2, half*2, 0,0,320,320);
+        }
+        x2.strokeStyle='#e11'; x2.lineWidth=3; x2.beginPath(); x2.arc(160,160,30,0,7); x2.stroke();
         var b64=o.toDataURL('image/png').split(',')[1];
-        var Q='HVAC plan crop; a duct junction candidate sits inside the red circle (duct is ~'+Math.round(c.w)+'″ here). Classify what the PRINT shows AT the circle: tap = a branch duct connects into the side of another (fitting/collar drawn, or the branch terminates at the trunk); elbow = the duct turns a corner; transition = the duct visibly changes size (taper); cap = a duct END is closed off; crossing = ducts merely overlap at different elevations, no connection; nothing = no duct junction here. Also: is the duct at the circle ROUND (circular/spiral) or RECTANGULAR? Answer ONLY {"verdict":"tap"|"elbow"|"transition"|"cap"|"crossing"|"nothing","round":true|false,"confidence":0.0-1.0,"reason":"<10 words"}';
+        var Q='HVAC plan crop. Judge ONLY the duct ink inside the red circle. '+(KCTX[c.kind]||'')+' The duct here is roughly '+Math.round(c.w)+'″ wide. What SHAPE does the duct ink actually form at the circle? "L" = one duct turning a corner (two legs meet at one bend; nothing continues past the bend). "T" = a branch meets the SIDE of a duct whose walls run STRAIGHT THROUGH the junction. "X" = two ducts cross over each other and BOTH continue past. "CAP" = a duct end closed off with a flat end line or cap fitting. "END" = the duct just stops or leaves the crop with no fitting drawn. "STEP" = the duct visibly changes width (taper/transition). "NONE" = no duct at the circle. Do NOT report a fitting that is not actually drawn. Also: is the duct at the circle ROUND (circular/spiral) or RECTANGULAR? Answer ONLY {"shape":"L"|"T"|"X"|"CAP"|"END"|"STEP"|"NONE","round":true|false,"confidence":0.0-1.0,"reason":"<10 words"}';
         var resp=await fetch(wurl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:aiModel(),max_tokens:90,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:b64}},{type:'text',text:Q}]}]})});
         var data=await resp.json();
         var raw=(data.content||[]).filter(function(z){return z.type==='text';}).map(function(z){return z.text;}).join('').replace(/```json|```/g,'').trim();
         var jm=raw.indexOf('{'); if(jm>0) raw=raw.slice(jm);
         var pj=JSON.parse(raw);
-        return {c:c, v:(pj.verdict||'nothing'), round:!!pj.round, conf:Math.max(0,Math.min(1,+pj.confidence||0)), reason:(pj.reason||'')};
-      }catch(err){ return {c:c, v:'error', conf:0, reason:(err&&err.message)||'network'}; }
+        var shape=(pj.shape||pj.verdict||'NONE').toUpperCase();
+        var v= shape==='T' ? 'tap' : shape==='L' ? 'elbow' : shape==='X' ? 'crossing'
+             : shape==='CAP' ? 'cap' : shape==='STEP' ? 'transition'
+             : shape==='END' ? 'open-end' : 'nothing';
+        return {c:c, v:v, shape:shape, round:!!pj.round, conf:Math.max(0,Math.min(1,+pj.confidence||0)), reason:(pj.reason||'')};
+      }catch(err){ return {c:c, v:'error', shape:'ERR', conf:0, reason:(err&&err.message)||'network'}; }
     }
     var results=[];
     for(var q=0;q<cands.length;q+=5){ var chunk=cands.slice(q,q+5);
       results=results.concat(await Promise.all(chunk.map(ask)));
       try{ setStatus('AI junction census: '+results.length+'/'+cands.length+'…'); }catch(_){}
     }
-    // ---- verdicts -> synthetic detections ----
+    // ---- verdicts -> synthetic detections, gated by GEOMETRY COMPATIBILITY (v3.76) ----
+    // A verdict only seeds where geometry could support the fitting it names. Run 1's misfire mode:
+    // "tap" at corners and free ends — places where no through-duct exists, so a tap is impossible.
+    // The VLM proposes the SHAPE; geometry decides whether that shape can live at that spot.
+    function bodyThrough(x,y,w){
+      return runs.some(function(R){ var pr; try{ pr=projOnRun(R,x,y); }catch(_){ return false; }
+        return pr.alongIn>=6 && pr.alongIn<=runLenIn(R)-6 && Math.abs(pr.perpIn)<=(R.widthIn||12)/2+6; });
+    }
     window.__censusLog=window.__censusLog||[];
     var dets=window.__yoloDets=window.__yoloDets||[], seeded=0;
     results.forEach(function(rz){
       window.__censusVerdicts[ck(rz.c.x,rz.c.y)]=rz.v;
-      window.__censusLog.push({x:Math.round(rz.c.x),y:Math.round(rz.c.y),kind:rz.c.kind,verdict:rz.v,round:!!rz.round,conf:rz.conf,reason:rz.reason});
-      if(rz.v==='error'||rz.v==='nothing'||rz.v==='crossing') return;
+      var lg={x:Math.round(rz.c.x),y:Math.round(rz.c.y),kind:rz.c.kind,shape:rz.shape,verdict:rz.v,round:!!rz.round,conf:rz.conf,reason:rz.reason};
+      window.__censusLog.push(lg);
+      if(rz.v==='error'||rz.v==='nothing'||rz.v==='crossing'||rz.v==='open-end') return;
       if(rz.conf<0.4) return;                                              // weak reads don't seed evidence
+      var k=rz.c.kind, ok=false;
+      if(rz.v==='tap')        ok=(k==='end-flank'||k==='crossing'||bodyThrough(rz.c.x,rz.c.y,rz.c.w));   // a tap NEEDS a through-duct
+      else if(rz.v==='elbow') ok=(k==='corner'||k==='end-flank');                                        // an elbow NEEDS meeting ends
+      else if(rz.v==='cap')   ok=(k==='free-end');                                                       // a cap NEEDS a dead end
+      else if(rz.v==='transition') ok=true;                                                              // bridgeSizechanges gates on its own
+      if(!ok){ lg.seeded='incompatible: '+rz.v+' verdict at a '+k+' — geometry cannot host it'; return; }
       var cls= rz.v==='tap' ? (rz.round?'round-tap':'rect-tap')
              : rz.v==='elbow' ? 'elbow'
              : rz.v==='transition' ? 'sizechange'
              : rz.v==='cap' ? 'cap' : null;
       if(!cls) return;
+      lg.seeded=cls;
       var sz=inToPt(Math.max(12,rz.c.w*1.5));
       dets.push({cls:cls, score:Math.round((0.30+0.55*rz.conf)*100)/100, nx:rz.c.x, ny:rz.c.y, nw:sz, nh:sz,
                  nx0:rz.c.x-sz/2, ny0:rz.c.y-sz/2, nx1:rz.c.x+sz/2, ny1:rz.c.y+sz/2,
