@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.77</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.78</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3164,6 +3164,7 @@ function refreshSel(){
     var nTb = 0; try{ nTb = bridgeTaps(); }catch(e){ console.warn('bridgeTaps', e); }
     try{ window.__markTapDetsPlaced&&window.__markTapDetsPlaced(); }catch(e){}
     try{ window.__bridgeCaps&&window.__bridgeCaps(); }catch(e){ console.warn('capbridge',e); }
+    try{ setTimeout(function(){ window.__runSentinel&&window.__runSentinel('build'); }, 150); }catch(e){}
     // SECOND DE-DUPE (v3.71): the first sweep runs BEFORE the recovery passes, so overlaps that the
     // welds/splits/extensions create or expose afterward survived to the panel — page 2 came back
     // with six near-parallel overlapping pairs (incl. inner-liner traces sitting inside their outer
@@ -3932,6 +3933,21 @@ function refreshSel(){
   // at the other duct (tap), CONTINUE past it (crossing), or TURN (corner)? Verdicts land on the ledger
   // and the strip; a clear 'crossing' auto-removes the tap through the normal delete path (banked as
   // machine, not human). Runs async after the strip is up -- the build never waits on the network.
+  // ---- PROMPT REGISTRY (v3.78): every question we ask the AI worker lives HERE, versioned. ----
+  // Iterating a prompt means editing one place; every verdict logs the prompt version it came from,
+  // so exports can tell us whether a change helped. Rules learned in the field: state what geometry
+  // already knows, ask for SHAPES or one visible discriminator (never fitting names alone), forbid
+  // reporting fittings that are not drawn, and ask for the CUE — the drawn feature that decided it —
+  // so ungrounded answers expose themselves.
+  window.__PROMPTS={
+    ver:'p2',
+    refTapCross:'Inside the red circle, a branch duct meets or runs across a trunk duct. tap = the TRUNK visibly changes size at or just past this junction (necks down where air leaves), or a tap/conical fitting visibly joins them. crossing = the ducts merely overlap with NO trunk size change and NO joining fitting. Answer ONLY {"verdict":"tap"|"crossing"|"unsure","cue":"<6 words: the drawn feature that decided it>","reason":"<8 words"}.',
+    refTap:'Inside the red circle, a duct meets the side of another duct. corner = the airstream TURNS (miter/diagonal joint line, matching widths flowing into each other, the through-duct segmenting AT this junction). tap = a branch TERMINATES into a trunk whose walls run CONTINUOUS straight through. crossing = the duct visibly CONTINUES on the far side. Answer ONLY {"verdict":"tap"|"crossing"|"corner"|"unsure","cue":"<6 words>","reason":"<8 words"}.',
+    refStep:'Inside the red circle, does the duct WIDTH visibly change (a taper/transition between two sizes)? Answer ONLY {"verdict":"yes"|"no"|"unsure","cue":"<6 words>","reason":"<8 words"}.',
+    refCap:'Inside the red circle, does the duct END with a cap (closed end, no continuation)? Answer ONLY {"verdict":"yes"|"no"|"unsure","cue":"<6 words>","reason":"<8 words"}.',
+    refElbow:'Inside the red circle, is there a 90-degree duct ELBOW (the duct turns a corner)? Answer ONLY {"verdict":"yes"|"no"|"unsure","cue":"<6 words>","reason":"<8 words"}.',
+    census:function(kctx,wIn,yoloCtx){ return 'HVAC plan crop. Judge ONLY the duct ink inside the red circle. '+kctx+' The duct here is roughly '+wIn+'″ wide.'+(yoloCtx||'')+' What SHAPE does the duct ink actually form at the circle? "L" = one duct turning a corner (two legs meet at one bend; nothing continues past the bend). "T" = a branch meets the SIDE of a duct whose walls run STRAIGHT THROUGH the junction. "X" = two ducts cross over each other and BOTH continue past. "CAP" = a duct end closed off with a flat end line or cap fitting. "END" = the duct just stops or leaves the crop with no fitting drawn. "STEP" = the duct visibly changes width (taper/transition). "NONE" = no duct at the circle. Do NOT report a fitting that is not actually drawn; judge the ink, not any detector opinion. Answer ONLY {"shape":"L"|"T"|"X"|"CAP"|"END"|"STEP"|"NONE","round":true|false,"confidence":0.0-1.0,"cue":"<6 words: the drawn feature that decided it>","reason":"<10 words"}'; },
+  };
   window.__refereeTaps=async function(){
     var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,'');
     if(!wurl) return;
@@ -3992,12 +4008,25 @@ function refreshSel(){
         var detSup=isTapQ && (window.__yoloDets||[]).some(function(dd){
           return dd.nx!=null && /tap|tee/.test(dd.cls||'') && (dd.score||0)>=0.15 &&
                  Math.hypot(dd.nx-e.x, dd.ny-e.y)<=inToPt(Math.max(30,(e.widthIn||12)*2)); });
+        // ONE JUDGMENT PER JUNCTION (v3.78): if the census already judged this junction THIS build,
+        // don't ask a second question — a second opinion at the same spot is where contradictions
+        // are born (and it doubles the cost). Census agreement bumps the score; census DISAGREEMENT
+        // becomes an explicit flag for the estimator instead of two AIs silently fighting.
+        var _cv=(window.__censusAt?window.__censusAt(e.x,e.y):null);
+        if(_cv){
+          var _kindOf={tap:'stap',elbow:'e90',cap:'cap',transition:'tr'};
+          var _sameKind=(_cv==='tap'&&isTapQ)||(_cv==='elbow'&&(e.kind==='e90'||e.kind==='e45'))||(_cv==='cap'&&e.kind==='cap')||(_cv==='transition'&&(e.kind==='tr'||e.kind==='reducer'||e.kind==='s2r'));
+          if(_sameKind){ e.reasons.push('census already judged this junction: '+_cv+' — agreement, no second question asked'); e.score=Math.min(1,e.score+0.12); if(e.verdict!=='confirmed'&&e.score>=0.60)e.verdict='confirmed'; continue; }
+          if(_cv==='crossing'||_cv==='nothing'||_cv==='open-end'){ e.machine='you'; e.reasons.push('DISAGREEMENT: census read this junction as "'+_cv+'" but a '+e.kind+' is placed — your call'); continue; }
+          e.reasons.push('census read this junction as '+_cv);
+        }
+        var PR=window.__PROMPTS||{};
         var Q;
-        if(isCrossTap||detSup) Q='Inside the red circle, a branch duct meets or runs across a trunk duct. tap = the TRUNK visibly changes size at or just past this junction (it necks down where air leaves at a takeoff), or a tap/conical fitting visibly joins them. crossing = the two ducts merely overlap with NO trunk size change and NO joining fitting (different elevations). Answer ONLY {"verdict":"tap"|"crossing"|"unsure","reason":"<8 words"}.';
-        else if(isTapQ) Q='Inside the red circle, a duct meets the side of another duct. corner = the airstream TURNS (miter/diagonal joint line, matching widths flowing into each other, the through-duct segmenting AT this junction). tap = a branch TERMINATES into a trunk whose walls run CONTINUOUS straight through. crossing = the duct visibly CONTINUES on the far side. Answer ONLY {"verdict":"tap"|"crossing"|"corner"|"unsure","reason":"<8 words"}.';
-        else if(e.kind==='tr'||e.kind==='reducer'||e.kind==='s2r') Q='Inside the red circle, does the duct WIDTH visibly change (a taper/transition between two sizes)? Answer ONLY {"verdict":"yes"|"no"|"unsure","reason":"<8 words"}.';
-        else if(e.kind==='cap') Q='Inside the red circle, does the duct END with a cap (closed end, no continuation)? Answer ONLY {"verdict":"yes"|"no"|"unsure","reason":"<8 words"}.';
-        else Q='Inside the red circle, is there a 90-degree duct ELBOW (the duct turns a corner)? Answer ONLY {"verdict":"yes"|"no"|"unsure","reason":"<8 words"}.';
+        if(isCrossTap||detSup) Q=PR.refTapCross;
+        else if(isTapQ) Q=PR.refTap;
+        else if(e.kind==='tr'||e.kind==='reducer'||e.kind==='s2r') Q=PR.refStep;
+        else if(e.kind==='cap') Q=PR.refCap;
+        else Q=PR.refElbow;
         var prompt='HVAC plan crop. '+ctx+' '+Q;
         var content=[];
         var ex=EX[e.kind]||{};
@@ -4014,7 +4043,7 @@ function refreshSel(){
         var jm=raw.indexOf('{'); if(jm>0) raw=raw.slice(jm);
         var pj=JSON.parse(raw);
         var v=(pj.verdict||'unsure');
-        e.reasons.push('AI (ink'+(hist?'+history':'')+'): '+v+(pj.reason?(' \u2014 '+pj.reason):''));
+        e.reasons.push('AI (ink'+(hist?'+history':'')+'): '+v+(pj.cue?(' [cue: '+pj.cue+']'):'')+(pj.reason?(' \u2014 '+pj.reason):''));
         if(v==='crossing'){
           // v3.66: a 'crossing' read NEVER auto-deletes a tap anymore. Three runs of field data
           // (6/7/8): on this sheet family every drop passes THROUGH the main to the diffuser
@@ -4060,6 +4089,8 @@ function refreshSel(){
     // ---- enumerate candidates ----
     var cands=[], seen={};
     function ck(x,y){ return Math.round(x/inToPt(15))+'|'+Math.round(y/inToPt(15)); }
+    window.__censusAt=function(x,y){ var V=window.__censusVerdicts||{}; var cx=Math.round(x/inToPt(15)), cy=Math.round(y/inToPt(15));
+      for(var dx=-1;dx<=1;dx++)for(var dy=-1;dy<=1;dy++){ var v=V[(cx+dx)+'|'+(cy+dy)]; if(v) return v; } return null; };
     function push(x,y,w,kind){ var k=ck(x,y); if(seen[k]) return; seen[k]=1;
       if(fittingNear(x,y,Math.max(12,w))) return;
       cands.push({x:x,y:y,w:w,kind:kind}); }
@@ -4164,7 +4195,8 @@ function refreshSel(){
         var v= shape==='T' ? 'tap' : shape==='L' ? 'elbow' : shape==='X' ? 'crossing'
              : shape==='CAP' ? 'cap' : shape==='STEP' ? 'transition'
              : shape==='END' ? 'open-end' : 'nothing';
-        return {c:c, v:v, shape:shape, round:!!pj.round, conf:Math.max(0,Math.min(1,+pj.confidence||0)), reason:(pj.reason||'')};
+        var _yagree=_yd?(((/tap|tee/.test(_yd.cls)&&v==='tap')||(/elbow/.test(_yd.cls)&&v==='elbow')||(/cap/.test(_yd.cls)&&v==='cap')||(/sizechange/.test(_yd.cls)&&v==='transition'))?'agree':'disagree'):null;
+        return {c:c, v:v, shape:shape, round:!!pj.round, conf:Math.max(0,Math.min(1,+pj.confidence||0)), reason:(pj.reason||''), cue:(pj.cue||''), yolo:(_yd?(_yd.cls+'@'+Math.round((_yd.score||0)*100)):null), yagree:_yagree};
       }catch(err){ return {c:c, v:'error', shape:'ERR', conf:0, reason:(err&&err.message)||'network'}; }
     }
     var results=[];
@@ -4184,7 +4216,7 @@ function refreshSel(){
     var dets=window.__yoloDets=window.__yoloDets||[], seeded=0;
     results.forEach(function(rz){
       window.__censusVerdicts[ck(rz.c.x,rz.c.y)]=rz.v;
-      var lg={x:Math.round(rz.c.x),y:Math.round(rz.c.y),kind:rz.c.kind,shape:rz.shape,verdict:rz.v,round:!!rz.round,conf:rz.conf,reason:rz.reason};
+      var lg={x:Math.round(rz.c.x),y:Math.round(rz.c.y),kind:rz.c.kind,shape:rz.shape,verdict:rz.v,round:!!rz.round,conf:rz.conf,reason:rz.reason,cue:rz.cue||'',yolo:rz.yolo||null,yagree:rz.yagree||null,pv:(window.__PROMPTS||{}).ver||'p1'};
       window.__censusLog.push(lg);
       if(rz.v==='error'||rz.v==='nothing'||rz.v==='crossing'||rz.v==='open-end') return;
       if(rz.conf<0.4) return;                                              // weak reads don't seed evidence
@@ -4226,7 +4258,108 @@ function refreshSel(){
     var msg='AI junction census: '+nJudged+' judged · '+seeded+' evidence seeded → +'+nT+' tap(s), +'+nE+' elbow join(s), +'+nB+' reducer bridge(s), +'+nC+' cap(s). All on the review strip.';
     console.log('[census] '+msg);
     try{ setStatus(msg); }catch(_){}
+    try{ window.__runSentinel&&window.__runSentinel('census-done'); }catch(e){}
     return nT+nE+nB+nC;
+  };
+  // ---- CONFLICT SENTINEL (v3.78): the Conflict Map compiled into runtime checks. ----
+  // Every check is an invariant a past field bug violated. The sentinel never fixes anything --
+  // it FLAGS: console table + a banner chip + the export (sentinel[]), so a conflict between
+  // layers is visible the moment it happens instead of three runs later.
+  window.__sentinelLog=window.__sentinelLog||[];
+  window.__runSentinel=function(tag){
+    var runs=window.__runs2d||[], items=[];
+    function add(sev,id,msg,x,y){ items.push({sev:sev,id:id,msg:msg,x:(x!=null?Math.round(x):null),y:(y!=null?Math.round(y):null)}); }
+    function tapNearPt2(x,y,tolIn){ var tol=inToPt(Math.max(6,tolIn||18));
+      return runs.some(function(r){ var fr; try{ fr=runFrames(r); }catch(_){ return false; }
+        return (r.pieces||[]).some(function(p,i){ if(!(p.kind==='fitting'&&p._tap)) return false; var f=fr[i]; return f&&Math.hypot(f.x-x,f.y-y)<=tol; }); }); }
+    try{ // S1 -- dedupe orphan: a 'duplicate' refusal claims a tap is billed at the junction; verify one actually is
+      (window.__tapDisp||[]).forEach(function(t){ if(!/^duplicate/.test(t.why||'')||t.x==null) return;
+        if(!tapNearPt2(t.x,t.y,Math.max(18,(t.trW||12)))) add('warn','dedupe-orphan','dedupe said a tap already sits at ('+t.x+','+t.y+') but nothing is billed there now',t.x,t.y); });
+    }catch(e){}
+    try{ // S2 -- census seeds nobody consumed (Conflict #13 live)
+      var un=(window.__yoloDets||[]).filter(function(d){ return d._census&&!d._used&&/elbow|tap|cap/.test(d.cls||''); });
+      if(un.length) add('warn','seed-unconsumed',un.length+' census-seeded detection(s) were never consumed by any pass: '+un.map(function(d){return d.cls+'@('+Math.round(d.nx)+','+Math.round(d.ny)+')';}).join(' | '));
+    }catch(e){}
+    try{ // S3 -- layer fights: placed-then-removed this build
+      var mem=0,ref=0; (window.__elbowLedger||[]).forEach(function(e2){ if(e2.human!=='deleted') return;
+        var rs=(e2.reasons||[]).join('|'); if(/memory: you deleted/.test(rs)) mem++; else if(/auto-removed/.test(rs)) ref++; });
+      if(ref) add('warn','layer-fight',ref+' fitting(s) placed by a pass and auto-removed by another layer in the SAME build');
+      if(mem) add('info','memory-replay',mem+' fitting(s) removed by bank memory (your past X) -- verify they are still wrong');
+    }catch(e){}
+    try{ // S4 -- band off the ink ("outside the duct lines"): centerline samples with no duct line beside them
+      if(typeof segments!=='undefined'&&segments&&segments.length){
+        runs.forEach(function(r){ var L=runLenIn(r); if(L<60) return;
+          var e2=runEnd(r), sx=r.start[0],sy=r.start[1];
+          var miss=0,tot=0;
+          for(var t9=0.15;t9<=0.86;t9+=0.175){ tot++;
+            var px9=sx+(e2.x-sx)*t9, py9=sy+(e2.y-sy)*t9, hit=false;
+            for(var si=0;si<segments.length;si++){ var s9=segments[si];
+              if(s9.cls!=='duct'||s9.nx1==null) continue;
+              var dx9=s9.nx2-s9.nx1, dy9=s9.ny2-s9.ny1, sl=Math.hypot(dx9,dy9); if(sl<inToPt(8)) continue;
+              if(Math.abs((dx9*r.dir[0]+dy9*r.dir[1])/sl)<0.9) continue;
+              var a1=(s9.nx1-px9)*r.dir[0]+(s9.ny1-py9)*r.dir[1], a2=(s9.nx2-px9)*r.dir[0]+(s9.ny2-py9)*r.dir[1];
+              if(Math.min(a1,a2)>0||Math.max(a1,a2)<0) continue;
+              var pp9=Math.abs((s9.nx1-px9)*(-r.dir[1])+(s9.ny1-py9)*r.dir[0]);
+              if(pp9<=inToPt((r.widthIn||12)/2+8)){ hit=true; break; } }
+            if(!hit) miss++; }
+          if(tot&&miss/tot>0.5) add('warn','off-ink','run '+r.id.slice(0,8)+' ('+(r.widthIn||'?')+'in, '+Math.round(L/12)+'lf) has no duct linework beside '+miss+'/'+tot+' of its centerline -- band may sit off the print',sx,sy); });
+      }
+    }catch(e){}
+    try{ // S5 -- doubling survived the de-dupe sweeps
+      for(var i=0;i<runs.length;i++) for(var j=i+1;j<runs.length;j++){ var A=runs[i],B=runs[j];
+        if(Math.abs(A.dir[0]*B.dir[0]+A.dir[1]*B.dir[1])<0.95) continue;
+        var lat=Math.abs((B.start[0]-A.start[0])*(-A.dir[1])+(B.start[1]-A.start[1])*A.dir[0]);
+        if(lat>=inToPt(((A.widthIn||0)+(B.widthIn||0))/2)) continue;
+        var eA=runEnd(A),eB=runEnd(B);
+        var a1=A.start[0]*A.dir[0]+A.start[1]*A.dir[1], a2=eA.x*A.dir[0]+eA.y*A.dir[1];
+        var b1=B.start[0]*A.dir[0]+B.start[1]*A.dir[1], b2=eB.x*A.dir[0]+eB.y*A.dir[1];
+        var ov=Math.min(Math.max(a1,a2),Math.max(b1,b2))-Math.max(Math.min(a1,a2),Math.min(b1,b2));
+        if(ov>0.5*Math.min(Math.abs(a2-a1),Math.abs(b2-b1)) && ov>inToPt(24))
+          add('warn','doubled-runs','runs '+A.id.slice(0,8)+' (W'+A.widthIn+') and '+B.id.slice(0,8)+' (W'+B.widthIn+') overlap '+Math.round(ptToIn(ov))+'in on the same axis -- doubling survived de-dupe',A.start[0],A.start[1]); }
+    }catch(e){}
+    try{ // S6 -- tap with no branch anywhere near it
+      runs.forEach(function(r){ var fr; try{ fr=runFrames(r); }catch(_){ return; }
+        (r.pieces||[]).forEach(function(p,i){ if(!(p.kind==='fitting'&&p._tap)||p._tapRef) return; var f=fr[i]; if(!f) return;
+          var near=runs.some(function(o){ if(o===r) return false; var eo=runEnd(o);
+            if([[o.start[0],o.start[1]],[eo.x,eo.y]].some(function(q){ return Math.hypot(q[0]-f.x,q[1]-f.y)<=inToPt(40); })) return true;
+            var pr; try{ pr=projOnRun(o,f.x,f.y); }catch(_){ return false; }
+            return Math.abs(pr.perpIn)<=(o.widthIn||12)/2+12 && pr.alongIn>=-6 && pr.alongIn<=runLenIn(o)+6; });
+          if(!near) add('warn','lonely-tap','tap on '+r.id.slice(0,8)+' at ('+Math.round(f.x)+','+Math.round(f.y)+') has no branch run anywhere near it',f.x,f.y); }); });
+    }catch(e){}
+    try{ // S7 -- census answers vs geometry kinds (crop-quality canary) + YOLO/census splits
+      var cl=window.__censusLog||[], cor=cl.filter(function(c){return c.kind==='corner';});
+      if(cor.length>=4){ var tt=cor.filter(function(c){return c.shape==='T';}).length;
+        if(tt/cor.length>0.6) add('info','census-bias',tt+' of '+cor.length+' corner candidates answered T -- census disagrees with geometry kinds; check crop quality'); }
+      var dis=cl.filter(function(c){return c.yagree==='disagree';});
+      if(dis.length>=3) add('info','yolo-census-split','YOLO and census disagree at '+dis.length+' junction(s) -- worth a look on the strip');
+    }catch(e){}
+    try{ // S8 -- census configured but silent
+      if(tag!=='census-done'){
+        var wu=((document.getElementById('aiWorker')||{}).value||'').trim();
+        var ck9=(document.getElementById('censusChk')||{checked:false}).checked;
+        if(wu&&ck9&&!(window.__censusLog||[]).length) add('info','census-silent','census is enabled but has not produced verdicts yet -- export after the status line reports it');
+      }
+    }catch(e){}
+    var rec={at:tag||'build', items:items};
+    window.__sentinel=rec; window.__sentinelLog.push(rec);
+    if(window.__sentinelLog.length>10) window.__sentinelLog.shift();
+    var nW=items.filter(function(x){return x.sev==='warn';}).length, nI=items.length-nW;
+    try{
+      var chip=document.getElementById('sentinelChip');
+      if(!chip){ chip=document.createElement('div'); chip.id='sentinelChip';
+        chip.style.cssText='position:fixed;top:8px;right:10px;z-index:10001;font:600 12px system-ui;border-radius:9px;padding:6px 12px;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.35)';
+        chip.title='Conflict sentinel -- click to log details to the console';
+        chip.onclick=function(){ try{ console.log('[sentinel] '+(window.__sentinel.at)); console.table(window.__sentinel.items); }catch(_){} };
+        document.body.appendChild(chip); }
+      chip.style.display='block';
+      if(nW){ chip.style.background='#5c1f24'; chip.style.color='#ffd7dc'; chip.style.border='1px solid #ff5c68'; }
+      else if(nI){ chip.style.background='#4a3d14'; chip.style.color='#ffe9b0'; chip.style.border='1px solid #e0b53f'; }
+      else { chip.style.background='#12351f'; chip.style.color='#b9e7c6'; chip.style.border='1px solid #2c6e49'; }
+      chip.textContent=items.length?('\u26a0 sentinel: '+nW+' conflict'+(nW===1?'':'s')+(nI?(' \u00b7 '+nI+' notice'+(nI===1?'':'s')):'')):'\u2713 sentinel: clean';
+    }catch(e){}
+    if(items.length){ console.log('[sentinel:'+(tag||'build')+'] '+nW+' conflict(s), '+nI+' notice(s)'); try{ console.table(items); }catch(_){ console.log(items); } }
+    else console.log('[sentinel:'+(tag||'build')+'] clean');
+    return items;
   };
   // ---- TAP GAP BRIDGE: a tap detection sitting between a branch run's END and another run's BODY
   // means the branch never attached (the walker only taps events on its own spine). Auto-connect it
@@ -6602,6 +6735,7 @@ function refreshSel(){
     var _rTap=0; try{ _rTap=(window.__bridgeTaps?window.__bridgeTaps():0)||0; }catch(e){ console.warn('tapbridge',e); }
     try{ window.__markTapDetsPlaced&&window.__markTapDetsPlaced(); }catch(e){}
     try{ window.__bridgeCaps&&window.__bridgeCaps(); }catch(e){ console.warn('capbridge',e); }
+    try{ setTimeout(function(){ window.__runSentinel&&window.__runSentinel('build'); }, 150); }catch(e){}
     // SECOND DE-DUPE (v3.71): the first sweep runs BEFORE the recovery passes, so overlaps that the
     // welds/splits/extensions create or expose afterward survived to the panel — page 2 came back
     // with six near-parallel overlapping pairs (incl. inner-liner traces sitting inside their outer
@@ -8265,6 +8399,7 @@ $('exportBtn').onclick=()=>{
     tapDisp:(window.__tapDisp||[]),
     inferDiag:(window.__inferDiag||null),   // v3.74: corner-inference reach/angle table — the elbow refusals were invisible in exports (GASD p31: elbows missing, no way to see why)
     censusLog:(window.__censusLog||[]),   // v3.75: every junction the census judged, with verdicts
+    sentinel:((window.__sentinel||{}).items||[]),   // v3.78: conflict sentinel findings at export time
     fillDuctMode:!!window.__fillDuctMode,
     rogueRemoved:((window.__rogueLog||[]).flat()),
     detDecisions:((window.__yoloDets||[]).map(function(d){
