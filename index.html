@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.76</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.77</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -1869,6 +1869,43 @@ function buildSegmentRuns(){
   }
   runs.sort(function(p,q){ if(!!q.confirmed!==!!p.confirmed) return (q.confirmed?1:0)-(p.confirmed?1:0); return q.lenP-p.lenP; });
   if(runs.length>400) runs=runs.slice(0,400);
+  // RE-CENTER BANDS IN WALL CLUSTERS (v3.77). On prints that draw each duct wall as a CLUSTER of
+  // 2-3 parallel lines (metal + liner/insulation — GASD p31: left wall at 1036/1039/1040.5, right
+  // at 1052.5/1054), the tag-matched pair is often a MIXED pair — outer line one side, inner line
+  // the other (1036↔1052.5 = 14.7 → snaps to the 14×12 tag) — so the band is the RIGHT WIDTH but
+  // sits shifted, riding the outside line on one flank ("duct running along the outside of the
+  // duct lines"). Width stays tag-authoritative; only the CENTER moves: find the outermost
+  // classified duct line within 4in of each band edge (cluster members only — neighbors are
+  // farther) and re-center the band in that envelope. Shift capped at 3in.
+  (function(){
+    if(typeof segments==='undefined'||!segments||!segments.length) return;
+    var moved=0;
+    runs.forEach(function(r){
+      var c=r.corners; if(!c||c.length<4) return;
+      var ux=c[1][0]-c[0][0], uy=c[1][1]-c[0][1], Lr=Math.hypot(ux,uy)||1; ux/=Lr; uy/=Lr;
+      var nx=c[3][0]-c[0][0], ny=c[3][1]-c[0][1], Wp=Math.hypot(nx,ny)||1; nx/=Wp; ny/=Wp;
+      var reach=inToPt(4);
+      var lo=0, hi=Wp;                                     // band edges in the n-frame (0..Wp)
+      var cLo=lo, cHi=hi;
+      for(var si=0;si<segments.length;si++){ var s=segments[si];
+        if(s.cls!=='duct'||s.nx1==null) continue;
+        var sdx=s.nx2-s.nx1, sdy=s.ny2-s.ny1, sl=Math.hypot(sdx,sdy); if(sl<inToPt(8)) continue;
+        if(Math.abs((sdx*ux+sdy*uy)/sl)<0.95) continue;    // parallel to the run only
+        var a1=(s.nx1-c[0][0])*ux+(s.ny1-c[0][1])*uy, a2=(s.nx2-c[0][0])*ux+(s.ny2-c[0][1])*uy;
+        var ov=Math.min(Math.max(a1,a2),Lr)-Math.max(Math.min(a1,a2),0);
+        if(ov < 0.4*Lr) continue;                          // must run with the band, not a stub
+        var off=(s.nx1-c[0][0])*nx+(s.ny1-c[0][1])*ny;
+        if(off>=lo-reach && off<lo) cLo=Math.min(cLo,off);          // cluster member outside the low edge
+        if(off>hi && off<=hi+reach) cHi=Math.max(cHi,off);          // cluster member outside the high edge
+      }
+      var shift=((cLo+cHi)/2)-((lo+hi)/2);
+      if(Math.abs(shift)<inToPt(0.75)) return;             // already centered
+      shift=Math.max(-inToPt(3),Math.min(inToPt(3),shift));
+      for(var q9=0;q9<4;q9++){ c[q9][0]+=nx*shift; c[q9][1]+=ny*shift; }
+      moved++;
+    });
+    if(moved) console.log('[takeoff] re-centered '+moved+' band(s) inside their wall clusters (multi-line walls)');
+  })();
   window.__sgRuns=runs;
   // 5) report
   function fmtLen(p){ var ti=p/k6, ft=Math.floor(ti/12), inn=Math.round(ti-ft*12); if(inn>=12){ft++;inn-=12;} return ft<=0?(inn+'\u2033'):(ft+'\u2032'+inn+'\u2033'); }
