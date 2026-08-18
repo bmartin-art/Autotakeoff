@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.72</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.73</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -1359,6 +1359,17 @@ function classify(){
   for(const s of segments){
     if(workArea && !inArea(s)){ s.cls='not'; continue; }                                   // work area always trims everything outside it
     if(s.lock && s._userMark){ s.cls=s.lock; continue; }                                    // YOUR marks this session win over the picker
+    // COLORED FILL BEATS THE LABEL HEURISTICS (v3.73). On a colored-fill duct sheet the size
+    // labels are DRAWN ON TOP of the filled duct — and a short, narrow run (the green 6-8in EA
+    // stubs on the Chase sheet) IS a small tag-sized box with its own tag inside it, which is
+    // exactly what inTextBox and the labelBox killer exist to erase. They ran before the v3.72
+    // fill branch and ate the entire green system while the long yellow/cyan runs slid past.
+    // A saturated fill can't BE a label box — it's the duct body — so it classifies here, ahead
+    // of every text/label/symbol heuristic. User marks (above) and explicit removals still win.
+    if(s._fill && window.__fillDuctMode && s.lock!=='not'){
+      var _fr8=s.rgb||[0,0,0], _fmx8=Math.max(_fr8[0]||0,_fr8[1]||0,_fr8[2]||0), _fmn8=Math.min(_fr8[0]||0,_fr8[1]||0,_fr8[2]||0);
+      if((_fmx8-_fmn8)>0.25 && _fmx8>0.45){ s.cls=(__aiFirst?'maybe':'duct'); continue; }
+    }
     if(window.__killText!==false && inTextBox(s)){ s.cls='not'; continue; }                  // linework fully inside a PDF text label -> never duct
     if(s.lock==='not'){ s.cls='not'; continue; }                                            // anything explicitly removed stays removed — the picker can't re-green it
     if(__dropBoxes && s.labelBox){ s.cls='not'; continue; }                                 // boxes drawn around size tags — never duct, in ANY mode
@@ -1370,16 +1381,7 @@ function classify(){
     }   // color and/or shade pickers: tapped colors/shades become duct
     if(s.lock){ s.cls=s.lock; continue; }
     if(__ductRuns){ var __dDiag=(s._u&&s._u.o==='D'&&s.paired); s.cls = ((s.ductRun||__dDiag) ? (__aiFirst?'maybe':'duct') : 'not'); continue; }   // precision geometry mode (+ paired diagonal runs the H/V detector can't see)
-    if(s._fill){
-      // v3.72: on a colored-fill duct sheet, a SATURATED fill outline IS the duct — the filled band's
-      // long edges pair like drawn walls and feed the normal build. Gray/black/white fills (hatch
-      // bars, poche, solid ink) stay excluded everywhere, and everything stays excluded on ordinary
-      // stroke-drawn sheets (mode arms only on substantial saturated fill coverage).
-      if(window.__fillDuctMode){
-        var _fr8=s.rgb||[0,0,0], _fmx8=Math.max(_fr8[0]||0,_fr8[1]||0,_fr8[2]||0), _fmn8=Math.min(_fr8[0]||0,_fr8[1]||0,_fr8[2]||0);
-        if((_fmx8-_fmn8)>0.25 && _fmx8>0.45){ s.cls=(__aiFirst?'maybe':'duct'); continue; }   // straight edges pair as walls; curved edges (elbow sweeps) feed the arc detector
-      }
-      s.cls='not'; continue; }                             // FILL outlines (hatch bars, solid fills) are ink shapes, not duct linework — they measure pure black and defeat every threshold
+    if(s._fill){ s.cls='not'; continue; }                             // FILL outlines (hatch bars, solid fills) are ink shapes, not duct linework — saturated duct fills already classified above (v3.73)
     if(matchSample && ductRef){ s.cls=(((darkOf(s) >= __blkT) || s.blkRescue) && (s.len==null || s.len >= __blkMin) && !(s.wallPair && !s.paired && !s.nearTag))?(__aiFirst?'maybe':'duct'):'not'; continue; }   // BINARY color takeoff: dark AND long enough — a wall-thickness pair with no duct-width partner and no size tag is a WALL
     // 'Black lines only' is no longer a binary mode — it now RESTRICTS the smart default selection
     // to black ink (post-pass below), instead of replacing it with keep-everything-black.
