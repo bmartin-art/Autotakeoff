@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.82</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.83</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -1703,7 +1703,21 @@ function buildSegmentRuns(){
   var tagOnly=!!(document.getElementById('runsTagOnly')||{}).checked;
   function mkCand(A,B,gap,bt0,bt1,ai,bi,ov){
     var gIn=gap/k6;
-    var t0r=Math.min(A.t0,bt0), t1r=Math.max(A.t1,bt1), lenP=t1r-t0r;
+    // A DUCT EXISTS WHERE BOTH WALLS EXIST (v3.83). The band's extent was the UNION of its two walls'
+    // spans, so when one wall line kept going — collinear with the next duct segment, a neighbor
+    // system, or architecture — the band sailed straight past where the duct actually stops. Field
+    // case (p2 run 17): 18in trunk r02bmwe ran 277in (23 FT) past its last both-wall support; three
+    // more runs overran 99–242in — "misses where the duct is supposed to stop and just runs straight".
+    // The extent is now the INTERSECTION of the two walls, each end allowed a single-wall overhang of
+    // max(24in, one duct width) to absorb corner art, cap strokes, and tap openings at the ends.
+    var t0r=Math.min(A.t0,bt0), t1r=Math.max(A.t1,bt1);
+    var _i0=Math.max(A.t0,bt0), _i1=Math.min(A.t1,bt1);
+    var _ovh=inToPt(Math.max(24,gIn));
+    t0r=Math.max(t0r,_i0-_ovh); t1r=Math.min(t1r,_i1+_ovh);
+    var lenP=t1r-t0r;
+    // the intersection span in EACH wall's own frame — used for per-interval face claims below
+    var _a0b=B.ux*A.A[0]+B.uy*A.A[1], _a1b=B.ux*A.B[0]+B.uy*A.B[1]; if(_a0b>_a1b){ var _tb9=_a0b; _a0b=_a1b; _a1b=_tb9; }
+    var _j0=Math.max(B.t0,_a0b), _j1=Math.min(B.t1,_a1b);
     var off1=A.c, off2=A.nxn*B.mid[0]+A.nyn*B.mid[1];
     var loOff=Math.min(off1,off2), hiOff=Math.max(off1,off2);
     var thn=A.th, axis=(thn<0.35||thn>Math.PI-0.35)?'horizontal':(Math.abs(thn-Math.PI/2)<0.35?'vertical':'diagonal');
@@ -1721,7 +1735,7 @@ function buildSegmentRuns(){
       if((gIn-pd.w)<=wtolUnder && (pd.w-gIn)<=wtolOver) matchTis.push(ti);   // WIDTH only: in top-down plan the wall gap is the duct's width (1st number); height goes into the page. (round: w===h)
     }
     inside.sort(function(p,q){ if(axis==='horizontal') return p.nx-q.nx; if(axis==='vertical') return p.ny-q.ny; return p.ta-q.ta; });
-    return {A:A,B:B,ai:ai,bi:bi,ov:ov,gap:gap,gIn:gIn,t0r:t0r,t1r:t1r,lenP:lenP,off1:off1,off2:off2,axis:axis,inside:inside,matchTis:matchTis,confirmed:matchTis.length>0};
+    return {A:A,B:B,ai:ai,bi:bi,ov:ov,gap:gap,gIn:gIn,t0r:t0r,t1r:t1r,lenP:lenP,off1:off1,off2:off2,axis:axis,inside:inside,matchTis:matchTis,confirmed:matchTis.length>0,i0:_i0,i1:_i1,j0:_j0,j1:_j1};
   }
   var cands=[];
   for(var a=0;a<walls.length;a++){ for(var b=a+1;b<walls.length;b++){ var A=walls[a],B=walls[b];
@@ -1759,10 +1773,19 @@ function buildSegmentRuns(){
   // below -- while the same face still can't be claimed twice.
   var faceUsed={}, usedTags={}, runs=[], squares=0, _acceptedWalls={};
   function _face(i,sgn){ return i+'|'+(sgn>=0?1:-1); }
+  // FACES ARE CLAIMED BY INTERVAL, NOT WHOLESALE (v3.83). With intersection-trimmed extents, a long
+  // wall legitimately serves SEVERAL ducts along its length (a trunk's far wall vs. near-wall pieces
+  // between tap openings). A boolean claim let the first pair lock the whole wall and starved the
+  // rest. A face now records the axial spans it serves; a new pair is refused only when its span
+  // overlaps a claimed span by more than min(24in, 30% of itself).
+  function _fcFree(key,s0,s1){ var iv=faceUsed[key]; if(!iv||!iv.length) return true;
+    for(var q9=0;q9<iv.length;q9++){ var o9=Math.min(s1,iv[q9][1])-Math.max(s0,iv[q9][0]);
+      if(o9>Math.min(inToPt(24),0.3*Math.max(1,s1-s0))) return false; } return true; }
+  function _fcClaim(key,s0,s1){ (faceUsed[key]=faceUsed[key]||[]).push([s0,s1]); }
   function _awKey(P){ return P.axis==='horizontal'?'H':(P.axis==='vertical'?'V':('D'+Math.round(((P.A&&P.A.th)||0)*20))); }
   cands.forEach(function(P){
     var _sgn=(P.off2-P.off1)>=0?1:-1;                                          // which side of wall A its partner sits
-    if(faceUsed[_face(P.ai,_sgn)]||faceUsed[_face(P.bi,-_sgn)]) return;
+    if(!_fcFree(_face(P.ai,_sgn),P.i0,P.i1) || !_fcFree(_face(P.bi,-_sgn),P.j0,P.j1)) return;
     if(P.lenP<inToPt(8)) return;                                               // too small to be a run
     // NO WALL INSIDE THE BAND (v3.37). Admitting shorter segments doubled the chain pool, and pairing
     // started spanning ACROSS ducts: one duct's wall paired with a parallel line far beyond it, putting
@@ -1812,7 +1835,7 @@ function buildSegmentRuns(){
     if(eff && P.lenP < 1.02*P.gap){ squares++; return; }                        // even a tagged blob must be longer than wide
     if(!eff){ var _wS=snapDuctW(P.gap/k6), _lf=(P.lenP/k6)/12;                    // NO TAG -> the gap must be a plausible untagged-duct size, else it's not duct
       if(_wS>32 || _wS<5){ squares++; return; } }                                 // >32" (architectural span) or <5" (doubled wall-line / thickness, not a rect duct) = phantom pair
-    faceUsed[_face(P.ai,_sgn)]=1; faceUsed[_face(P.bi,-_sgn)]=1;
+    _fcClaim(_face(P.ai,_sgn),P.i0,P.i1); _fcClaim(_face(P.bi,-_sgn),P.j0,P.j1);
     freeMatch.forEach(function(ti){ usedTags[ti]=1; }); // claim the matched tag(s) so nothing else can confirm on them
     (_acceptedWalls[_awKey(P)]=_acceptedWalls[_awKey(P)]||[]).push({fix:P.off1,t0:P.t0r,t1:P.t1r},{fix:P.off2,t0:P.t0r,t1:P.t1r});
     function pt(off,t){ return [off*P.A.nxn+t*P.A.ux, off*P.A.nyn+t*P.A.uy]; }
@@ -1868,9 +1891,11 @@ function buildSegmentRuns(){
     var off1=W0.c, off2, t0r=W0.t0, t1r=W0.t1, synth=false;
     var PW=walls[partner]; off2=W0.nxn*PW.mid[0]+W0.nyn*PW.mid[1];
     var qb0=W0.ux*PW.A[0]+W0.uy*PW.A[1], qb1=W0.ux*PW.B[0]+W0.uy*PW.B[1];
-    t0r=Math.min(t0r,Math.min(qb0,qb1)); t1r=Math.max(t1r,Math.max(qb0,qb1));
+    var _qlo=Math.min(qb0,qb1), _qhi=Math.max(qb0,qb1);
+    var _si0=Math.max(W0.t0,_qlo), _si1=Math.min(W0.t1,_qhi), _sovh=inToPt(Math.max(24,wIn));
+    t0r=Math.max(Math.min(t0r,_qlo), _si0-_sovh); t1r=Math.min(Math.max(t1r,_qhi), _si1+_sovh);   // v3.83: same both-walls extent rule as the main pairer
     var _sSgn=(off2-off1)>=0?1:-1;
-    faceUsed[_face(wi,_sSgn)]=1; faceUsed[_face(partner,-_sSgn)]=1; swCount++;
+    _fcClaim(_face(wi,_sSgn),walls[wi].t0,walls[wi].t1); if(partner>=0)_fcClaim(_face(partner,-_sSgn),walls[partner].t0,walls[partner].t1); swCount++;
     var thn2=W0.th, ax3=(thn2<0.35||thn2>Math.PI-0.35)?'horizontal':(Math.abs(thn2-Math.PI/2)<0.35?'vertical':'diagonal');
     function pt2(o,t){ return [o*W0.nxn+t*W0.ux, o*W0.nyn+t*W0.uy]; }
     runs.push({axis:ax3, widthIn:Math.round(wIn), lenP:(t1r-t0r),
