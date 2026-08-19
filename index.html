@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.79</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.80</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -2222,6 +2222,9 @@ function drawOverlay(){
     html+='<circle cx="'+_t.x.toFixed(1)+'" cy="'+_t.y.toFixed(1)+'" r="4" fill="'+_c+'" stroke="#000" stroke-width="0.7" pointer-events="none"/>'
         +'<text x="'+(_t.x+6).toFixed(1)+'" y="'+(_t.y-6).toFixed(1)+'" font-size="13" font-weight="700" fill="'+_c+'" stroke="#000" stroke-width="0.5" pointer-events="none">'+String(_t.text)+'</text>';
   } }catch(e){}
+  try{ var _ab9=window.__attnBoxes||[]; if(_ab9.length && window.__n2s){ for(var _ai9=0;_ai9<_ab9.length;_ai9++){ var ab9=_ab9[_ai9]; var _p9=window.__n2s(ab9.x,ab9.y); if(!_p9) continue; var _r9=30;
+    html+='<rect x="'+(_p9[0]-_r9).toFixed(1)+'" y="'+(_p9[1]-_r9).toFixed(1)+'" width="'+(2*_r9)+'" height="'+(2*_r9)+'" rx="6" fill="rgba(255,45,60,0.07)" stroke="#ff2d3c" stroke-width="2.5" stroke-dasharray="6 4" pointer-events="none"/>'
+        +'<text x="'+_p9[0].toFixed(1)+'" y="'+(_p9[1]-_r9-5).toFixed(1)+'" font-size="12" font-weight="800" text-anchor="middle" fill="#ff2d3c" stroke="#000" stroke-width="0.4" pointer-events="none">'+String(ab9.label||'?')+'</text>'; } } }catch(e){}
   try{ var _gc=window.__geoClusters||[]; for(var _gi=0;_gi<_gc.length;_gi++){ var b=_gc[_gi]; html+='<rect x="'+b[0].toFixed(1)+'" y="'+b[1].toFixed(1)+'" width="'+(b[2]-b[0]).toFixed(1)+'" height="'+(b[3]-b[1]).toFixed(1)+'" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="4 3" pointer-events="none"/>'; } }catch(e){}
   g.innerHTML=html;
   if((document.getElementById('shadeBoxes')||{}).checked && viewport){ try{ shadeBoxesInto(g, viewport.transform); }catch(e){} }
@@ -4348,6 +4351,28 @@ function refreshSel(){
         if(wu&&ck9&&!(window.__censusLog||[]).length) add('info','census-silent','census is enabled but has not produced verdicts yet -- export after the status line reports it');
       }
     }catch(e){}
+    // ATTENTION CARDS (v3.80) — "the review really has not found much of anything useful": the
+    // useful findings existed (unconsumed census seeds, off-ink bands, doubled runs) but lived in a
+    // console chip while the strip filled with amber noise. Every location-bearing finding now becomes
+    // a RED card at the top of the strip AND a red dashed box on the plan itself. Dismissing one is
+    // display-only — it never banks, so it can never veto a real fitting later.
+    try{
+      window.__elbowLedger=(window.__elbowLedger||[]).filter(function(e9){ return !e9._sentinel; });
+      var _attn=[];
+      function lookCard(x9,y9,kind9,src9,msg9){ var ev9={runId:null,pieceIdx:null,x:x9,y:y9,widthIn:12,kind:kind9,src:src9,score:0.15,verdict:'suspect',machine:'look',_sentinel:true,human:null,reasons:[msg9]};
+        (window.__elbowLedger=window.__elbowLedger||[]).push(ev9); _attn.push({x:x9,y:y9,label:kind9}); }
+      (window.__yoloDets||[]).forEach(function(d9){ if(!(d9._census&&!d9._used&&/elbow|tap|cap/.test(d9.cls||''))||d9.nx==null) return;
+        var k9=(d9.cls||'').replace(/^(rect|round)-/,'');
+        if(k9==='tap'&&tapNearPt2(d9.nx,d9.ny,24)) return;                     // a tap IS billed there — not a miss
+        var why9='';
+        try{ var cb9=null; (window.__censusLog||[]).forEach(function(c9){ var m9=Math.hypot((c9.x||0)-d9.nx,(c9.y||0)-d9.ny); if(m9<=18&&(!cb9||m9<cb9.m)) cb9={m:m9,c:c9}; });
+          if(cb9&&(cb9.c.reason||cb9.c.cue)) why9=' — “'+(cb9.c.reason||cb9.c.cue)+'”'; }catch(_){}
+        lookCard(d9.nx,d9.ny,k9,'census-unplaced','the AI census saw a '+k9+' here'+why9+' but NO pass could place it — check for a missing branch or run at this junction'); });
+      items.forEach(function(it9){ if(it9.sev!=='warn'||it9.x==null) return; lookCard(it9.x,it9.y,it9.id,'sentinel',it9.msg); });
+      window.__attnBoxes=_attn;
+      if((window.__elbowLedger||[]).some(function(e9){return e9._sentinel;})){ try{ window.__showElbowStrip(); }catch(_){} }
+      try{ drawOverlay(); }catch(_){}
+    }catch(e9x){ console.warn('attention cards',e9x); }
     var rec={at:tag||'build', items:items};
     window.__sentinel=rec; window.__sentinelLog.push(rec);
     if(window.__sentinelLog.length>10) window.__sentinelLog.shift();
@@ -5433,6 +5458,18 @@ function refreshSel(){
         else if(_density<4){ ev.reasons.push('sheet nearly blind to this class ('+_density+' usable dets) \u2014 no penalty'); }
         else if(dn.have){ ev.score-=0.15; ev.reasons.push('nearest det '+dn.xw.toFixed(1)+'\u00d7W away'); }
         else { ev.score-=0.10; ev.reasons.push('no matching detection on sheet'); }
+        // CENSUS FUSION (v3.80): the junction census LOOKED at this exact spot with its own eyes.
+        // Agreement is strong independent evidence; a shape-level contradiction caps the verdict at
+        // review and the card says WHY. Neutral census answers (open-end, no verdict) say nothing.
+        // This is what empties the strip of noise: a det-less merge-join elbow the census vouched
+        // for stops showing up as amber "review" clutter, so the red cards left are real conflicts.
+        try{ var _cvv=(window.__censusAt?window.__censusAt(f.x,f.y):null);
+          if(_cvv){
+            var _match=(isElb&&_cvv==='elbow')||(isTap&&_cvv==='tap')||(isStep&&_cvv==='transition')||(isCap&&_cvv==='cap');
+            var _contra=(isElb&&(_cvv==='tap'||_cvv==='crossing'))||(isTap&&(_cvv==='elbow'||_cvv==='crossing'))||(isCap&&_cvv==='tap');
+            if(_match){ ev.score+=0.30; ev.reasons.push('census: the AI looked here and saw a '+_cvv); }
+            else if(_contra){ ev.score-=0.30; capReview=true; ev.reasons.push('census DISAGREES: the AI saw a '+_cvv+' here, not a '+(isElb?'corner':(isTap?'tap':_cid))); }
+          } }catch(_){}
         if(isElb){
           if(p.turn){ ev.score+=0.30; ev.reasons.push('turns '+Math.round(p.turn*180/Math.PI)+'\u00b0'); }
           else { ev.score-=0.35; capReview=true; ev.reasons.push('NO TURN \u2014 marker only'); }
@@ -5493,6 +5530,7 @@ function refreshSel(){
       if(j.turn){ ev.score+=0.25; ev.reasons.push('turn '+Math.round(j.turn*180/Math.PI)+'\u00b0'); }
       if(j.score!=null){ ev.score+=0.35*Math.min(1,(j.score||0)*1.4); ev.reasons.push('det '+(j.score||0).toFixed(2)); }
       else ev.reasons.push(j._inferred?'inferred from run ends (no detection)':'no score recorded');
+      try{ if(window.__censusAt && window.__censusAt(j.atX,j.atY)==='elbow'){ ev.score+=0.25; ev.reasons.push('census: the AI looked here and saw an elbow'); } }catch(_){}
       var A=findRun(j.trunkId), B=findRun(j.branchId);
       if(A&&B){ ev.score+=0.15; ev.reasons.push('both runs still present (unmerged)'); }
       ev.verdict = ev.score>=0.60 ? 'confirmed' : (ev.score>=0.35 ? 'review' : 'suspect');
@@ -5781,8 +5819,10 @@ function refreshSel(){
     var ov=document.getElementById('overlay'); if(ov) ov.appendChild(r);
   };
   window.__stripKeep=function(i,auto){ var e=(window.__elbowLedger||[])[i]; if(!e) return;
+    if(e._sentinel){ e.human='kept'; var el9=document.getElementById('elstrip-c'+i); if(el9){ el9.style.opacity=.45; el9.querySelector('.act').textContent='\u2713 noted'; } return; }
     e.human='kept'; if(!auto) window.__bankPut({kind:e.kind,src:e.src||null,verdict:e.verdict,score:e.score,human:'kept',x:e.x,y:e.y,widthIn:e.widthIn,reasons:e.reasons,img:window.__fitCrop(e,160)}); var el=document.getElementById('elstrip-c'+i); if(el){ el.style.opacity=.45; el.querySelector('.act').textContent='\u2713 kept'; } };
   window.__stripDel=function(i,auto){ var e=(window.__elbowLedger||[])[i]; if(!e) return;
+    if(e._sentinel){ e.human='deleted'; window.__attnBoxes=(window.__attnBoxes||[]).filter(function(ab){ return !(ab.x===e.x&&ab.y===e.y); }); try{ drawOverlay(); }catch(_){} var el8=document.getElementById('elstrip-c'+i); if(el8){ el8.style.opacity=.35; el8.querySelector('.act').textContent='\u2717 dismissed'; } return; }
     e.human='deleted'; if(!auto) window.__bankPut({kind:e.kind,src:e.src||null,verdict:e.verdict,score:e.score,human:'deleted',x:e.x,y:e.y,widthIn:e.widthIn,reasons:e.reasons,img:window.__fitCrop(e,160)});
     if(e.kind==='run'){ window.__runs2d=(window.__runs2d||[]).filter(function(r){ return r.id!==e.runId; }); try{ renderItems(); renderPanel(); }catch(_){ } }
     else if(e.runId!=null){ window.__pcDel(e.runId, e.pieceIdx); }
@@ -5858,7 +5898,7 @@ function refreshSel(){
     var old=document.getElementById('elstrip'); if(old) old.remove();
     var L=(window.__elbowLedger||[]).slice(); if(!L.length) return;
     var order={suspect:0,review:1,confirmed:2};
-    var mo={no:0,you:1,yes:2};
+    var mo={no:0,look:1,you:2,yes:3};
     L.sort(function(a,b){ return (a.human?1:0)-(b.human?1:0) || (mo[a.machine]||1)-(mo[b.machine]||1) || order[a.verdict]-order[b.verdict] || a.score-b.score; });
     var box=document.createElement('div'); box.id='elstrip';
     box.style.cssText='position:fixed;right:10px;bottom:34px;width:295px;max-height:46vh;overflow:auto;z-index:9998;background:rgba(10,16,24,.96);border:1px solid #2c3d52;border-radius:10px;padding:8px;font:12px system-ui;color:#dfe8f2';
@@ -5870,8 +5910,8 @@ function refreshSel(){
       '<button onclick="document.getElementById(\'elstrip\').remove();var e=document.getElementById(\'aihl\');if(e)e.remove();" style="background:#222;color:#ccc;border:1px solid #555;border-radius:5px;cursor:pointer">\u00d7</button></div>';
     L.forEach(function(e){
       var i=(window.__elbowLedger||[]).indexOf(e);
-      var col=e.machine==='yes'?'#2c6e49':(e.machine==='no'?'#7e2c35':'#8a6d1a');
-      var mtxt=e.machine==='no'?'\u2716 ALGORITHM SAYS NO':(e.machine==='yes'?'\u2714 algorithm: yes':'\u2754 your call');
+      var col=e.machine==='yes'?'#2c6e49':(e.machine==='no'?'#7e2c35':(e.machine==='look'?'#c2273a':'#8a6d1a'));
+      var mtxt=e.machine==='no'?'\u2716 ALGORITHM SAYS NO':(e.machine==='yes'?'\u2714 algorithm: yes':(e.machine==='look'?'\u26a0 POSSIBLE MISS \u2014 LOOK HERE':'\u2754 your call'));
       h+='<div id="elstrip-c'+i+'" onmouseenter="__stripCircle('+e.x.toFixed(1)+','+e.y.toFixed(1)+')" style="border:1px solid '+col+';border-left:5px solid '+col+';border-radius:7px;padding:5px 7px;margin-bottom:6px">'
         +'<div style="font-weight:700;color:'+col+'">'+mtxt+'</div>'
         +'<div style="display:flex;justify-content:space-between"><b>'+(e.kind||'').toUpperCase()+(e.src?(' ['+e.src+']'):'')+' \u00b7 '+e.verdict.toUpperCase()+' '+(e.score*100|0)+'%</b><span class="act">'
