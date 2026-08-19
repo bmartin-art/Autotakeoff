@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.80</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.81</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -1614,7 +1614,12 @@ function buildSegmentRuns(){
     var ux=Math.cos(th), uy=Math.sin(th), nxn=-Math.sin(th), nyn=Math.cos(th);
     var mx=(s.nx1+s.nx2)/2, my=(s.ny1+s.ny2)/2;
     var ta=ux*s.nx1+uy*s.ny1, tb=ux*s.nx2+uy*s.ny2;
-    cand.push({th:th,ux:ux,uy:uy,nxn:nxn,nyn:nyn,c:nxn*mx+nyn*my,t0:Math.min(ta,tb),t1:Math.max(ta,tb),L:L,mx:mx,my:my});
+    // SYSTEM COLOR (v3.81, Conflict #14): on multi-system sheets each system is stroked its own
+    // saturated color (GASD: green/orange/blue/yellow). Carry the hue bucket so chains and pairs stay
+    // inside one system. Black/gray ink gets NO key (wildcard) — single-color prints are untouched.
+    var _ck9=null; try{ var _c9=s.rgb||[0,0,0], _mx9=Math.max(_c9[0],_c9[1],_c9[2]), _mn9=Math.min(_c9[0],_c9[1],_c9[2]);
+      if((_mx9-_mn9)>0.25 && _mx9>0.40) _ck9=colorKeyOf(s); }catch(_){}
+    cand.push({th:th,ux:ux,uy:uy,nxn:nxn,nyn:nyn,c:nxn*mx+nyn*my,t0:Math.min(ta,tb),t1:Math.max(ta,tb),L:L,mx:mx,my:my,ck:_ck9});
   }
   if(cand.length<2){ out.innerHTML='<div class="hint">No duct walls are selected yet \u2014 mark or scan your duct first, then build runs.</div>'; return; }
   // 2) merge collinear + same-centerline + end-to-end-touching fragments into continuous walls
@@ -1624,17 +1629,23 @@ function buildSegmentRuns(){
   for(var ci=0;ci<cand.length;ci++){ var it=cand[ci]; var best=-1;
     for(var wi=0;wi<walls.length;wi++){ var w=walls[wi];
       if(adiff(w.th,it.th)>ANG) continue;
+      if(w.ck&&it.ck&&w.ck!==it.ck) continue;    // (v3.81 #14) never chain across system colors
       var cw=w.nxn*it.mx+w.nyn*it.my;            // fragment offset measured in the wall's frame
       if(Math.abs(cw-w.c)>CTOL) continue;        // must sit on the same centerline
       var fm=w.ux*it.mx+w.uy*it.my, half=it.L/2; // fragment axial span projected onto the wall axis
       var sep=Math.max((fm-half)-w.t1, w.t0-(fm+half));  // >0 only if a real gap separates them
-      if(sep>BRIDGE) continue;
+      // colored systems are often DASHED (GASD blue: 3in dashes, dash+dot gaps beyond the 6in bridge
+      // fragmented every wall). Same-color fragments may bridge 12in; the base bridge is unchanged
+      // for black/gray ink so solid single-color prints keep their tighter rail.
+      var _br9=(w.ck&&it.ck&&w.ck===it.ck)?Math.max(BRIDGE,inToPt(12)):BRIDGE;
+      if(sep>_br9) continue;
       best=wi; break;
     }
     if(best>=0){ var W=walls[best]; var cw2=W.nxn*it.mx+W.nyn*it.my; var fm2=W.ux*it.mx+W.uy*it.my, h2=it.L/2;
       W.t0=Math.min(W.t0,fm2-h2); W.t1=Math.max(W.t1,fm2+h2); W.sumC+=cw2*it.L; W.sumL+=it.L; W.c=W.sumC/W.sumL; W.n++;
+      if(!W.ck&&it.ck) W.ck=it.ck;
     } else {
-      walls.push({th:it.th,ux:it.ux,uy:it.uy,nxn:it.nxn,nyn:it.nyn,c:it.c,sumC:it.c*it.L,sumL:it.L,t0:it.t0,t1:it.t1,n:1});
+      walls.push({th:it.th,ux:it.ux,uy:it.uy,nxn:it.nxn,nyn:it.nyn,c:it.c,sumC:it.c*it.L,sumL:it.L,t0:it.t0,t1:it.t1,n:1,ck:it.ck});
     }
   }
   walls.forEach(function(w){ w.len=w.t1-w.t0;
@@ -1715,6 +1726,7 @@ function buildSegmentRuns(){
   var cands=[];
   for(var a=0;a<walls.length;a++){ for(var b=a+1;b<walls.length;b++){ var A=walls[a],B=walls[b];
     if(adiff(A.th,B.th)>PAIRANG) continue;
+    if(A.ck&&B.ck&&A.ck!==B.ck) continue;        // (v3.81 #14) a duct's two walls are the SAME system color — green never pairs with blue
     var gapP=Math.abs(A.nxn*B.mid[0]+A.nyn*B.mid[1]-A.c); var gI=gapP/k6;
     if(gI<MINW||gI>MAXW) continue;
     var bt0=A.ux*B.A[0]+A.uy*B.A[1], bt1=A.ux*B.B[0]+A.uy*B.B[1]; if(bt0>bt1){var tt=bt0;bt0=bt1;bt1=tt;}
@@ -3943,13 +3955,13 @@ function refreshSel(){
   // reporting fittings that are not drawn, and ask for the CUE — the drawn feature that decided it —
   // so ungrounded answers expose themselves.
   window.__PROMPTS={
-    ver:'p2',
+    ver:'p3',
     refTapCross:'Inside the red circle, a branch duct meets or runs across a trunk duct. tap = the TRUNK visibly changes size at or just past this junction (necks down where air leaves), or a tap/conical fitting visibly joins them. crossing = the ducts merely overlap with NO trunk size change and NO joining fitting. Answer ONLY {"verdict":"tap"|"crossing"|"unsure","cue":"<6 words: the drawn feature that decided it>","reason":"<8 words"}.',
     refTap:'Inside the red circle, a duct meets the side of another duct. corner = the airstream TURNS (miter/diagonal joint line, matching widths flowing into each other, the through-duct segmenting AT this junction). tap = a branch TERMINATES into a trunk whose walls run CONTINUOUS straight through. crossing = the duct visibly CONTINUES on the far side. Answer ONLY {"verdict":"tap"|"crossing"|"corner"|"unsure","cue":"<6 words>","reason":"<8 words"}.',
     refStep:'Inside the red circle, does the duct WIDTH visibly change (a taper/transition between two sizes)? Answer ONLY {"verdict":"yes"|"no"|"unsure","cue":"<6 words>","reason":"<8 words"}.',
     refCap:'Inside the red circle, does the duct END with a cap (closed end, no continuation)? Answer ONLY {"verdict":"yes"|"no"|"unsure","cue":"<6 words>","reason":"<8 words"}.',
     refElbow:'Inside the red circle, is there a 90-degree duct ELBOW (the duct turns a corner)? Answer ONLY {"verdict":"yes"|"no"|"unsure","cue":"<6 words>","reason":"<8 words"}.',
-    census:function(kctx,wIn,yoloCtx){ return 'HVAC plan crop. Judge ONLY the duct ink inside the red circle. '+kctx+' The duct here is roughly '+wIn+'″ wide.'+(yoloCtx||'')+' What SHAPE does the duct ink actually form at the circle? "L" = one duct turning a corner (two legs meet at one bend; nothing continues past the bend). "T" = a branch meets the SIDE of a duct whose walls run STRAIGHT THROUGH the junction. "X" = two ducts cross over each other and BOTH continue past. "CAP" = a duct end closed off with a flat end line or cap fitting. "END" = the duct just stops or leaves the crop with no fitting drawn. "STEP" = the duct visibly changes width (taper/transition). "NONE" = no duct at the circle. Do NOT report a fitting that is not actually drawn; judge the ink, not any detector opinion. Answer ONLY {"shape":"L"|"T"|"X"|"CAP"|"END"|"STEP"|"NONE","round":true|false,"confidence":0.0-1.0,"cue":"<6 words: the drawn feature that decided it>","reason":"<10 words"}'; },
+    census:function(kctx,wIn,yoloCtx){ return 'HVAC plan crop. Judge ONLY the duct ink inside the red circle. '+kctx+' The duct here is roughly '+wIn+'″ wide.'+(yoloCtx||'')+' What SHAPE does the duct ink actually form at the circle? "L" = one duct turning a corner (two legs meet at one bend; nothing continues past the bend). "T" = a branch meets the SIDE of a duct whose walls run STRAIGHT THROUGH the junction and continue WELL PAST it on BOTH sides. If the through-duct STOPS, turns, or fades within about one duct width past the junction, that is "L" (a corner where one leg was drawn long), NOT "T". "X" = two ducts cross over each other and BOTH continue past. "CAP" = a duct end closed off with a flat end line or cap fitting. "END" = the duct just stops or leaves the crop with no fitting drawn. "STEP" = the duct visibly changes width (taper/transition). "NONE" = no duct at the circle. Do NOT report a fitting that is not actually drawn; judge the ink, not any detector opinion. Answer ONLY {"shape":"L"|"T"|"X"|"CAP"|"END"|"STEP"|"NONE","round":true|false,"confidence":0.0-1.0,"cue":"<6 words: the drawn feature that decided it>","reason":"<10 words"}'; },
   };
   window.__refereeTaps=async function(){
     var wurl=((document.getElementById('aiWorker')||{}).value||'').trim().replace(/\/+$/,'');
@@ -4107,8 +4119,14 @@ function refreshSel(){
             var vx=E.p[0]-sx, vy=E.p[1]-sy;
             var along=ptToIn(vx*dx+vy*dy), perp=ptToIn(vx*(-dy)+vy*dx);
             var gap=Math.abs(perp)-bw/2;
-            if(along>=6 && along<=Lb-6 && gap>=-10 && gap<=Math.max(12,bw)){    // end near flank: tap-or-crossing question
-              push(E.p[0],E.p[1],Math.max(bw,A.widthIn||12),'end-flank'); }
+            if(along>=6 && along<=Lb-6 && gap>=-10 && gap<=Math.max(12,bw)){
+              // KIND, NOT JUST DISTANCE (v3.81): when the junction sits within 24in of the OTHER run's
+              // own terminus, this is two ducts MEETING (the trunk merely overshoots its corner — the
+              // exact geometry v3.79 trims), not a branch into a continuing trunk. Asking it as
+              // 'end-flank' primed the model toward T and real elbows came back as taps. A real tap
+              // this close to a trunk end still can seed: tap-at-corner passes when a body runs through.
+              var _knd9=(along<=24||along>=Lb-24)?'corner':'end-flank';
+              push(E.p[0],E.p[1],Math.max(bw,A.widthIn||12),_knd9); }
           });
           if(i<j){
             var eA=runEnd(A), p1=[A.start[0],A.start[1]], p2=[eA.x,eA.y];
@@ -4235,7 +4253,12 @@ function refreshSel(){
       else if(rz.v==='elbow') ok=(k==='corner'||k==='end-flank');                                        // an elbow NEEDS meeting ends
       else if(rz.v==='cap')   ok=(k==='free-end');                                                       // a cap NEEDS a dead end
       else if(rz.v==='transition') ok=true;                                                              // bridgeSizechanges gates on its own
-      if(!ok){ lg.seeded='incompatible: '+rz.v+' verdict at a '+k+' — geometry cannot host it'; return; }
+      if(!ok){ lg.seeded='incompatible: '+rz.v+' verdict at a '+k+' — geometry cannot host it';
+        // and it must not POISON the fusion layer either: a physically-impossible verdict left in
+        // __censusVerdicts made __censusAt tell the adjudicator "census saw a tap" at a real elbow/cap
+        // (red DISAGREE on correct fittings) and starved mergeElbowJoins of its census vouch.
+        try{ delete window.__censusVerdicts[ck(rz.c.x,rz.c.y)]; }catch(_){}
+        return; }
       var cls= rz.v==='tap' ? (rz.round?'round-tap':'rect-tap')
              : rz.v==='elbow' ? 'elbow'
              : rz.v==='transition' ? 'sizechange'
