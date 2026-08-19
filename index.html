@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.81</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.82</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -4299,6 +4299,84 @@ function refreshSel(){
   // Every check is an invariant a past field bug violated. The sentinel never fixes anything --
   // it FLAGS: console table + a banner chip + the export (sentinel[]), so a conflict between
   // layers is visible the moment it happens instead of three runs later.
+  // ---------- SYSTEM AUDIT (v3.82) — declarative rules on the finished run graph ----------
+  // Idea from rule-based P&ID autocorrection (Schulze Balhorn et al. 2025): once the takeoff is a
+  // graph, correctness is a set of RULES checked independently of how anything was built. Each rule
+  // searches for a broken pattern, first checks whether the CORRECTED pattern already exists (a tap
+  // billed, a transition present) and stays silent if so, and carries a severity: 'mandatory' = red
+  // LOOK card + plan box, 'suggested'/'consider' = amber your-call card. Pure geometry — no AI calls.
+  window.__runSystemAudit=function(){
+    var runs=window.__runs2d||[]; var F=[]; window.__auditLog=F; if(runs.length<1) return F;
+    var TOL_END=inToPt(12);
+    function frames(r){ try{ return runFrames(r); }catch(_){ return null; } }
+    // fitting inventory with plan positions (same kind logic as the adjudicator)
+    var fitAt=[];
+    runs.forEach(function(r){ var fr=frames(r); if(!fr) return;
+      (r.pieces||[]).forEach(function(p,i){ if(p.kind!=='fitting') return; var f=fr[i]; if(!f) return;
+        var cid=p.cid||'';
+        var kind=(cid==='stap'||cid==='tap'||cid==='tee'||p._tap)?'tap'
+               :((cid==='cap'||cid==='ec'||p._cap)?'cap'
+               :((cid==='e90'||cid==='e45'||p._elbow)?'elbow'
+               :((cid==='tr'||cid==='reducer'||cid==='s2r'||p._sizeStep)?'trans':cid)));
+        fitAt.push({x:f.x,y:f.y,kind:kind}); }); });
+    function fitNear(x,y,kinds,tolIn){ var tol=inToPt(tolIn||24);
+      return fitAt.some(function(f){ return kinds.indexOf(f.kind)>=0 && Math.hypot(f.x-x,f.y-y)<=tol; }); }
+    function joinNear(x,y){ return (window.__elbowJoins||[]).some(function(j){ return Math.hypot((j.atX||0)-x,(j.atY||0)-y)<=inToPt(24); }); }
+    function connEnd(pp,self){ return runs.some(function(o){ if(o===self) return false; var eo=runEnd(o);
+      return Math.hypot(o.start[0]-pp[0],o.start[1]-pp[1])<=TOL_END || Math.hypot(eo.x-pp[0],eo.y-pp[1])<=TOL_END; }); }
+    function bodyAt(pp,self){ var hit=null;
+      runs.forEach(function(o){ if(o===self||hit) return; var pr; try{ pr=projOnRun(o,pp[0],pp[1]); }catch(_){ return; }
+        var L=runLenIn(o); if(pr.alongIn>=6&&pr.alongIn<=L-6&&Math.abs(pr.perpIn)<=(o.widthIn||12)/2+10) hit=o; });
+      return hit; }
+    var seenF={}; function put(rule,sev,x,y,msg){ var k=rule+'|'+Math.round(x/inToPt(15))+'|'+Math.round(y/inToPt(15));
+      if(seenF[k]) return; seenF[k]=1; F.push({rule:rule,sev:sev,x:Math.round(x),y:Math.round(y),msg:msg}); }
+    // R1/R2/R5 — every run END must terminate in something
+    runs.forEach(function(r){ if(runLenIn(r)<24) return;
+      var e=runEnd(r), hEnd=headingAtEndOf(r);
+      [{p:[r.start[0],r.start[1]], out:[-r.dir[0],-r.dir[1]]},
+       {p:[e.x,e.y], out:[hEnd[0],hEnd[1]]}].forEach(function(Ee){
+        if(fitNear(Ee.p[0],Ee.p[1],['cap'],18) || joinNear(Ee.p[0],Ee.p[1])) return;
+        var Bt=bodyAt(Ee.p,r);
+        if(Bt){ // end sits ON another run's body — corrected pattern is a billed tap (or a transition connector)
+          if(!fitNear(Ee.p[0],Ee.p[1],['tap'],24) && !fitNear(Ee.p[0],Ee.p[1],['trans'],24))
+            put('unattached-branch','mandatory',Ee.p[0],Ee.p[1],'run '+r.id.slice(0,7)+' ('+(r.widthIn||'?')+'″) touches '+Bt.id.slice(0,7)+' ('+(Bt.widthIn||'?')+'″) with NO tap billed at the junction');
+          else if((r.widthIn||0)>(Bt.widthIn||0)+2)
+            put('branch-gt-trunk','suggested',Ee.p[0],Ee.p[1],'branch '+(r.widthIn||'?')+'″ is LARGER than its trunk '+(Bt.widthIn||'?')+'″ — check size assignment');
+          return; }
+        if(connEnd(Ee.p,r) || fitNear(Ee.p[0],Ee.p[1],['elbow'],18)) return;
+        // pointing at another run within 48in with nothing joining them?
+        var tgt=null, tgtIn=0;
+        for(var t=6;t<=48 && !tgt;t+=6){ var q=[Ee.p[0]+Ee.out[0]*inToPt(t), Ee.p[1]+Ee.out[1]*inToPt(t)];
+          for(var oi=0;oi<runs.length;oi++){ var o=runs[oi]; if(o===r) continue; var pr; try{ pr=projOnRun(o,q[0],q[1]); }catch(_){ continue; }
+            var L=runLenIn(o); if(pr.alongIn>=-6&&pr.alongIn<=L+6&&Math.abs(pr.perpIn)<=(o.widthIn||12)/2+8){ tgt=o; tgtIn=t; break; } } }
+        if(tgt) put('open-end-toward','mandatory',Ee.p[0],Ee.p[1],'run '+r.id.slice(0,7)+' ends pointing at '+tgt.id.slice(0,7)+' ~'+tgtIn+'″ away — nothing joins them (missing tap/elbow/extension)');
+        else if(runLenIn(r)>=144) put('open-end','consider',Ee.p[0],Ee.p[1],'run '+r.id.slice(0,7)+' ('+Math.round(runLenIn(r)/12)+' LF) just stops here — no cap, drop, or connection billed');
+      }); });
+    // R3 — a size step inside a run needs a transition piece between the two sizes
+    runs.forEach(function(r){ var fr=frames(r); if(!fr) return; var pcs=r.pieces||[];
+      for(var i=0;i<pcs.length-1;i++){ var a=pcs[i], b=pcs[i+1];
+        if(a.kind!=='straight'||b.kind!=='straight') continue;
+        var aw=a.widthIn||0,bw=b.widthIn||0, ad=(a.depthIn!=null?a.depthIn:aw), bd=(b.depthIn!=null?b.depthIn:bw);
+        if(Math.abs(aw-bw)>=2||Math.abs(ad-bd)>=2){ var f=fr[i+1]||fr[i]; if(!f) continue;
+          put('step-no-transition','mandatory',f.x,f.y,'size changes '+(a.size||aw+'″')+' → '+(b.size||bw+'″')+' inside run '+r.id.slice(0,7)+' with no transition piece'); } } });
+    // R4 — two collinear same-size runs with a small end gap are one duct split in two
+    for(var i2=0;i2<runs.length;i2++){ for(var j2=i2+1;j2<runs.length;j2++){ var A=runs[i2],Bb=runs[j2];
+      if((A.widthIn||0)!==(Bb.widthIn||0)) continue;
+      if(Math.abs(A.dir[0]*Bb.dir[0]+A.dir[1]*Bb.dir[1])<0.98) continue;
+      var lat=Math.abs((Bb.start[0]-A.start[0])*(-A.dir[1])+(Bb.start[1]-A.start[1])*A.dir[0]);
+      if(lat>inToPt(4)) continue;
+      var eA=runEnd(A), eB=runEnd(Bb);
+      var a1=A.start[0]*A.dir[0]+A.start[1]*A.dir[1], a2=eA.x*A.dir[0]+eA.y*A.dir[1];
+      var b1=Bb.start[0]*A.dir[0]+Bb.start[1]*A.dir[1], b2=eB.x*A.dir[0]+eB.y*A.dir[1];
+      var gap=Math.max(Math.min(a1,a2),Math.min(b1,b2))-Math.min(Math.max(a1,a2),Math.max(b1,b2));
+      if(gap>inToPt(1) && gap<=inToPt(24)){
+        var best=null; [[A.start[0],A.start[1]],[eA.x,eA.y]].forEach(function(pp){ [[Bb.start[0],Bb.start[1]],[eB.x,eB.y]].forEach(function(qq){ var m=Math.hypot(pp[0]-qq[0],pp[1]-qq[1]); if(!best||m<best.m) best={m:m,x:(pp[0]+qq[0])/2,y:(pp[1]+qq[1])/2}; }); });
+        if(best && best.m<=inToPt(26) && !fitNear(best.x,best.y,['cap'],14))
+          put('split-run','suggested',best.x,best.y,'runs '+A.id.slice(0,7)+' and '+Bb.id.slice(0,7)+' ('+(A.widthIn||'?')+'″) are collinear with a '+Math.round(ptToIn(gap))+'″ gap — likely ONE duct split in two');
+      } } }
+    if(F.length) console.log('[audit] '+F.length+' rule finding(s)'); 
+    return F;
+  };
   window.__sentinelLog=window.__sentinelLog||[];
   window.__runSentinel=function(tag){
     var runs=window.__runs2d||[], items=[];
@@ -4392,6 +4470,18 @@ function refreshSel(){
           if(cb9&&(cb9.c.reason||cb9.c.cue)) why9=' — “'+(cb9.c.reason||cb9.c.cue)+'”'; }catch(_){}
         lookCard(d9.nx,d9.ny,k9,'census-unplaced','the AI census saw a '+k9+' here'+why9+' but NO pass could place it — check for a missing branch or run at this junction'); });
       items.forEach(function(it9){ if(it9.sev!=='warn'||it9.x==null) return; lookCard(it9.x,it9.y,it9.id,'sentinel',it9.msg); });
+      // SYSTEM AUDIT findings (v3.82): mandatory = red card + plan box; suggested/consider = amber card.
+      // Skip a finding when another attention card already sits within 15in (census-unplaced overlap).
+      try{ var _au9=(window.__runSystemAudit?window.__runSystemAudit():[])||[];
+        _au9.forEach(function(f9){ if(f9.x==null) return;
+          var dup9=(window.__elbowLedger||[]).some(function(e8){ return e8._sentinel && Math.hypot((e8.x||0)-f9.x,(e8.y||0)-f9.y)<=inToPt(15); });
+          if(dup9) return;
+          var _red9=(f9.sev==='mandatory');
+          window.__elbowLedger.push({runId:null,pieceIdx:null,x:f9.x,y:f9.y,widthIn:12,kind:f9.rule,src:'audit',
+            score:0.15,verdict:'suspect',machine:(_red9?'look':'you'),_sentinel:true,human:null,
+            reasons:[f9.msg+(_red9?'':' ('+f9.sev+')')]});
+          if(_red9) _attn.push({x:f9.x,y:f9.y,label:f9.rule});
+        }); }catch(e8x){ console.warn('system audit',e8x); }
       window.__attnBoxes=_attn;
       if((window.__elbowLedger||[]).some(function(e9){return e9._sentinel;})){ try{ window.__showElbowStrip(); }catch(_){} }
       try{ drawOverlay(); }catch(_){}
@@ -8482,6 +8572,7 @@ $('exportBtn').onclick=()=>{
     inferDiag:(window.__inferDiag||null),   // v3.74: corner-inference reach/angle table — the elbow refusals were invisible in exports (GASD p31: elbows missing, no way to see why)
     censusLog:(window.__censusLog||[]),   // v3.75: every junction the census judged, with verdicts
     sentinel:((window.__sentinel||{}).items||[]),   // v3.78: conflict sentinel findings at export time
+    audit:(window.__auditLog||[]),   // v3.82: system-audit rule findings (rule/sev/x/y/msg)
     fillDuctMode:!!window.__fillDuctMode,
     rogueRemoved:((window.__rogueLog||[]).flat()),
     detDecisions:((window.__yoloDets||[]).map(function(d){
