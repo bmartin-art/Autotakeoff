@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.84</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.86</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -4339,6 +4339,42 @@ function refreshSel(){
       function unsupported(px,py,inx,iny){ // inches of no-both-wall centerline from this tip inward
         for(var t=3;t<=maxProbe;t+=6){ if(bothWalls(px+inx*inToPt(t),py+iny*inToPt(t),inx,iny,w)) return t-3; }
         return -1; }                                                            // -1 = never supported: leave alone
+      // JUNCTION OVERSHOOT (v3.86, "I get a lot of ductwork overshoots"): a branch that crossed a
+      // perpendicular trunk and stopped within (trunk_w/2 + 18in) of its CENTERLINE is a tap that
+      // ran long — the stub past the trunk is shorter than the ink-trim allowance, so v3.84 never
+      // caught it. Pull the end back to the trunk's NEAR wall (where the tap collar takes it).
+      // A cap billed on the overshoot stub is an artifact of the overshoot and is removed with it.
+      // Real crossings (elevation changes) continue well past the trunk and are untouched.
+      function jTrim(px,py,inx,iny){
+        var best=null;
+        for(var oi=0;oi<runs.length;oi++){ var T=runs[oi]; if(T===r) continue;
+          if(Math.abs((T.dir[0]||0)*inx+(T.dir[1]||0)*iny)>0.35) continue;      // near-perpendicular only
+          var pr; try{ pr=projOnRun(T,px,py); }catch(_){ continue; }
+          var Lt=runLenIn(T); if(pr.alongIn<6||pr.alongIn>Lt-6) continue;       // trunk BODY here (corners excluded)
+          var wT=T.widthIn||12;
+          if(Math.abs(pr.perpIn)>wT/2+18) continue;                             // tip inside or just past the trunk
+          var back=Math.min(30, Lr-6);                                          // a point well inside the branch body
+          var pq; try{ pq=projOnRun(T,px+inx*inToPt(back),py+iny*inToPt(back)); }catch(_){ continue; }
+          if(Math.abs(pq.perpIn)<=wT/2) continue;                               // body still inside the trunk: ambiguous
+          var sideIn=(pq.perpIn>=0)?1:-1;                                       // the side the branch comes FROM
+          var cutIn=wT/2 - sideIn*pr.perpIn;                                    // tip -> near face, along the branch
+          if(cutIn>=4 && cutIn<=wT+24){ if(!best||cutIn<best.cut) best={cut:cutIn, T:T}; } }
+        return best; }
+      function dropStubCap(atEnd){ var i9=atEnd?pcs.length-1:0; var p9=pcs[i9];
+        if(p9&&p9.kind==='fitting'&&(p9.cid==='cap'||p9.cid==='ec'||p9._cap)){ pcs.splice(i9,1);
+          console.log('[trim] '+r.id+' removed a cap billed on an overshoot stub'); return true; } return false; }
+      var eO=runEnd(r), hO=headingAtEndOf(r);
+      var bjE=jTrim(eO.x,eO.y,-hO[0],-hO[1]);
+      if(bjE){ dropStubCap(true);
+        if(pcs.length&&pcs[pcs.length-1].kind==='straight'){ var lpJ=pcs[pcs.length-1], cJ=Math.min(bjE.cut,(lpJ.lenIn||0)-1);
+          if(cJ>=4){ lpJ.lenIn=Math.round((lpJ.lenIn-cJ)*10)/10; nTrim++;
+            console.log('[trim] '+r.id+' finish pulled back '+Math.round(cJ)+'″ to '+bjE.T.id+'’s near wall (tap face)'); } } }
+      var bjS=jTrim(r.start[0],r.start[1],r.dir[0],r.dir[1]);
+      if(bjS){ dropStubCap(false);
+        if(pcs.length&&pcs[0].kind==='straight'){ var fpJ=pcs[0], cS=Math.min(bjS.cut,(fpJ.lenIn||0)-1);
+          if(cS>=4){ fpJ.lenIn=Math.round((fpJ.lenIn-cS)*10)/10;
+            r.start=[r.start[0]+r.dir[0]*inToPt(cS), r.start[1]+r.dir[1]*inToPt(cS)]; nTrim++;
+            console.log('[trim] '+r.id+' start pulled back '+Math.round(cS)+'″ to '+bjS.T.id+'’s near wall (tap face)'); } } }
       // finish end — only if the run ends in a straight (a cap/elbow at the end is trusted)
       if(pcs[pcs.length-1].kind==='straight'){
         var e=runEnd(r), h=headingAtEndOf(r);
@@ -5759,7 +5795,25 @@ function refreshSel(){
             comp.forEach(function(id2){ var r3=_by[id2]; var e3=runEnd(r3);
               var mx=(r3.start[0]+e3.x)/2, my=(r3.start[1]+e3.y)/2;
               if(Math.hypot(km.x-mx,km.y-my)<inToPt(Math.max(12,r3.widthIn||12))) _mem=true; }); }); }catch(_){}
-          if(!_mem){
+          // A MATCHING TAG VETOES THE SILENT DELETE (v3.85). p1 run 41: 8 of 10 auto-removals were
+          // real branch drops sitting on solid ink — 7 had a WIDTH-MATCHING size tag within arm's
+          // reach (one 17in away) — "why does it miss these random ones outlined in green". Clutter
+          // (ceiling grid, soffits) sits on ink too, so ink can't discriminate — but grid clutter has
+          // no matching duct tag beside it. Tag-matched components now become a review card instead
+          // of silently vanishing; untagged small clutter still auto-removes as before.
+          var _tagged=false, _tagTxt='';
+          try{ if(typeof tags!=='undefined'&&tags&&typeof parseTagDims==='function'){
+            comp.forEach(function(id2){ if(_tagged) return; var r3=_by[id2]; var e3=runEnd(r3);
+              var rl3=Math.hypot(e3.x-r3.start[0],e3.y-r3.start[1])||1;
+              var ux3=(e3.x-r3.start[0])/rl3, uy3=(e3.y-r3.start[1])/rl3;
+              for(var ti3=0;ti3<tags.length;ti3++){ var tg3=tags[ti3]; if(tg3.nx==null) continue;
+                var pd3=parseTagDims(tg3.text||''); if(!pd3) continue;
+                if(Math.abs(pd3.w-(r3.widthIn||0))>2) continue;
+                var tt3=(tg3.nx-r3.start[0])*ux3+(tg3.ny-r3.start[1])*uy3;
+                if(tt3<-inToPt(12)||tt3>rl3+inToPt(12)) continue;
+                var pp3=Math.abs((tg3.nx-r3.start[0])*(-uy3)+(tg3.ny-r3.start[1])*ux3);
+                if(pp3<=inToPt(36)){ _tagged=true; _tagTxt=tg3.text; break; } } }); } }catch(_){}
+          if(!_mem && !_tagged){
             (window.__rogueLog=window.__rogueLog||[]).push(comp.map(function(id2){ var r3=_by[id2]; var e3=runEnd(r3);
               return {w:r3.widthIn||null, lf:Math.round(runLenIn(r3)/12), x:Math.round((r3.start[0]+e3.x)/2), y:Math.round((r3.start[1]+e3.y)/2)}; }));
             window.__runs2d=(window.__runs2d||[]).filter(function(r4){ return comp.indexOf(r4.id)<0; });
@@ -5772,7 +5826,7 @@ function refreshSel(){
           var e3=runEnd(r3), mx=(r3.start[0]+e3.x)/2, my=(r3.start[1]+e3.y)/2;
           out.push({runId:r3.id, pieceIdx:null, x:mx, y:my, widthIn:(r3.widthIn||12), kind:'run',
             src:'rogue-sweep', score:0.15, verdict:'suspect',
-            reasons:['LARGE isolated network ('+Math.round(_lf/12)+' LF) \u2014 no tag, no fittings; left for your call',
+            reasons:[((typeof _tagged!=='undefined'&&_tagged)?('isolated band, but a matching size tag ('+_tagTxt+') sits on it \u2014 real duct whose connection failed; left for your call'):('LARGE isolated network ('+Math.round(_lf/12)+' LF) \u2014 no tag, no fittings; left for your call')),
                      Math.round(runLenIn(r3)/12)+' LF at '+(r3.widthIn||'?')+'\u2033']});
         });
       });
