@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.86</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.87</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -952,7 +952,15 @@ async function extractTags(page){
     }
     if(!matched || usedJoin[ii]) continue;
     const m=it.transform; const [x,y]=applyM(vt,m[4],m[5]); const [nx,ny]=applyM(nvt,m[4],m[5]);
-    tags.push({x,y,ux:m[4],uy:m[5],nx,ny,text:text});
+    // TEXT BBOX IN THE NVT FRAME (v3.87): leaders attach at the text's EDGE, not its anchor point.
+    // Measured on the Stone Gables print: anchor-point grab reached 23 of 31 leadered tags; the
+    // text-box grab reaches 31 of 31 (leaders touch the box at ~0.2pt). Stored so the leader
+    // follower can measure from the text itself; tags from other sources fall back to the point.
+    var _tw7=(it.width||0), _th7=Math.max(4, Math.hypot(m[2]||0,m[3]||0)||Math.hypot(m[0]||0,m[1]||0)||8);
+    var _c17=applyM(nvt, m[4], m[5]-_th7*0.25), _c27=applyM(nvt, m[4]+_tw7, m[5]+_th7);
+    tags.push({x,y,ux:m[4],uy:m[5],nx,ny,text:text,
+      _bx0:Math.min(_c17[0],_c27[0]),_by0:Math.min(_c17[1],_c27[1]),
+      _bx1:Math.max(_c17[0],_c27[0]),_by1:Math.max(_c17[1],_c27[1])});
   }
   try{ var __all=tc.items.map(function(it){return it.str||'';}).join(' '); detectScaleFromText(__all); }catch(e){}
 }
@@ -1667,14 +1675,24 @@ function buildSegmentRuns(){
   // thin annotation lines, so duct-classified and wall-paired segments are excluded from candidacy.
   (function(){
     var NEAR=12, HOP=3;                                    // pt: text-to-leader grab, bend continuity
+    // v3.87 (Stone Gables, "size tags off to the side"): three measured fixes —
+    // (a) grab leaders from the text BBOX, not the anchor point (23/31 -> 31/31 on that sheet);
+    // (b) bent leaders start with a stub as short as 3pt at the text;
+    // (c) a 'duct'-classified line far thinner than the duct-wall median lineweight is a leader that
+    //     a dark/black selection mode swept up — it may still serve as a leader.
+    var _lwMed7=0; try{ var _lws7=[]; for(var _q7=0;_q7<segments.length;_q7++){ var _s7=segments[_q7];
+      if(_s7.cls==='duct'&&(_s7.lw||0)>0) _lws7.push(_s7.lw); }
+      _lws7.sort(function(a,b){return a-b;}); _lwMed7=_lws7.length?_lws7[Math.floor(_lws7.length/2)]:0; }catch(_){}
+    function _tagD7(tg,X,Y){ if(tg._bx0!=null){ var cx=Math.min(Math.max(X,tg._bx0),tg._bx1), cy=Math.min(Math.max(Y,tg._by0),tg._by1); return Math.hypot(X-cx,Y-cy); } return Math.hypot(X-tg.nx,Y-tg.ny); }
     for(var ti=0; ti<tags.length; ti++){ var tg=tags[ti];
       tg._lx=null; tg._ly=null;
       if(tg.nx==null) continue;
       var best=null;
       for(var si=0; si<segments.length; si++){ var sg=segments[si];
-        if(sg.nx1==null || sg.cls==='duct' || sg.wallPair) continue;
-        var L2=Math.hypot(sg.nx2-sg.nx1, sg.ny2-sg.ny1); if(L2<6||L2>inToPt(120)) continue;
-        var d1=Math.hypot(sg.nx1-tg.nx, sg.ny1-tg.ny), d2=Math.hypot(sg.nx2-tg.nx, sg.ny2-tg.ny);
+        if(sg.nx1==null || sg.wallPair) continue;
+        if(sg.cls==='duct' && !(_lwMed7>0 && (sg.lw||0)>0 && sg.lw<0.6*_lwMed7)) continue;
+        var L2=Math.hypot(sg.nx2-sg.nx1, sg.ny2-sg.ny1); if(L2<3||L2>inToPt(120)) continue;
+        var d1=_tagD7(tg,sg.nx1,sg.ny1), d2=_tagD7(tg,sg.nx2,sg.ny2);
         var dmin=Math.min(d1,d2);
         if(dmin>NEAR) continue;
         var far=(d1<d2)?[sg.nx2,sg.ny2]:[sg.nx1,sg.ny1];
@@ -1685,7 +1703,7 @@ function buildSegmentRuns(){
       var far=best.far;
       for(var s2=0; s2<segments.length; s2++){ var g2=segments[s2];
         if(g2===best.seg || g2.nx1==null || g2.cls==='duct' || g2.wallPair) continue;
-        var L3=Math.hypot(g2.nx2-g2.nx1, g2.ny2-g2.ny1); if(L3<4||L3>inToPt(120)) continue;
+        var L3=Math.hypot(g2.nx2-g2.nx1, g2.ny2-g2.ny1); if(L3<3||L3>inToPt(120)) continue;
         var e1=Math.hypot(g2.nx1-far[0], g2.ny1-far[1]), e2=Math.hypot(g2.nx2-far[0], g2.ny2-far[1]);
         if(Math.min(e1,e2)<=HOP){ far=(e1<e2)?[g2.nx2,g2.ny2]:[g2.nx1,g2.ny1]; break; }
       }
