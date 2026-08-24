@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.92</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.93</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -933,8 +933,9 @@ async function extractTags(page){
   var items=tc.items.filter(function(it){return it.str&&it.str.trim();});
   var usedJoin={};
   for(let ii=0; ii<items.length; ii++){ var it=items[ii];
-    var matched=re.test(it.str);
-    var text=it.str.trim();
+    var _iq=function(z){ return String(z||'').replace(/["“”′″ʺˮ]/g,''); };   // v3.93: inch marks blinded the matcher — 10"x10" never matched [digit][x]
+    var matched=re.test(_iq(it.str));
+    var text=_iq(it.str).trim();
     if(!matched){
       // try joining with the next 1-2 adjacent items (PDFs split "20x16" into "20","x","16")
       for(var span=1; span<=2 && ii+span<items.length; span++){
@@ -942,11 +943,11 @@ async function extractTags(page){
         // adjacency: close in position
         var dx=Math.abs((nIt.transform[4])-(it.transform[4])), dy=Math.abs((nIt.transform[5])-(it.transform[5]));
         if(dx>60 && dy>60) break;
-        var joined=(text+nIt.str).replace(/\s+/g,'');
+        var joined=_iq(text+nIt.str).replace(/\s+/g,'');
         if(re.test(joined)){ text=joined; matched=true; usedJoin[ii+span]=1; break; }
         // also try with an 'x' between bare numbers stacked vertically (e.g. "20" over "16")
-        if(/^\d{1,3}$/.test(text) && /^\d{1,3}$/.test(nIt.str.trim()) && dy>3 && dx<20){
-          var stacked=text+'x'+nIt.str.trim(); if(re.test(stacked)){ text=stacked; matched=true; usedJoin[ii+span]=1; break; }
+        if(/^\d{1,3}$/.test(text) && /^\d{1,3}$/.test(_iq(nIt.str).trim()) && dy>3 && dx<20){
+          var stacked=text+'x'+_iq(nIt.str).trim(); if(re.test(stacked)){ text=stacked; matched=true; usedJoin[ii+span]=1; break; }
         }
       }
     }
@@ -2258,6 +2259,10 @@ function darkOf(s){ var strict=(document.getElementById('strictBlack')||{}).chec
 function segDistU(px,py,s){ var dx=s.ux2-s.ux1,dy=s.uy2-s.uy1; var L2=dx*dx+dy*dy||1; var t=((px-s.ux1)*dx+(py-s.uy1)*dy)/L2; t=Math.max(0,Math.min(1,t)); var cx=s.ux1+t*dx,cy=s.uy1+t*dy; return Math.hypot(px-cx,py-cy); }
 function parseTagDims(text){
   if(!text) return null; var t=String(text).toUpperCase();
+  // INCH MARKS (v3.93, Stone Gables): drafters write 10"x10" and 4"ø — the straight/curly/prime
+  // quote between the number and the x/ø made EVERY such tag unparseable (and the missing 4″
+  // round drop unconfirmable, so the <5″ untagged floor killed its pair). Strip them first.
+  t=t.replace(/["“”′″ʺˮ]/g,'');
   var mr=/\u00d8\s*(\d{1,3})|(\d{1,3})\s*\u00d8|(\d{1,3})\s*["\u201d]?\s*DIA/.exec(t);
   if(mr){ var dia=parseInt(mr[1]||mr[2]||mr[3],10); if(dia>=3&&dia<=120) return {round:true,w:dia,h:dia}; }
   var m=/(\d{1,3})\s*[\/xX\u00d7]\s*(\d{1,3})/.exec(t);
