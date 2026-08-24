@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.87</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.88</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -7089,9 +7089,15 @@ function refreshSel(){
       var parseable=0, onband=0, agree=0, ratios=[];
       (tags||[]).forEach(function(t9){ var pd9=(typeof parseTagDims==='function')?parseTagDims(t9.text):null; if(!pd9||!(pd9.w>0)||t9.nx==null) return;
         parseable++;
+        // EFFECTIVE POSITION (v3.88): on leadered prints (Stone Gables) tags sit OFF the duct by
+        // design — judging "the duct under them" from the raw text position fired a false "build
+        // looks broken" banner on a perfectly good build (2 of 27). Judge from the leader tip,
+        // exactly where the tag matcher itself looks.
+        var _tx9=(t9._lx!=null)?t9._lx:((t9._lxAI!=null)?t9._lxAI:t9.nx);
+        var _ty9=(t9._ly!=null)?t9._ly:((t9._lyAI!=null)?t9._lyAI:t9.ny);
         for(var q9=0;q9<runs9.length;q9++){ var r9=runs9[q9]; var e9=runEnd(r9);
           var dx9=r9.dir[0],dy9=r9.dir[1],sx9=r9.start[0],sy9=r9.start[1];
-          var vx9=t9.nx-sx9, vy9=t9.ny-sy9;
+          var vx9=_tx9-sx9, vy9=_ty9-sy9;
           var al9=vx9*dx9+vy9*dy9, L9=Math.hypot(e9.x-sx9,e9.y-sy9);
           if(al9<-inToPt(6)||al9>L9+inToPt(6)) continue;
           var pp9=Math.abs(vx9*(-dy9)+vy9*dx9);
@@ -7101,6 +7107,10 @@ function refreshSel(){
             break; }
         } });
       if(parseable<15) return;                                        // not enough tags to judge
+      // A WRONG SCALE puts tags on UNRELATED bands (onband stays high, agreement collapses). Tags
+      // that mostly don't touch ANY band are a labeling convention (side tags without leaders), not
+      // a scale problem — don't cry scale on those sheets (v3.88).
+      if(onband < Math.max(6, parseable*0.3)) return;
       var rate=agree/parseable;
       if(rate>=0.12) return;                                          // healthy sheets run ~0.35+
       ratios.sort(function(a,b){return a-b;}); var med=ratios.length?ratios[Math.floor(ratios.length/2)]:0;
