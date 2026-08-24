@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.88</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.92</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -962,6 +962,22 @@ async function extractTags(page){
       _bx0:Math.min(_c17[0],_c27[0]),_by0:Math.min(_c17[1],_c27[1]),
       _bx1:Math.max(_c17[0],_c27[0]),_by1:Math.max(_c17[1],_c27[1])});
   }
+  // EQUIPMENT ROOTS (v3.91): unit labels anchor the system trace. Prefix + a digit required, so
+  // "AH-1F", "VRF-3", "EF-1", "RTU-2", "DOAS-101" match but stray acronyms in notes don't.
+  try{ window.__equipLabels=[]; var _eqre=/^(AHU?|RTU|VRF|EF|SF|RF|ERV|HRV|DOAS|FCU?|MAU|HP)[-\s]?\d[A-Z0-9]*$/i;
+    items.forEach(function(it2){ var t2=(it2.str||'').trim(); if(!_eqre.test(t2)) return;
+      var m2=it2.transform; var nn2=applyM(nvt,m2[4],m2[5]);
+      window.__equipLabels.push({nx:nn2[0],ny:nn2[1],text:t2.toUpperCase()}); });
+    if(window.__equipLabels.length) console.log('[roots] '+window.__equipLabels.length+' equipment label(s): '+window.__equipLabels.map(function(e){return e.text;}).join(', '));
+    // TELL THE USER BEFORE THE BUILD (v3.92): detection happens here, at page open — the purple
+    // diamonds are already on the plan. Surface the count on the Mark-unit button and the status
+    // line so missed units can be marked BEFORE Auto Takeoff is run.
+    try{ if(window.__updUnitBtn) window.__updUnitBtn(); }catch(_){}
+    try{ var _nEq=window.__equipLabels.length;
+      if(typeof setStatus==='function') setStatus(_nEq
+        ? (_nEq+' unit(s) detected (purple \u25c6: '+window.__equipLabels.map(function(e){return e.text;}).join(', ')+') \u2014 missing one? \ud83d\udccd Mark unit BEFORE running Auto Takeoff.')
+        : 'No unit labels detected on this page \u2014 use \ud83d\udccd Mark unit if you want system tracing anchored.'); }catch(_){}
+  }catch(_){}
   try{ var __all=tc.items.map(function(it){return it.str||'';}).join(' '); detectScaleFromText(__all); }catch(e){}
 }
 
@@ -1000,6 +1016,40 @@ function startClean(){    // BLANK SLATE: wipe all green + saved trace, and stop
   setStatus('Blank slate \u2014 all green cleared. Now select duct (paint it, box-select, or pick a mode), then Build.');
 }
 loadLearn();
+// MARK UNIT (v3.91): a button beside Export — click it, then click an air handler on the plan.
+// The mark persists per print and anchors root-anchored system tracing when labels are missing.
+window.addEventListener('load',function(){ try{
+  var eb=document.getElementById('exportBtn'); if(!eb||document.getElementById('markUnitBtn')) return;
+  var b=document.createElement('button'); b.id='markUnitBtn'; b.type='button';
+  b.textContent='\ud83d\udccd Mark unit'; b.title='Click, then click an air handler / RTU / VRF / fan on the plan \u2014 system tracing anchors there.';
+  window.__updUnitBtn=function(){ try{ var n=(window.__equipLabels||[]).length+(window.__equipManual||[]).length;
+    b.textContent='\ud83d\udccd Mark unit'+(n?(' ('+n+')'):'');
+    if(n) b.title=((window.__equipLabels||[]).map(function(e){return e.text;}).concat((window.__equipManual||[]).map(function(){return 'manual';})).join(', '))+' \u2014 click to add another root.'; }catch(_){} };
+  b.className=eb.className||''; b.style.marginRight='6px';
+  eb.parentNode.insertBefore(b, eb);
+  b.onclick=function(){ window.__markUnitMode=!window.__markUnitMode;
+    b.style.outline=window.__markUnitMode?'2px solid #7b5cff':'';
+    if(typeof setStatus==='function') setStatus(window.__markUnitMode?'Click the unit on the plan \u2014 its duct system will trace from there. (Click the button again to cancel.)':'Unit marking off.'); };
+  var ov=document.getElementById('overlay');
+  if(ov) ov.addEventListener('click',function(ev){ if(!window.__markUnitMode) return;
+    ev.stopPropagation(); ev.preventDefault(); window.__markUnitMode=false; b.style.outline='';
+    try{ var nn=window.__s2n?window.__s2n(ev.offsetX,ev.offsetY):null; if(!nn) return;
+      (window.__equipManual=window.__equipManual||[]).push({nx:nn[0],ny:nn[1],text:'UNIT'});
+      try{ localStorage.setItem('bt_roots_'+(typeof curPrintId==='function'?curPrintId():'p'), JSON.stringify(window.__equipManual)); }catch(_){}
+      try{ window.__updUnitBtn&&window.__updUnitBtn(); }catch(_){}
+      // APPLY IMMEDIATELY (v3.92): if a takeoff is already built, re-trace and re-run the connect
+      // passes right now — no rebuild needed. Before a build, the mark simply waits for Auto Takeoff.
+      var _built=(window.__runs2d||[]).length>0;
+      if(_built){ try{ var _rt=window.__rootTrace?window.__rootTrace(true):null;
+          if(_rt&&_rt.extended){ try{window.__inferTapsFromEnds&&window.__inferTapsFromEnds();}catch(_){} try{window.__bridgeTaps&&window.__bridgeTaps();}catch(_){} try{window.__mergeElbowJoins&&window.__mergeElbowJoins();}catch(_){} try{window.__dedupeOverlappingRuns&&window.__dedupeOverlappingRuns();}catch(_){} }
+          try{ window.__renderItems&&window.__renderItems(); }catch(_){}
+          try{ window.__adjudicateElbows&&window.__adjudicateElbows(); }catch(_){}
+        }catch(_){} }
+      if(typeof setStatus==='function') setStatus(_built?'Unit marked \u2014 system re-traced from it now.':'Unit marked \u2014 it will anchor tracing when you run Auto Takeoff.');
+      try{ drawOverlay(); }catch(_){}
+    }catch(_){}
+  }, true);
+}catch(_){} });
 /* ===== AI teaching examples (few-shot in-context learning) ===== */
 var EX_KEY='brookstone_duct_examples_v1';
 var EXAMPLES=[];
@@ -2260,6 +2310,9 @@ function drawOverlay(){
   try{ var _ab9=window.__attnBoxes||[]; if(_ab9.length && window.__n2s){ for(var _ai9=0;_ai9<_ab9.length;_ai9++){ var ab9=_ab9[_ai9]; var _p9=window.__n2s(ab9.x,ab9.y); if(!_p9) continue; var _r9=30;
     html+='<rect x="'+(_p9[0]-_r9).toFixed(1)+'" y="'+(_p9[1]-_r9).toFixed(1)+'" width="'+(2*_r9)+'" height="'+(2*_r9)+'" rx="6" fill="rgba(255,45,60,0.07)" stroke="#ff2d3c" stroke-width="2.5" stroke-dasharray="6 4" pointer-events="none"/>'
         +'<text x="'+_p9[0].toFixed(1)+'" y="'+(_p9[1]-_r9-5).toFixed(1)+'" font-size="12" font-weight="800" text-anchor="middle" fill="#ff2d3c" stroke="#000" stroke-width="0.4" pointer-events="none">'+String(ab9.label||'?')+'</text>'; } } }catch(e){}
+  try{ var _rt8=[].concat(window.__equipLabels||[],window.__equipManual||[]); if(_rt8.length&&window.__n2s){ for(var _ri8=0;_ri8<_rt8.length;_ri8++){ var rt8=_rt8[_ri8]; var _p8=window.__n2s(rt8.nx,rt8.ny); if(!_p8) continue;
+    html+='<path d="M'+_p8[0].toFixed(1)+' '+(_p8[1]-9).toFixed(1)+' l9 9 l-9 9 l-9 -9 Z" fill="rgba(123,92,255,0.25)" stroke="#7b5cff" stroke-width="2" pointer-events="none"/>'
+        +'<text x="'+(_p8[0]+11).toFixed(1)+'" y="'+(_p8[1]-8).toFixed(1)+'" font-size="11" font-weight="800" fill="#7b5cff" stroke="#000" stroke-width="0.4" pointer-events="none">'+String(rt8.text||'UNIT')+'</text>'; } } }catch(e){}
   try{ var _gc=window.__geoClusters||[]; for(var _gi=0;_gi<_gc.length;_gi++){ var b=_gc[_gi]; html+='<rect x="'+b[0].toFixed(1)+'" y="'+b[1].toFixed(1)+'" width="'+(b[2]-b[0]).toFixed(1)+'" height="'+(b[3]-b[1]).toFixed(1)+'" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="4 3" pointer-events="none"/>'; } }catch(e){}
   g.innerHTML=html;
   if((document.getElementById('shadeBoxes')||{}).checked && viewport){ try{ shadeBoxesInto(g, viewport.transform); }catch(e){} }
@@ -3203,6 +3256,8 @@ function refreshSel(){
     try{ window.__markTapDetsPlaced&&window.__markTapDetsPlaced(); }catch(e){}
     try{ window.__bridgeCaps&&window.__bridgeCaps(); }catch(e){ console.warn('capbridge',e); }
     try{ window.__trimRunEnds&&window.__trimRunEnds(); }catch(e){}
+    try{ var _rt9=window.__rootTrace?window.__rootTrace(true):null;
+      if(_rt9&&_rt9.extended){ try{window.__inferTapsFromEnds&&window.__inferTapsFromEnds();}catch(_){} try{window.__bridgeTaps&&window.__bridgeTaps();}catch(_){} try{window.__mergeElbowJoins&&window.__mergeElbowJoins();}catch(_){} try{window.__dedupeOverlappingRuns&&window.__dedupeOverlappingRuns();}catch(_){} } }catch(e){}
     try{ setTimeout(function(){ window.__runSentinel&&window.__runSentinel('build'); }, 150); }catch(e){}
     // SECOND DE-DUPE (v3.71): the first sweep runs BEFORE the recovery passes, so overlaps that the
     // welds/splits/extensions create or expose afterward survived to the panel — page 2 came back
@@ -4303,6 +4358,7 @@ function refreshSel(){
     try{ nE=(window.__joinRunsAtElbows?window.__joinRunsAtElbows():0)||0; }catch(e){ console.warn('census joins',e); }
     try{ nE+=(window.__mergeElbowJoins?window.__mergeElbowJoins():0)||0; }catch(e){ console.warn('census merge',e); }   // v3.79: joins are only VISUAL until merged — census-seeded elbows never became pieces without this
     try{ nB=(window.__bridgeSizechanges?window.__bridgeSizechanges():0)||0; }catch(e){ console.warn('census bridge',e); }
+    try{ window.__rootTrace&&window.__rootTrace(true); }catch(e){}   // v3.91: close unrooted gaps BEFORE the tap passes so the junctions bill in this same pass
     try{ nT=(window.__inferTapsFromEnds?window.__inferTapsFromEnds():0)||0; }catch(e){}
     try{ nT+=(window.__inferTapsFromCrossings?window.__inferTapsFromCrossings():0)||0; }catch(e){}
     try{ nT+=(window.__bridgeTaps?window.__bridgeTaps():0)||0; }catch(e){}
@@ -4412,6 +4468,78 @@ function refreshSel(){
     });
     if(nTrim) console.log('[trim] shortened '+nTrim+' run end(s) to their ink');
     return nTrim;
+  };
+  // ---------- ROOT-ANCHORED SYSTEM TRACE (v3.91) ----------
+  // Duct systems start at EQUIPMENT and flow outward. Roots = auto-detected unit labels
+  // (__equipLabels) + hand-marked units (__equipManual, persisted per print). BFS over physical
+  // adjacency labels every run with its system. An UNROOTED component whose free end points at a
+  // rooted run within 36in gets that end EXTENDED to the trunk's near face — the tap passes then
+  // bill the junction (census re-run calls this before its tap passes; the build calls the exposed
+  // passes again when anything extended). Per Blake: duct that doesn't tie back to a unit is often
+  // CORRECT (existing/spare) — unrooted duct is never deleted or demoted, it gets one amber card.
+  // No roots found or marked = this whole pass is a no-op.
+  window.__rootTrace=function(apply){
+    var runs=window.__runs2d||[]; if(!runs.length) return null;
+    var roots=[].concat(window.__equipLabels||[], window.__equipManual||[]);
+    try{ var _pk='bt_roots_'+(typeof curPrintId==='function'?curPrintId():'p');
+      var _pv=localStorage.getItem(_pk);
+      if(_pv){ JSON.parse(_pv).forEach(function(m){ if(m&&m.nx!=null&&!roots.some(function(qq){return Math.hypot(qq.nx-m.nx,qq.ny-m.ny)<3;})) roots.push(m); }); } }catch(_){}
+    if(!roots.length){ window.__rootStats=null; runs.forEach(function(r){ r._sys=null; }); return null; }
+    var adj={}, by={};
+    runs.forEach(function(r){ by[r.id]=r; adj[r.id]=[]; r._sys=null; });
+    function endsOf9(r){ var e=runEnd(r); return [[r.start[0],r.start[1]],[e.x,e.y]]; }
+    for(var i=0;i<runs.length;i++){ for(var j=i+1;j<runs.length;j++){ var A=runs[i],B=runs[j], hit=false;
+      var eA=endsOf9(A), eB=endsOf9(B);
+      for(var a=0;a<2&&!hit;a++) for(var b=0;b<2&&!hit;b++) if(Math.hypot(eA[a][0]-eB[b][0],eA[a][1]-eB[b][1])<=inToPt(14)) hit=true;
+      for(var a2=0;a2<2&&!hit;a2++){ var pr9; try{ pr9=projOnRun(B,eA[a2][0],eA[a2][1]); }catch(_){ break; }
+        if(pr9.alongIn>=-6&&pr9.alongIn<=runLenIn(B)+6&&Math.abs(pr9.perpIn)<=(B.widthIn||12)/2+10) hit=true; }
+      for(var b2=0;b2<2&&!hit;b2++){ var pr8; try{ pr8=projOnRun(A,eB[b2][0],eB[b2][1]); }catch(_){ break; }
+        if(pr8.alongIn>=-6&&pr8.alongIn<=runLenIn(A)+6&&Math.abs(pr8.perpIn)<=(A.widthIn||12)/2+10) hit=true; }
+      if(hit){ adj[A.id].push(B.id); adj[B.id].push(A.id); } } }
+    var q9=[], seen9={};
+    roots.forEach(function(rt){ var best=null;
+      runs.forEach(function(r){ var eA=endsOf9(r);
+        var d=Math.min(Math.hypot(eA[0][0]-rt.nx,eA[0][1]-rt.ny),Math.hypot(eA[1][0]-rt.nx,eA[1][1]-rt.ny));
+        try{ var pr=projOnRun(r,rt.nx,rt.ny); if(pr.alongIn>=-6&&pr.alongIn<=runLenIn(r)+6) d=Math.min(d,inToPt(Math.abs(pr.perpIn))); }catch(_){}
+        if(d<=inToPt(60)&&(!best||d<best.d)) best={d:d,r:r}; });
+      if(best&&!best.r._sys){ best.r._sys=rt.text||'UNIT'; q9.push(best.r.id); seen9[best.r.id]=1; } });
+    while(q9.length){ var id9=q9.shift();
+      (adj[id9]||[]).forEach(function(nid){ if(seen9[nid]) return; seen9[nid]=1; by[nid]._sys=by[id9]._sys; q9.push(nid); }); }
+    var ext=0;
+    if(apply){
+      runs.forEach(function(r){ if(r._sys||r.synthetic) return; var pcs=r.pieces||[]; if(!pcs.length) return;
+        ['end','start'].forEach(function(which){
+          var isEnd=(which==='end');
+          var pc=isEnd?pcs[pcs.length-1]:pcs[0]; if(!pc||pc.kind!=='straight'||pc._rootExt) return;
+          var tip,out;
+          if(isEnd){ var e9=runEnd(r), h9=headingAtEndOf(r); tip=[e9.x,e9.y]; out=[h9[0],h9[1]]; }
+          else { tip=[r.start[0],r.start[1]]; out=[-r.dir[0],-r.dir[1]]; }
+          var best=null;
+          runs.forEach(function(T){ if(T===r||!T._sys) return;
+            if(Math.abs(T.dir[0]*out[0]+T.dir[1]*out[1])>0.35) return;
+            var pr; try{ pr=projOnRun(T,tip[0],tip[1]); }catch(_){ return; }
+            var Lt=runLenIn(T); if(pr.alongIn<6||pr.alongIn>Lt-6) return;
+            var wT=T.widthIn||12, gapIn=Math.abs(pr.perpIn)-wT/2;
+            if(gapIn<2||gapIn>36) return;
+            var pq; try{ pq=projOnRun(T,tip[0]+out[0]*inToPt(6),tip[1]+out[1]*inToPt(6)); }catch(_){ return; }
+            if(Math.abs(pq.perpIn)>=Math.abs(pr.perpIn)) return;               // must point TOWARD the trunk
+            if(!best||gapIn<best.g) best={g:gapIn,T:T}; });
+          if(best){ pc.lenIn=Math.round((pc.lenIn+best.g)*10)/10; pc._rootExt=1;
+            if(!isEnd) r.start=[r.start[0]-r.dir[0]*inToPt(best.g), r.start[1]-r.dir[1]*inToPt(best.g)];
+            ext++; console.log('[roots] extended '+r.id+' ('+which+') +'+Math.round(best.g)+'\u2033 to reach '+best.T.id+' ['+best.T._sys+']'); }
+        }); });
+    }
+    var comps=[], cseen={};
+    runs.forEach(function(r0){ if(cseen[r0.id]||r0._sys) return; var st=[r0.id], ids=[];
+      while(st.length){ var x9=st.pop(); if(cseen[x9]) continue; cseen[x9]=1; if(by[x9]._sys) continue; ids.push(x9); st=st.concat(adj[x9]||[]); }
+      if(!ids.length) return; var lf=0,cx=0,cy=0;
+      ids.forEach(function(id2){ var rr=by[id2]; var e2=runEnd(rr); lf+=runLenIn(rr); cx+=(rr.start[0]+e2.x)/2; cy+=(rr.start[1]+e2.y)/2; });
+      comps.push({x:cx/ids.length, y:cy/ids.length, lf:Math.round(lf/12), n:ids.length}); });
+    var rooted=runs.filter(function(r){return r._sys;}).length;
+    window.__unrootedComps=comps;
+    window.__rootStats={units:roots.length, rooted:rooted, unrooted:runs.length-rooted, extended:ext};
+    console.log('[roots] '+roots.length+' unit(s) \u00b7 '+rooted+'/'+runs.length+' runs tied to a system'+(ext?(' \u00b7 '+ext+' end(s) extended to reach the network'):''));
+    return window.__rootStats;
   };
   // ---------- SYSTEM AUDIT (v3.82) — declarative rules on the finished run graph ----------
   // Idea from rule-based P&ID autocorrection (Schulze Balhorn et al. 2025): once the takeoff is a
@@ -4596,6 +4724,16 @@ function refreshSel(){
             reasons:[f9.msg+(_red9?'':' ('+f9.sev+')')]});
           if(_red9) _attn.push({x:f9.x,y:f9.y,label:f9.rule});
         }); }catch(e8x){ console.warn('system audit',e8x); }
+      // UNROOTED components (v3.91): amber your-call cards only — never red, never deleted
+      // ("sometimes duct doesn't tie back to a unit"). Skipped entirely when no roots exist.
+      try{ if(window.__rootStats){
+        (window.__unrootedComps||[]).forEach(function(uc){ if(!uc||uc.lf<6) return;
+          var dup8=(window.__elbowLedger||[]).some(function(e8){ return e8._sentinel && Math.hypot((e8.x||0)-uc.x,(e8.y||0)-uc.y)<=inToPt(15); });
+          if(dup8) return;
+          window.__elbowLedger.push({runId:null,pieceIdx:null,x:uc.x,y:uc.y,widthIn:12,kind:'unrooted',src:'root-trace',
+            score:0.2,verdict:'review',machine:'you',_sentinel:true,human:null,
+            reasons:[uc.n+' run(s), '+uc.lf+' LF not tied to any unit (AHU/RTU/VRF/EF) \u2014 can be correct (existing, spare, future); left for your call']});
+        }); } }catch(_){}
       window.__attnBoxes=_attn;
       if((window.__elbowLedger||[]).some(function(e9){return e9._sentinel;})){ try{ window.__showElbowStrip(); }catch(_){} }
       try{ drawOverlay(); }catch(_){}
@@ -5160,7 +5298,23 @@ function refreshSel(){
       (groups[k]=groups[k]||[]).push(r); });
     var removeIds={}, mergedCount=0, newRuns=[];
     Object.keys(groups).forEach(function(k){
-      var g=groups[k]; if(g.length<2) return; var vert=k[0]==='V';
+      var g0=groups[k]; if(g0.length<2) return; var vert=k[0]==='V';
+      // PER-GAP LIMIT (v3.90, "these pink trunks ran way past the end of the duct to combine with
+      // other runs"): the only guard here was density over the WHOLE span (lenP <= 2.2x sumLen), so
+      // any single blank stretch could be bridged — Stone Gables p6 welded separate risers into
+      // 25-30ft trunks straight THROUGH diffusers and open floor. A chain may only continue across
+      // a gap of <= max(48in, 2x width); a bigger hole splits the group and each side merges (or
+      // stays separate) on its own. The audit's split-run card still surfaces big-gap cases.
+      function _ax9(r){ var e9=endOf(r); return vert?[Math.min(r.start[1],e9.y),Math.max(r.start[1],e9.y)]:[Math.min(r.start[0],e9.x),Math.max(r.start[0],e9.x)]; }
+      g0.sort(function(a,b){ return _ax9(a)[0]-_ax9(b)[0]; });
+      var _chains9=[], _cur9=[g0[0]];
+      for(var _gi9=1; _gi9<g0.length; _gi9++){
+        var _gapP9=_ax9(g0[_gi9])[0]-_ax9(_cur9[_cur9.length-1])[1];
+        if(_gapP9>inToPt(Math.max(48, 2*(g0[_gi9].widthIn||12)))){ _chains9.push(_cur9); _cur9=[g0[_gi9]]; }
+        else _cur9.push(g0[_gi9]);
+      }
+      _chains9.push(_cur9);
+      _chains9.forEach(function(g){ if(g.length<2) return;
       var allTags=[]; g.forEach(function(r){ (r.tagIdx||[]).forEach(function(ti){ var tg=tags[ti]; if(tg&&tg.nx!=null){ var pd=parseTagDims(tg.text); if(pd) allTags.push({nx:tg.nx,ny:tg.ny,pd:pd}); } }); });
       if(allTags.length<2) return;                                  // need a tag-line (chain) to justify merging
       var xs=[],ys=[],sumLen=0; g.forEach(function(r){ var e=endOf(r); xs.push(r.start[0],e.x); ys.push(r.start[1],e.y); sumLen+=Math.hypot(e.x-r.start[0],e.y-r.start[1]); });
@@ -5188,6 +5342,7 @@ function refreshSel(){
       var mergedTagIdx=[]; g.forEach(function(r){ (r.tagIdx||[]).forEach(function(ti){ mergedTagIdx.push(ti); }); });
       newRuns.push({id:uid(),axis:vert?'vertical':'horizontal',start:start,dir:dir,normal:normal,widthIn:(pieces[0]&&pieces[0].widthIn)||g[0].widthIn,color:g[0].color,label:'',confirmed:true,scaled:false,tagIdx:mergedTagIdx,pieces:pieces});
       g.forEach(function(r){ removeIds[r.id]=1; }); mergedCount++;
+      });
     });
     if(mergedCount){ window.__runs2d=runs.filter(function(r){return !removeIds[r.id];}).concat(newRuns); }
     return mergedCount;
@@ -5827,11 +5982,36 @@ function refreshSel(){
               for(var ti3=0;ti3<tags.length;ti3++){ var tg3=tags[ti3]; if(tg3.nx==null) continue;
                 var pd3=parseTagDims(tg3.text||''); if(!pd3) continue;
                 if(Math.abs(pd3.w-(r3.widthIn||0))>2) continue;
-                var tt3=(tg3.nx-r3.start[0])*ux3+(tg3.ny-r3.start[1])*uy3;
+                var _tx3=(tg3._lx!=null)?tg3._lx:((tg3._lxAI!=null)?tg3._lxAI:tg3.nx);   // v3.89: leader tip, like every other tag consumer
+                var _ty3=(tg3._ly!=null)?tg3._ly:((tg3._lyAI!=null)?tg3._lyAI:tg3.ny);
+                var tt3=(_tx3-r3.start[0])*ux3+(_ty3-r3.start[1])*uy3;
                 if(tt3<-inToPt(12)||tt3>rl3+inToPt(12)) continue;
-                var pp3=Math.abs((tg3.nx-r3.start[0])*(-uy3)+(tg3.ny-r3.start[1])*ux3);
+                var pp3=Math.abs((_tx3-r3.start[0])*(-uy3)+(_ty3-r3.start[1])*ux3);
                 if(pp3<=inToPt(36)){ _tagged=true; _tagTxt=tg3.text; break; } } }); } }catch(_){}
-          if(!_mem && !_tagged){
+          // ON-INK VETO (v3.89). Field score of the silent auto-remove across three prints: p1 run 41
+          // — 8 of 10 removals were REAL branch drops; Stone Gables p6 — the two biggest missing areas
+          // (12in/9LF, 10in/12LF) were removed bands sitting ON solid duct ink with no nearby tag to
+          // save them. The evidence-free-clutter case this delete exists for (grid/soffit bands) is the
+          // OFF-ink one after pairing moved the band off its source. So: a component whose runs sit ON
+          // parallel duct ink for most of their length is DEMOTED to a card, never silently deleted.
+          var _onInk9=false;
+          try{ if(typeof segments!=='undefined'&&segments&&segments.length){
+            var _hit9=0,_tot9=0;
+            comp.forEach(function(id2){ var r3=_by[id2]; var e3=runEnd(r3);
+              var rl9=Math.hypot(e3.x-r3.start[0],e3.y-r3.start[1]); if(rl9<1) return;
+              var ux9=(e3.x-r3.start[0])/rl9, uy9=(e3.y-r3.start[1])/rl9;
+              for(var q9=0.1;q9<=0.91;q9+=0.2){ _tot9++;
+                var px9=r3.start[0]+(e3.x-r3.start[0])*q9, py9=r3.start[1]+(e3.y-r3.start[1])*q9;
+                for(var s9i=0;s9i<segments.length;s9i++){ var g9=segments[s9i];
+                  if(g9.cls!=='duct'||g9.nx1==null) continue;
+                  var gx9=g9.nx2-g9.nx1, gy9=g9.ny2-g9.ny1, gl9=Math.hypot(gx9,gy9); if(gl9<inToPt(4)) continue;
+                  if(Math.abs((gx9*ux9+gy9*uy9)/gl9)<0.9) continue;
+                  var a19=(g9.nx1-px9)*ux9+(g9.ny1-py9)*uy9, a29=(g9.nx2-px9)*ux9+(g9.ny2-py9)*uy9;
+                  if(Math.min(a19,a29)>inToPt(9)||Math.max(a19,a29)<-inToPt(9)) continue;
+                  var pp9x=Math.abs((g9.nx1-px9)*(-uy9)+(g9.ny1-py9)*ux9);
+                  if(pp9x<=inToPt((r3.widthIn||12)/2+6)&&pp9x>=inToPt(1.5)){ _hit9++; break; } } } });
+            _onInk9=_tot9>0 && _hit9/_tot9>=0.6; } }catch(_){}
+          if(!_mem && !_tagged && !_onInk9){
             (window.__rogueLog=window.__rogueLog||[]).push(comp.map(function(id2){ var r3=_by[id2]; var e3=runEnd(r3);
               return {w:r3.widthIn||null, lf:Math.round(runLenIn(r3)/12), x:Math.round((r3.start[0]+e3.x)/2), y:Math.round((r3.start[1]+e3.y)/2)}; }));
             window.__runs2d=(window.__runs2d||[]).filter(function(r4){ return comp.indexOf(r4.id)<0; });
@@ -5844,7 +6024,9 @@ function refreshSel(){
           var e3=runEnd(r3), mx=(r3.start[0]+e3.x)/2, my=(r3.start[1]+e3.y)/2;
           out.push({runId:r3.id, pieceIdx:null, x:mx, y:my, widthIn:(r3.widthIn||12), kind:'run',
             src:'rogue-sweep', score:0.15, verdict:'suspect',
-            reasons:[((typeof _tagged!=='undefined'&&_tagged)?('isolated band, but a matching size tag ('+_tagTxt+') sits on it \u2014 real duct whose connection failed; left for your call'):('LARGE isolated network ('+Math.round(_lf/12)+' LF) \u2014 no tag, no fittings; left for your call')),
+            reasons:[((typeof _tagged!=='undefined'&&_tagged)?('isolated band, but a matching size tag ('+_tagTxt+') sits on it \u2014 real duct whose connection failed; left for your call')
+                     :((typeof _onInk9!=='undefined'&&_onInk9)?('isolated band sitting ON duct ink \u2014 likely real duct whose connection failed; left for your call')
+                     :('LARGE isolated network ('+Math.round(_lf/12)+' LF) \u2014 no tag, no fittings; left for your call'))),
                      Math.round(runLenIn(r3)/12)+' LF at '+(r3.widthIn||'?')+'\u2033']});
         });
       });
@@ -7040,6 +7222,8 @@ function refreshSel(){
     try{ window.__markTapDetsPlaced&&window.__markTapDetsPlaced(); }catch(e){}
     try{ window.__bridgeCaps&&window.__bridgeCaps(); }catch(e){ console.warn('capbridge',e); }
     try{ window.__trimRunEnds&&window.__trimRunEnds(); }catch(e){}
+    try{ var _rt9=window.__rootTrace?window.__rootTrace(true):null;
+      if(_rt9&&_rt9.extended){ try{window.__inferTapsFromEnds&&window.__inferTapsFromEnds();}catch(_){} try{window.__bridgeTaps&&window.__bridgeTaps();}catch(_){} try{window.__mergeElbowJoins&&window.__mergeElbowJoins();}catch(_){} try{window.__dedupeOverlappingRuns&&window.__dedupeOverlappingRuns();}catch(_){} } }catch(e){}
     try{ setTimeout(function(){ window.__runSentinel&&window.__runSentinel('build'); }, 150); }catch(e){}
     // SECOND DE-DUPE (v3.71): the first sweep runs BEFORE the recovery passes, so overlaps that the
     // welds/splits/extensions create or expose afterward survived to the panel — page 2 came back
@@ -8690,7 +8874,7 @@ $('exportBtn').onclick=()=>{
   const runOut=(window.__runs2d||[]).map(r=>{
     const Lpt=(typeof r._Lpt==='number'&&r._Lpt>0)?r._Lpt:(r.pieces||[]).reduce((a,b)=>a+(b.lenIn||0),0)*ppi;
     const end=[r.start[0]+r.dir[0]*Lpt, r.start[1]+r.dir[1]*Lpt];
-    return {id:r.id,axis:r.axis,confirmed:!!r.confirmed,scaled:!!r.scaled,flag:r._flag||null,branch:!!r._branch,synthetic:!!r.synthetic,
+    return {id:r.id,axis:r.axis,confirmed:!!r.confirmed,scaled:!!r.scaled,flag:r._flag||null,branch:!!r._branch,synthetic:!!r.synthetic,sys:(r._sys||null),
       widthIn:r.widthIn,lenPt:round(Lpt),start:[round(r.start[0]),round(r.start[1])],end:[round(end[0]),round(end[1])],dir:[r4(r.dir[0]),r4(r.dir[1])],
       tagIdx:r.tagIdx||[],nPieces:(r.pieces||[]).length,
       poly:(window.__runPoly?window.__runPoly(r):[[round(r.start[0]),round(r.start[1])],[round(end[0]),round(end[1])]]),
@@ -8716,6 +8900,7 @@ $('exportBtn').onclick=()=>{
     censusLog:(window.__censusLog||[]),   // v3.75: every junction the census judged, with verdicts
     sentinel:((window.__sentinel||{}).items||[]),   // v3.78: conflict sentinel findings at export time
     audit:(window.__auditLog||[]),   // v3.82: system-audit rule findings (rule/sev/x/y/msg)
+    roots:(window.__rootStats||null),   // v3.91: root-anchored trace stats {units,rooted,unrooted,extended}
     fillDuctMode:!!window.__fillDuctMode,
     rogueRemoved:((window.__rogueLog||[]).flat()),
     detDecisions:((window.__yoloDets||[]).map(function(d){
