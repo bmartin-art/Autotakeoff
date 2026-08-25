@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.96</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.97</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -4716,33 +4716,97 @@ function refreshSel(){
     var dead=[];
     for(var xi=0;xi<runs.length;xi++){ var X=runs[xi]; if(X.synthetic) continue;
       var LX=runLenIn(X); if(LX<120) continue;
-      var g=geo(X); var iv=[];
+      var g=geo(X); var iv=[]; var ivS=[]; var covers=[];
       for(var yi=0;yi<runs.length;yi++){ if(yi===xi) continue; var Y=runs[yi];
-        if(!((X.widthIn||0)>=(Y.widthIn||0)+4)) continue;
         var h=geo(Y);
         if(Math.abs(g.ux*h.ux+g.uy*h.uy)<0.95) continue;
         var lat=Math.abs((Y.start[0]-X.start[0])*(-g.uy)+(Y.start[1]-X.start[1])*g.ux);
-        if(lat >= inToPt(((X.widthIn||0)+(Y.widthIn||0))/2 - 2)) continue;     // bodies must genuinely overlap
         var a0=(Y.start[0]-X.start[0])*g.ux+(Y.start[1]-X.start[1])*g.uy;
         var a1=a0+h.L*(g.ux*h.ux+g.uy*h.uy);
         if(a0>a1){ var t9=a0;a0=a1;a1=t9; }
         var lo=Math.max(0,a0), hi=Math.min(g.L,a1);
-        if(hi>lo) iv.push([lo,hi]);
+        if(hi<=lo) continue;
+        if(((X.widthIn||0)>=(Y.widthIn||0)+4) && lat < inToPt(((X.widthIn||0)+(Y.widthIn||0))/2 - 2))
+          iv.push([lo,hi]);                                                    // wide-over-narrow: bodies genuinely overlap
+        if(lat < inToPt(((X.widthIn||0)+(Y.widthIn||0))/2 + 2)){              // straddle branch: overlap OR abut (shared wall)
+          ivS.push([lo,hi]); covers.push(Y); }
       }
-      if(!iv.length) continue;
-      iv.sort(function(a,b){return a[0]-b[0];});
-      var cov=0, cur=iv[0].slice();
-      for(var k=1;k<iv.length;k++){ if(iv[k][0]<=cur[1]) cur[1]=Math.max(cur[1],iv[k][1]);
-        else { cov+=cur[1]-cur[0]; cur=iv[k].slice(); } }
-      cov+=cur[1]-cur[0];
-      if(cov>0.5*g.L) dead.push(X);
+      function unionCov(arr){ if(!arr.length) return 0;
+        arr.sort(function(a,b){return a[0]-b[0];});
+        var c9=0, cu=arr[0].slice();
+        for(var k=1;k<arr.length;k++){ if(arr[k][0]<=cu[1]) cu[1]=Math.max(cu[1],arr[k][1]);
+          else { c9+=cu[1]-cu[0]; cu=arr[k].slice(); } }
+        return c9+cu[1]-cu[0]; }
+      if(iv.length && unionCov(iv)>0.5*g.L){ dead.push(X); continue; }         // wide-over-narrow: v3.96 rule, no tag veto (field-proven)
+      // UNCONTESTED tag = X's own evidence, X is never auto-dropped by the STRADDLE branch. A tag is
+      // CONTESTED only when a covering neighbor also bills the same tag instance, or the tip sits
+      // inside the neighbor's body closer to its centerline than to X's. Tip position alone can NOT
+      // disqualify -- leadered tags legitimately sit off to the side of their duct (v3.87).
+      var wXpt=inToPt((X.widthIn||12)/2);
+      var excl=false;
+      try{ if(typeof tags!=='undefined'&&tags&&X.tagIdx){
+        for(var xt=0;xt<X.tagIdx.length&&!excl;xt++){ var ti9=X.tagIdx[xt]; var tgX9=tags[ti9]; if(!tgX9||tgX9.nx==null) continue;
+          var txE=(tgX9._lx!=null)?tgX9._lx:((tgX9._lxAI!=null)?tgX9._lxAI:tgX9.nx);
+          var tyE=(tgX9._ly!=null)?tgX9._ly:((tgX9._lyAI!=null)?tgX9._lyAI:tgX9.ny);
+          var ppX=Math.abs((txE-X.start[0])*(-g.uy)+(tyE-X.start[1])*g.ux);
+          var mine=true;
+          for(var cv=0;cv<covers.length;cv++){ var Yc=covers[cv];
+            if(Yc.tagIdx&&Yc.tagIdx.indexOf(ti9)>=0){ mine=false; break; }     // same tag billed by a coverer
+            var hc=geo(Yc);
+            var ppY=Math.abs((txE-Yc.start[0])*(-hc.uy)+(tyE-Yc.start[1])*hc.ux);
+            var alY=(txE-Yc.start[0])*hc.ux+(tyE-Yc.start[1])*hc.uy;
+            if(alY>=-inToPt(12)&&alY<=hc.L+inToPt(12)&&ppY<=inToPt((Yc.widthIn||12)/2)+inToPt(2)&&ppY<ppX){ mine=false; break; } }
+          if(mine) excl=true; } } }catch(_){}
+      // ---- v3.97 SAME-WIDTH STRADDLE: a run assembled from BORROWED walls (the chase wall on one
+      // side, a neighbor's wall on the other) rides between real ducts, double-billing their tag.
+      // Drop X only when ALL of: (1) parallel neighbors cover >70% of its length, (2) no tag is
+      // exclusively X's, (3) NEITHER wall is majority X's OWN ink -- a wall sample is 'own' when the
+      // ink there is NOT sitting on a covering neighbor's face. A real duct abutting another shares
+      // at most ONE wall line, so one side stays its own; a straddle phantom borrows BOTH.
+      if(!ivS.length || unionCov(ivS)<=0.7*g.L) continue;
+      if(excl) continue;
+      // a straddle rides BETWEEN ducts, so at least one coverer must be a genuine SIDE neighbor
+      // (centerline >=3in away). Coverers ON X's own centerline are stack/width disagreements about
+      // the SAME duct (S5 territory, _stackCollapse's job) -- if that is all there is, never drop.
+      var sideNb=false;
+      for(var sv=0;sv<covers.length;sv++){ var Ys=covers[sv];
+        var latS=Math.abs((Ys.start[0]-X.start[0])*(-g.uy)+(Ys.start[1]-X.start[1])*g.ux);
+        if(latS>=inToPt(3)){ sideNb=true; break; } }
+      if(!sideNb) continue;
+      var faces=[];                                                            // covering neighbors' wall faces (signed perp offsets from X)
+      for(var fv=0;fv<covers.length;fv++){ var Yf=covers[fv];
+        var latF=(Yf.start[0]-X.start[0])*(-g.uy)+(Yf.start[1]-X.start[1])*g.ux;
+        var hw=inToPt((Yf.widthIn||12)/2);
+        faces.push(latF-hw); faces.push(latF+hw); }
+      function borrowed(ppQ){ for(var bf=0;bf<faces.length;bf++){ if(Math.abs(ppQ-faces[bf])<=inToPt(3)) return true; } return false; }   // 3in: covers double-stroked walls (strokes ~1.5in apart) + face placement error
+      var ownL=0, ownR=0, nS=0;
+      if(typeof segments!=='undefined'&&segments&&segments.length){
+        for(var tS=0.05;tS<=0.96;tS+=0.06){ nS++;
+          var pxS=X.start[0]+g.ux*g.L*tS, pyS=X.start[1]+g.uy*g.L*tS;
+          var ownHitL=false, ownHitR=false;
+          for(var sS=0;sS<segments.length;sS++){ var q=segments[sS];
+            if(q.cls!=='duct'||q.nx1==null) continue;
+            var qdx=q.nx2-q.nx1, qdy=q.ny2-q.ny1, qL=Math.hypot(qdx,qdy); if(qL<inToPt(2)) continue;
+            if(Math.abs((qdx*g.ux+qdy*g.uy)/qL)<0.9) continue;
+            var aq1=(q.nx1-pxS)*g.ux+(q.ny1-pyS)*g.uy, aq2=aq1+(qdx*g.ux+qdy*g.uy);
+            if(Math.min(aq1,aq2)>inToPt(6)||Math.max(aq1,aq2)<-inToPt(6)) continue;
+            var ppQ=(q.nx1-pxS)*(-g.uy)+(q.ny1-pyS)*g.ux;
+            var ppC=(q.nx1-X.start[0])*(-g.uy)+(q.ny1-X.start[1])*g.ux;        // face-relative to X's centerline
+            if(Math.abs(ppQ-wXpt)<=inToPt(3)&&!borrowed(ppC)) ownHitR=true;   // 3in: claimed faces sit a hair off ink on multi-line walls
+            if(Math.abs(ppQ+wXpt)<=inToPt(3)&&!borrowed(ppC)) ownHitL=true;
+            if(ownHitL&&ownHitR) break; }
+          if(ownHitL) ownL++; if(ownHitR) ownR++; }
+      }
+      if(nS<4) continue;
+      if(ownL/nS>=0.5 || ownR/nS>=0.5) continue;                               // at least one wall is genuinely its own -> real
+      X._straddle9=true; dead.push(X);
     }
     if(!dead.length) return 0;
     window.__offInkRemoved=window.__offInkRemoved||[];
     var ids={};
     dead.forEach(function(r){ var e=runEnd(r); ids[r.id]=1;
-      window.__offInkRemoved.push({w:r.widthIn||null, lf:Math.round(runLenIn(r)/12), x:Math.round((r.start[0]+e.x)/2), y:Math.round((r.start[1]+e.y)/2), why:'contained-overlap'});
-      console.log('[off-ink] removed contained-overlap phantom '+r.id+' ('+(r.widthIn||'?')+'″, '+Math.round(runLenIn(r)/12)+' LF) — narrower runs ride inside its body for >50% of its length'); });
+      window.__offInkRemoved.push({w:r.widthIn||null, lf:Math.round(runLenIn(r)/12), x:Math.round((r.start[0]+e.x)/2), y:Math.round((r.start[1]+e.y)/2), why:(r._straddle9?'straddle-overlap':'contained-overlap')});
+      console.log('[off-ink] removed '+(r._straddle9?'straddle':'contained')+'-overlap phantom '+r.id+' ('+(r.widthIn||'?')+'″, '+Math.round(runLenIn(r)/12)+' LF) — '+(r._straddle9?'built from borrowed walls between real ducts':'narrower runs ride inside its body for >50% of its length')); });
     window.__runs2d=runs.filter(function(r){ return !ids[r.id]; });
     return dead.length;
   };
