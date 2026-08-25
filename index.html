@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.95</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.96</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -1955,23 +1955,33 @@ function buildSegmentRuns(){
     var drop={};
     for(var xi=0; xi<runs.length; xi++){ var X=runs[xi]; if(drop[xi]||!X.corners||X.corners.length<4) continue;
       var F=frame(X); var shr=inToPt(2);
+      // ACCUMULATED interior coverage (v3.96, Curaleaf run 20): a long W18 phantom over a bank of
+      // SHORT risers slipped through — each riser wall covered <40% of its span individually. All
+      // interior wall intervals from every other band now UNION before the 40% test.
+      var _iv9=[];
       for(var yi=0; yi<runs.length; yi++){ if(yi===xi||drop[yi]) continue; var Y=runs[yi];
         if(!Y.corners||Y.corners.length<4) continue;
-        if(!((X.widthIn||0)>(Y.widthIn||0)+2)) continue;                       // only a strictly-wider container dies
+        if(!((X.widthIn||0)>(Y.widthIn||0)+2)) continue;                       // only strictly-narrower bands count
         var G=frame(Y);
         if(Math.abs(F.ux*G.ux+F.uy*G.uy)<0.95) continue;                       // parallel bands only
-        var inside=false;
-        for(var wi2=0; wi2<2 && !inside; wi2++){
+        for(var wi2=0; wi2<2; wi2++){
           var cA=Y.corners[wi2===0?0:3], cB=Y.corners[wi2===0?1:2];
           var offA=cA[0]*F.nxn+cA[1]*F.nyn, offB=cB[0]*F.nxn+cB[1]*F.nyn, off=(offA+offB)/2;
           if(off<=F.lo+shr||off>=F.hi-shr) continue;                           // wall must be strictly INTERIOR
           var a0=cA[0]*F.ux+cA[1]*F.uy, a1=cB[0]*F.ux+cB[1]*F.uy; if(a0>a1){var tt=a0;a0=a1;a1=tt;}
-          var ov9=Math.min(F.t1,a1)-Math.max(F.t0,a0);
-          if(ov9>0.4*(F.t1-F.t0)) inside=true;
+          var lo9=Math.max(F.t0,a0), hi9=Math.min(F.t1,a1);
+          if(hi9>lo9) _iv9.push([lo9,hi9]);
         }
-        if(inside){ drop[xi]=1;
-          console.log('[takeoff] dropped '+(X.widthIn||'?')+'″ band — another band’s wall ('+(Y.widthIn||'?')+'″) runs down its interior (spans across adjacent ducts)');
-          break; }
+      }
+      if(_iv9.length){
+        _iv9.sort(function(a,b){return a[0]-b[0];});
+        var cov9=0, cur9=_iv9[0].slice();
+        for(var k9=1;k9<_iv9.length;k9++){ var v9=_iv9[k9];
+          if(v9[0]<=cur9[1]) cur9[1]=Math.max(cur9[1],v9[1]);
+          else { cov9+=cur9[1]-cur9[0]; cur9=v9.slice(); } }
+        cov9+=cur9[1]-cur9[0];
+        if(cov9>0.4*(F.t1-F.t0)){ drop[xi]=1;
+          console.log('[takeoff] dropped '+(X.widthIn||'?')+'″ band — other bands’ walls run down '+Math.round(100*cov9/(F.t1-F.t0))+'% of its interior (spans across adjacent ducts)'); }
       } }
     var kept=[]; runs.forEach(function(R,i){ if(!drop[i]) kept.push(R); });
     if(kept.length!==runs.length){ runs.length=0; kept.forEach(function(R){ runs.push(R); }); }
@@ -3351,6 +3361,7 @@ function refreshSel(){
     try{ window.__bridgeCaps&&window.__bridgeCaps(); }catch(e){ console.warn('capbridge',e); }
     try{ window.__trimRunEnds&&window.__trimRunEnds(); }catch(e){}
     try{ window.__dropOffInkPhantoms&&window.__dropOffInkPhantoms(); }catch(e){}
+    try{ window.__dropContainedOverlaps&&window.__dropContainedOverlaps(); }catch(e){}
     try{ var _rt9=window.__rootTrace?window.__rootTrace(true):null;
       if(_rt9&&_rt9.extended){ try{window.__inferTapsFromEnds&&window.__inferTapsFromEnds();}catch(_){} try{window.__bridgeTaps&&window.__bridgeTaps();}catch(_){} try{window.__mergeElbowJoins&&window.__mergeElbowJoins();}catch(_){} try{window.__dedupeOverlappingRuns&&window.__dedupeOverlappingRuns();}catch(_){} } }catch(e){}
     try{ setTimeout(function(){ window.__runSentinel&&window.__runSentinel('build'); }, 150); }catch(e){}
@@ -4688,6 +4699,50 @@ function refreshSel(){
       window.__offInkRemoved.push({w:r.widthIn||null, lf:Math.round(runLenIn(r)/12), x:Math.round((r.start[0]+e.x)/2), y:Math.round((r.start[1]+e.y)/2)});
       console.log('[off-ink] removed phantom run '+r.id+' ('+(r.widthIn||'?')+'″, '+Math.round(runLenIn(r)/12)+' LF) — no duct linework beside '+Math.round(100*0.7)+'%+ of its centerline and no tag on it'); });
     var ids={}; dead.forEach(function(r){ ids[r.id]=1; });
+    window.__runs2d=runs.filter(function(r){ return !ids[r.id]; });
+    return dead.length;
+  };
+  // ---------- CONTAINED-OVERLAP DROP (v3.96) ----------
+  // Curaleaf run 20: short W18 outer-line bands living in the GAPS between risers get chained into a
+  // 600in mega-run by the tag-line merge — the band-level sweep never sees the assembled phantom.
+  // Run-level physics, same rule: a run whose BODY is overlapped along >50% of its length by strictly
+  // narrower runs is spanning ACROSS adjacent duct — drop it, whatever tag it carries. The real wide
+  // trunk on a sheet never has narrow runs riding inside it for half its length.
+  window.__dropContainedOverlaps=function(){
+    var runs=window.__runs2d||[]; if(runs.length<2) return 0;
+    var K9=6*((typeof scaleIPF!=='undefined'&&scaleIPF>0)?scaleIPF:0.125);
+    function geo(r){ var e=runEnd(r); var dx=e.x-r.start[0], dy=e.y-r.start[1], L=Math.hypot(dx,dy)||1;
+      return {ux:dx/L,uy:dy/L,L:L}; }
+    var dead=[];
+    for(var xi=0;xi<runs.length;xi++){ var X=runs[xi]; if(X.synthetic) continue;
+      var LX=runLenIn(X); if(LX<120) continue;
+      var g=geo(X); var iv=[];
+      for(var yi=0;yi<runs.length;yi++){ if(yi===xi) continue; var Y=runs[yi];
+        if(!((X.widthIn||0)>=(Y.widthIn||0)+4)) continue;
+        var h=geo(Y);
+        if(Math.abs(g.ux*h.ux+g.uy*h.uy)<0.95) continue;
+        var lat=Math.abs((Y.start[0]-X.start[0])*(-g.uy)+(Y.start[1]-X.start[1])*g.ux);
+        if(lat >= inToPt(((X.widthIn||0)+(Y.widthIn||0))/2 - 2)) continue;     // bodies must genuinely overlap
+        var a0=(Y.start[0]-X.start[0])*g.ux+(Y.start[1]-X.start[1])*g.uy;
+        var a1=a0+h.L*(g.ux*h.ux+g.uy*h.uy);
+        if(a0>a1){ var t9=a0;a0=a1;a1=t9; }
+        var lo=Math.max(0,a0), hi=Math.min(g.L,a1);
+        if(hi>lo) iv.push([lo,hi]);
+      }
+      if(!iv.length) continue;
+      iv.sort(function(a,b){return a[0]-b[0];});
+      var cov=0, cur=iv[0].slice();
+      for(var k=1;k<iv.length;k++){ if(iv[k][0]<=cur[1]) cur[1]=Math.max(cur[1],iv[k][1]);
+        else { cov+=cur[1]-cur[0]; cur=iv[k].slice(); } }
+      cov+=cur[1]-cur[0];
+      if(cov>0.5*g.L) dead.push(X);
+    }
+    if(!dead.length) return 0;
+    window.__offInkRemoved=window.__offInkRemoved||[];
+    var ids={};
+    dead.forEach(function(r){ var e=runEnd(r); ids[r.id]=1;
+      window.__offInkRemoved.push({w:r.widthIn||null, lf:Math.round(runLenIn(r)/12), x:Math.round((r.start[0]+e.x)/2), y:Math.round((r.start[1]+e.y)/2), why:'contained-overlap'});
+      console.log('[off-ink] removed contained-overlap phantom '+r.id+' ('+(r.widthIn||'?')+'″, '+Math.round(runLenIn(r)/12)+' LF) — narrower runs ride inside its body for >50% of its length'); });
     window.__runs2d=runs.filter(function(r){ return !ids[r.id]; });
     return dead.length;
   };
@@ -7382,6 +7437,7 @@ function refreshSel(){
     try{ window.__bridgeCaps&&window.__bridgeCaps(); }catch(e){ console.warn('capbridge',e); }
     try{ window.__trimRunEnds&&window.__trimRunEnds(); }catch(e){}
     try{ window.__dropOffInkPhantoms&&window.__dropOffInkPhantoms(); }catch(e){}
+    try{ window.__dropContainedOverlaps&&window.__dropContainedOverlaps(); }catch(e){}
     try{ var _rt9=window.__rootTrace?window.__rootTrace(true):null;
       if(_rt9&&_rt9.extended){ try{window.__inferTapsFromEnds&&window.__inferTapsFromEnds();}catch(_){} try{window.__bridgeTaps&&window.__bridgeTaps();}catch(_){} try{window.__mergeElbowJoins&&window.__mergeElbowJoins();}catch(_){} try{window.__dedupeOverlappingRuns&&window.__dedupeOverlappingRuns();}catch(_){} } }catch(e){}
     try{ setTimeout(function(){ window.__runSentinel&&window.__runSentinel('build'); }, 150); }catch(e){}
