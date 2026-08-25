@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.94</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.95</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -3350,6 +3350,7 @@ function refreshSel(){
     try{ window.__markTapDetsPlaced&&window.__markTapDetsPlaced(); }catch(e){}
     try{ window.__bridgeCaps&&window.__bridgeCaps(); }catch(e){ console.warn('capbridge',e); }
     try{ window.__trimRunEnds&&window.__trimRunEnds(); }catch(e){}
+    try{ window.__dropOffInkPhantoms&&window.__dropOffInkPhantoms(); }catch(e){}
     try{ var _rt9=window.__rootTrace?window.__rootTrace(true):null;
       if(_rt9&&_rt9.extended){ try{window.__inferTapsFromEnds&&window.__inferTapsFromEnds();}catch(_){} try{window.__bridgeTaps&&window.__bridgeTaps();}catch(_){} try{window.__mergeElbowJoins&&window.__mergeElbowJoins();}catch(_){} try{window.__dedupeOverlappingRuns&&window.__dedupeOverlappingRuns();}catch(_){} } }catch(e){}
     try{ setTimeout(function(){ window.__runSentinel&&window.__runSentinel('build'); }, 150); }catch(e){}
@@ -4635,6 +4636,61 @@ function refreshSel(){
     console.log('[roots] '+roots.length+' unit(s) \u00b7 '+rooted+'/'+runs.length+' runs tied to a system'+(ext?(' \u00b7 '+ext+' end(s) extended to reach the network'):''));
     return window.__rootStats;
   };
+  // ---------- OFF-INK PHANTOM DROP (v3.95) ----------
+  // Curaleaf p2 run 19: an 18in run billed 74 LF with NO duct linework beside ANY of its centerline,
+  // doubling over the 8in risers. It was CONNECTED (welded into the network) so the rogue sweep never
+  // saw it, and the end-trims only cut ends. A run that is off-ink over most of its LENGTH, with no
+  // size tag physically ON it (leader tip within its own body — a neighbor's tag doesn't count), is
+  // evidence-free duct: remove it from the bill, log it, and let the sentinel put a red box there.
+  window.__dropOffInkPhantoms=function(){
+    if(typeof segments==='undefined'||!segments||!segments.length) return 0;
+    var runs=window.__runs2d||[]; if(!runs.length) return 0;
+    var DS=[]; for(var si=0;si<segments.length;si++){ var s9=segments[si];
+      if(s9.cls!=='duct'||s9.nx1==null) continue;
+      var dx9=s9.nx2-s9.nx1, dy9=s9.ny2-s9.ny1, sl9=Math.hypot(dx9,dy9); if(sl9<inToPt(2)) continue;
+      DS.push({x1:s9.nx1,y1:s9.ny1,ux:dx9/sl9,uy:dy9/sl9,len:sl9}); }
+    if(!DS.length) return 0;
+    function beside(px,py,ax,ay,wIn){ var half=inToPt(wIn/2+8), win=inToPt(6);   // near-strict straddle (S4-style, +6in for dashes)
+      for(var i=0;i<DS.length;i++){ var g=DS[i];
+        if(Math.abs(g.ux*ax+g.uy*ay)<0.9) continue;
+        var a1=(g.x1-px)*ax+(g.y1-py)*ay, a2=a1+(g.ux*ax+g.uy*ay)*g.len;
+        if(Math.min(a1,a2)>win||Math.max(a1,a2)<-win) continue;
+        var pp=(g.x1-px)*(-ay)+(g.y1-py)*ax;
+        if(Math.abs(pp)<=half&&Math.abs(pp)>=inToPt(1.5)) return true; }
+      return false; }
+    var dead=[];
+    runs.forEach(function(r){ if(r.synthetic) return;
+      var Lr=runLenIn(r); if(Lr<120) return;
+      var e=runEnd(r); var dx=e.x-r.start[0], dy=e.y-r.start[1], Lp=Math.hypot(dx,dy); if(Lp<1) return;
+      var ux=dx/Lp, uy=dy/Lp, w=r.widthIn||12;
+      var miss=0, tot=0;
+      for(var t=0.08;t<=0.93;t+=0.12){ tot++;
+        if(!beside(r.start[0]+dx*t, r.start[1]+dy*t, ux, uy, w)) miss++; }
+      if(tot<4 || miss/tot<0.7) return;
+      // tag ON the run vetoes (leader-tip position, must sit within the run's own body)
+      var tagged=false;
+      try{ if(typeof tags!=='undefined'&&tags&&typeof parseTagDims==='function'){
+        for(var ti=0;ti<tags.length;ti++){ var tg=tags[ti]; if(tg.nx==null) continue;
+          var pd=parseTagDims(tg.text||''); if(!pd) continue;
+          if(Math.abs(pd.w-(r.widthIn||0))>2) continue;
+          var tx=(tg._lx!=null)?tg._lx:((tg._lxAI!=null)?tg._lxAI:tg.nx);
+          var ty=(tg._ly!=null)?tg._ly:((tg._lyAI!=null)?tg._lyAI:tg.ny);
+          var al=(tx-r.start[0])*ux+(ty-r.start[1])*uy;
+          if(al<-inToPt(12)||al>Lp+inToPt(12)) continue;
+          var pe=Math.abs((tx-r.start[0])*(-uy)+(ty-r.start[1])*ux);
+          if(pe<=inToPt(w/2+8)){ tagged=true; break; } } } }catch(_){}
+      if(tagged) return;
+      dead.push(r);
+    });
+    if(!dead.length) return 0;
+    window.__offInkRemoved=window.__offInkRemoved||[];
+    dead.forEach(function(r){ var e=runEnd(r);
+      window.__offInkRemoved.push({w:r.widthIn||null, lf:Math.round(runLenIn(r)/12), x:Math.round((r.start[0]+e.x)/2), y:Math.round((r.start[1]+e.y)/2)});
+      console.log('[off-ink] removed phantom run '+r.id+' ('+(r.widthIn||'?')+'″, '+Math.round(runLenIn(r)/12)+' LF) — no duct linework beside '+Math.round(100*0.7)+'%+ of its centerline and no tag on it'); });
+    var ids={}; dead.forEach(function(r){ ids[r.id]=1; });
+    window.__runs2d=runs.filter(function(r){ return !ids[r.id]; });
+    return dead.length;
+  };
   // ---------- SYSTEM AUDIT (v3.82) — declarative rules on the finished run graph ----------
   // Idea from rule-based P&ID autocorrection (Schulze Balhorn et al. 2025): once the takeoff is a
   // graph, correctness is a set of RULES checked independently of how anything was built. Each rule
@@ -4832,6 +4888,8 @@ function refreshSel(){
       if((window.__elbowLedger||[]).some(function(e9){return e9._sentinel;})){ try{ window.__showElbowStrip(); }catch(_){} }
       try{ drawOverlay(); }catch(_){}
     }catch(e9x){ console.warn('attention cards',e9x); }
+    try{ (window.__offInkRemoved||[]).forEach(function(o9){
+      add('warn','off-ink-removed','removed an off-ink phantom run ('+(o9.w||'?')+'\u2033, '+o9.lf+' LF) \u2014 no duct linework beside it and no tag on it; the footage is OUT of the bill',o9.x,o9.y); }); }catch(_){}
     var rec={at:tag||'build', items:items};
     window.__sentinel=rec; window.__sentinelLog.push(rec);
     if(window.__sentinelLog.length>10) window.__sentinelLog.shift();
@@ -7323,6 +7381,7 @@ function refreshSel(){
     try{ window.__markTapDetsPlaced&&window.__markTapDetsPlaced(); }catch(e){}
     try{ window.__bridgeCaps&&window.__bridgeCaps(); }catch(e){ console.warn('capbridge',e); }
     try{ window.__trimRunEnds&&window.__trimRunEnds(); }catch(e){}
+    try{ window.__dropOffInkPhantoms&&window.__dropOffInkPhantoms(); }catch(e){}
     try{ var _rt9=window.__rootTrace?window.__rootTrace(true):null;
       if(_rt9&&_rt9.extended){ try{window.__inferTapsFromEnds&&window.__inferTapsFromEnds();}catch(_){} try{window.__bridgeTaps&&window.__bridgeTaps();}catch(_){} try{window.__mergeElbowJoins&&window.__mergeElbowJoins();}catch(_){} try{window.__dedupeOverlappingRuns&&window.__dedupeOverlappingRuns();}catch(_){} } }catch(e){}
     try{ setTimeout(function(){ window.__runSentinel&&window.__runSentinel('build'); }, 150); }catch(e){}
@@ -9001,6 +9060,7 @@ $('exportBtn').onclick=()=>{
     censusLog:(window.__censusLog||[]),   // v3.75: every junction the census judged, with verdicts
     sentinel:((window.__sentinel||{}).items||[]),   // v3.78: conflict sentinel findings at export time
     audit:(window.__auditLog||[]),   // v3.82: system-audit rule findings (rule/sev/x/y/msg)
+    offInkRemoved:(window.__offInkRemoved||[]),   // v3.95: connected off-ink phantom runs dropped from the bill
     roots:(window.__rootStats||null),   // v3.91: root-anchored trace stats {units,rooted,unrooted,extended}
     fillDuctMode:!!window.__fillDuctMode,
     rogueRemoved:((window.__rogueLog||[]).flat()),
