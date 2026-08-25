@@ -137,7 +137,7 @@
 <body>
 <div class="app">
  <header>
-   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.93</span></div>
+   <div class="logo">BROOKSTONE · <b>2D TAKEOFF</b> <span id="verBadge" style="font-size:10px;opacity:.55;font-weight:500;letter-spacing:.04em">v3.94</span></div>
    <script>
    (function(){ // stale-cache detector: fetch our own page fresh and compare the version badge
      setTimeout(function(){ try{
@@ -1896,6 +1896,88 @@ function buildSegmentRuns(){
       tagIdx:freeMatch.slice(),                                                  // ONLY matched+claimed tags (proximity tags no longer ride along)
       sizes:freeMatch.map(function(ti){ var d=dimOf[ti]; return d?(d.round?('\u00d8'+d.w):(d.w+'\u00d7'+d.h)):''; }) });
   });
+  // 3.4) NO BAND INSIDE A BAND (v3.94). Field case (Curaleaf p2 riser bank): the outer walls of a
+  // GROUP of adjacent risers paired as one wide "duct" — an 18in band overlapping a 12, an 8, a 6 and
+  // a 4 at once (10-12 doubled-runs warnings). The v3.37 veto only sees walls accepted EARLIER, and a
+  // tag-confirmed wide phantom sorts first. Physics: a real duct's interior is EMPTY — if another
+  // accepted band's WALL runs down a band's interior for much of its length, the wide band spans
+  // ACROSS ducts and dies, whatever its tag says. Strictly-wider only (equal-width overlap is the
+  // dedupe's case); 2in edge shrink spares shared walls of adjacent duct.
+  // 3.35) STACK COLLAPSE (v3.94, Curaleaf riser bank / multi-line-wall family). One duct drawn with
+  // 2-3 lines per wall pairs at EVERY line combination: w22/w20/w18 bands stacked on one centerline,
+  // each surviving to the walk as its own run — the doubled-runs plague. Doctrine (v3.77): width from
+  // TAGS, center from the envelope. Bands on the same centerline (≤3in) with ≥60% mutual span overlap
+  // are ONE duct: keep the tag-confirmed one (narrowest of those if several), else the narrowest —
+  // inner wall lines are the duct; outer lines are wall build-out.
+  function _stackCollapse(){
+    if(runs.length<2) return;
+    function fr9(R){ var c=R.corners; var dx=c[1][0]-c[0][0], dy=c[1][1]-c[0][1]; var L=Math.hypot(dx,dy)||1;
+      var ux=dx/L, uy=dy/L, nxn=-uy, nyn=ux;
+      var o1=c[0][0]*nxn+c[0][1]*nyn, o2=c[3][0]*nxn+c[3][1]*nyn;
+      var t0=c[0][0]*ux+c[0][1]*uy, t1=c[1][0]*ux+c[1][1]*uy;
+      return {ux:ux,uy:uy,nxn:nxn,nyn:nyn,ctr:(o1+o2)/2,t0:Math.min(t0,t1),t1:Math.max(t0,t1)}; }
+    var F=runs.map(function(R){ return (R.corners&&R.corners.length>=4)?fr9(R):null; });
+    var parent=runs.map(function(_,i){return i;});
+    function find(i){ while(parent[i]!==i){ parent[i]=parent[parent[i]]; i=parent[i]; } return i; }
+    for(var i=0;i<runs.length;i++){ if(!F[i]) continue;
+      for(var j=i+1;j<runs.length;j++){ if(!F[j]) continue;
+        if(Math.abs(F[i].ux*F[j].ux+F[i].uy*F[j].uy)<0.95) continue;
+        var cj=( (runs[j].corners[0][0]+runs[j].corners[3][0])/2*F[i].nxn + (runs[j].corners[0][1]+runs[j].corners[3][1])/2*F[i].nyn );
+        if(Math.abs(cj-F[i].ctr)>inToPt(3)) continue;
+        var b0=runs[j].corners[0][0]*F[i].ux+runs[j].corners[0][1]*F[i].uy, b1=runs[j].corners[1][0]*F[i].ux+runs[j].corners[1][1]*F[i].uy;
+        if(b0>b1){ var tb=b0;b0=b1;b1=tb; }
+        var ov=Math.min(F[i].t1,b1)-Math.max(F[i].t0,b0);
+        if(ov < 0.6*Math.min(F[i].t1-F[i].t0, b1-b0)) continue;
+        parent[find(j)]=find(i);
+      } }
+    var groups={};
+    runs.forEach(function(R,i){ var r9=find(i); (groups[r9]=groups[r9]||[]).push(i); });
+    var dropN=0, keepIdx={};
+    Object.keys(groups).forEach(function(k){ var g9=groups[k];
+      if(g9.length<2){ keepIdx[g9[0]]=1; return; }
+      var conf=g9.filter(function(i){ return runs[i].confirmed; });
+      var pool=conf.length?conf:g9;
+      var best=pool[0]; pool.forEach(function(i){ if((runs[i].widthIn||99)<(runs[best].widthIn||99)) best=i; });
+      keepIdx[best]=1; dropN+=g9.length-1;
+      if(g9.length>1) console.log('[takeoff] stack-collapse: kept '+(runs[best].widthIn||'?')+'″'+(runs[best].confirmed?' (tagged)':'')+' of ['+g9.map(function(i){return runs[i].widthIn;}).join(',')+'] bands on one centerline');
+    });
+    if(dropN){ var kept9=[]; runs.forEach(function(R,i){ if(keepIdx[i]) kept9.push(R); });
+      runs.length=0; kept9.forEach(function(R){ runs.push(R); });
+      console.log('[takeoff] stack-collapse removed '+dropN+' nested duplicate band(s)'); }
+  }
+  function _bandInBandSweep(){
+    if(runs.length<2) return;
+    function frame(R){ var c=R.corners; var dx=c[1][0]-c[0][0], dy=c[1][1]-c[0][1]; var L=Math.hypot(dx,dy)||1;
+      var ux=dx/L, uy=dy/L, nxn=-uy, nyn=ux;
+      var o1=c[0][0]*nxn+c[0][1]*nyn, o2=c[3][0]*nxn+c[3][1]*nyn;
+      var t0=c[0][0]*ux+c[0][1]*uy, t1=c[1][0]*ux+c[1][1]*uy;
+      return {ux:ux,uy:uy,nxn:nxn,nyn:nyn,lo:Math.min(o1,o2),hi:Math.max(o1,o2),t0:Math.min(t0,t1),t1:Math.max(t0,t1),L:L}; }
+    var drop={};
+    for(var xi=0; xi<runs.length; xi++){ var X=runs[xi]; if(drop[xi]||!X.corners||X.corners.length<4) continue;
+      var F=frame(X); var shr=inToPt(2);
+      for(var yi=0; yi<runs.length; yi++){ if(yi===xi||drop[yi]) continue; var Y=runs[yi];
+        if(!Y.corners||Y.corners.length<4) continue;
+        if(!((X.widthIn||0)>(Y.widthIn||0)+2)) continue;                       // only a strictly-wider container dies
+        var G=frame(Y);
+        if(Math.abs(F.ux*G.ux+F.uy*G.uy)<0.95) continue;                       // parallel bands only
+        var inside=false;
+        for(var wi2=0; wi2<2 && !inside; wi2++){
+          var cA=Y.corners[wi2===0?0:3], cB=Y.corners[wi2===0?1:2];
+          var offA=cA[0]*F.nxn+cA[1]*F.nyn, offB=cB[0]*F.nxn+cB[1]*F.nyn, off=(offA+offB)/2;
+          if(off<=F.lo+shr||off>=F.hi-shr) continue;                           // wall must be strictly INTERIOR
+          var a0=cA[0]*F.ux+cA[1]*F.uy, a1=cB[0]*F.ux+cB[1]*F.uy; if(a0>a1){var tt=a0;a0=a1;a1=tt;}
+          var ov9=Math.min(F.t1,a1)-Math.max(F.t0,a0);
+          if(ov9>0.4*(F.t1-F.t0)) inside=true;
+        }
+        if(inside){ drop[xi]=1;
+          console.log('[takeoff] dropped '+(X.widthIn||'?')+'″ band — another band’s wall ('+(Y.widthIn||'?')+'″) runs down its interior (spans across adjacent ducts)');
+          break; }
+      } }
+    var kept=[]; runs.forEach(function(R,i){ if(!drop[i]) kept.push(R); });
+    if(kept.length!==runs.length){ runs.length=0; kept.forEach(function(R){ runs.push(R); }); }
+  }
+  _stackCollapse();
+  _bandInBandSweep();
   // 3.5) SINGLE-WALL RESCUE: an unclaimed wall with a size tag on it -> the tag's WIDTH (first number =
   // screen-facing side) gives the true span. Convert to px via the scale, look for a real parallel line
   // at that distance on the tag's side; pair it if found, else SYNTHESIZE the opposite wall at that width.
@@ -1953,6 +2035,8 @@ function buildSegmentRuns(){
       tagIdx:myTags.map(function(o){return o.ti;}),
       sizes:myTags.map(function(o){return o.dims.round?('\u00d8'+o.dims.w):(o.dims.w+'\u00d7'+o.dims.h);}) });
   }
+  _stackCollapse();     // v3.94: again AFTER the single-wall rescue — its bands weren't seen by the first pass
+  _bandInBandSweep();
   runs.sort(function(p,q){ if(!!q.confirmed!==!!p.confirmed) return (q.confirmed?1:0)-(p.confirmed?1:0); return q.lenP-p.lenP; });
   if(runs.length>400) runs=runs.slice(0,400);
   // RE-CENTER BANDS IN WALL CLUSTERS (v3.77). On prints that draw each duct wall as a CLUSTER of
@@ -3191,6 +3275,11 @@ function refreshSel(){
       var ev=[]; var _linkedTi=[];
       // one-to-one footprint association: use only the size tags ASSIGNED to this run (assignTagsToRuns)
       for(var _ti=0; _ti<tags.length; _ti++){ if(_tagAssign[_ti]!==_sgi) continue; var tg=tags[_ti]; if(!tg||tg.nx==null) continue; var pd=parseTagDims(tg.text); if(!pd) continue;
+        // A TAG CAN'T FATTEN A RUN (v3.94, Curaleaf riser bank): the neighbor's 18x12 tag assigned to
+        // a 12in riser resized its pieces to 18 — a phantom W18 overlay with no band behind it.
+        // Measured gaps only ever read WIDE of the tag (lineweight), never 6in narrow: a tag more
+        // than 4in wider than the band belongs to the duct next door.
+        if(pd.w > ptToIn(Wn)+4) continue;
         _linkedTi.push(_ti);
         var str=pd.round?('\u00d8'+pd.w):(pd.w+'\u00d7'+pd.h); var ai=ptToIn((tg.nx-sx)*ux+(tg.ny-sy)*uy);
         if(ev.some(function(e){ return Math.abs(e.alongIn-ai)<6 && e.str===str; })) continue;
@@ -5322,6 +5411,13 @@ function refreshSel(){
       _chains9.forEach(function(g){ if(g.length<2) return;
       var allTags=[]; g.forEach(function(r){ (r.tagIdx||[]).forEach(function(ti){ var tg=tags[ti]; if(tg&&tg.nx!=null){ var pd=parseTagDims(tg.text); if(pd) allTags.push({nx:tg.nx,ny:tg.ny,pd:pd}); } }); });
       if(allTags.length<2) return;                                  // need a tag-line (chain) to justify merging
+      // A TAG CAN'T FATTEN THE GROUP (v3.94, Curaleaf riser bank): 18x12 tags leadered to the REAL
+      // 18in duct got adopted by the neighboring 12in riser group, and the merge rebuilt those runs
+      // as an 18in trunk overlapping everything beside it. A merged run may only carry tag sizes no
+      // wider than its own measured runs (+2in read slack); fatter tags belong to a neighbor.
+      var _maxW9=0; g.forEach(function(r){ _maxW9=Math.max(_maxW9, r.widthIn||0); });
+      allTags=allTags.filter(function(t){ return t.pd.w <= _maxW9+4; });
+      if(allTags.length<2) return;
       var xs=[],ys=[],sumLen=0; g.forEach(function(r){ var e=endOf(r); xs.push(r.start[0],e.x); ys.push(r.start[1],e.y); sumLen+=Math.hypot(e.x-r.start[0],e.y-r.start[1]); });
       var x0=Math.min.apply(null,xs),x1=Math.max.apply(null,xs),y0=Math.min.apply(null,ys),y1=Math.max.apply(null,ys);
       var start,dir,normal,lenP;
